@@ -3,3 +3,4 @@ target/
 dist/
 *.node
 .DS_Store
+opensrc
