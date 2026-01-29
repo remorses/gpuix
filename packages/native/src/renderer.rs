@@ -252,8 +252,6 @@ fn build_text(desc: &ElementDesc) -> gpui::AnyElement {
 }
 
 fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> E {
-    use gpui::prelude::*;
-
     // Display & flex
     if style.display.as_deref() == Some("flex") {
         el = el.flex();
@@ -410,8 +408,8 @@ fn emit_event(
         let payload = EventPayload {
             element_id: element_id.to_string(),
             event_type: event_type.to_string(),
-            x: position.map(|p| p.x.0 as f64),
-            y: position.map(|p| p.y.0 as f64),
+            x: position.map(|p| f64::from(f32::from(p.x))),
+            y: position.map(|p| f64::from(f32::from(p.y))),
             key: None,
             modifiers: Some(EventModifiers::default()),
         };
