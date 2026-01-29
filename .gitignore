@@ -1,0 +1,5 @@
+node_modules/
+target/
+dist/
+*.node
+.DS_Store
