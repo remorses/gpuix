@@ -138,3 +138,19 @@ pub fn parse_color(color: &str) -> Option<(f32, f32, f32, f32)> {
 
     None
 }
+
+/// Convert RGBA floats (0.0-1.0) to a hex u32 for GPUI's rgba() function
+/// Format: 0xRRGGBBAA
+pub fn rgba_to_hex(r: f32, g: f32, b: f32, a: f32) -> u32 {
+    let r = (r.clamp(0.0, 1.0) * 255.0) as u32;
+    let g = (g.clamp(0.0, 1.0) * 255.0) as u32;
+    let b = (b.clamp(0.0, 1.0) * 255.0) as u32;
+    let a = (a.clamp(0.0, 1.0) * 255.0) as u32;
+    (r << 24) | (g << 16) | (b << 8) | a
+}
+
+/// Parse a color string and return a hex u32 for GPUI
+pub fn parse_color_hex(color: &str) -> Option<u32> {
+    let (r, g, b, a) = parse_color(color)?;
+    Some(rgba_to_hex(r, g, b, a))
+}
