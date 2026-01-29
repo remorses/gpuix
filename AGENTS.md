@@ -339,3 +339,14 @@ bun examples/counter.tsx
 1. For Rust changes, work in `zed/crates/gpuix` (easier to build)
 2. Copy changes to `gpuix/packages/native/src/` when ready
 3. TypeScript changes can be made directly in `packages/react/`
+
+
+## Examples using same tech as ours. To unblock on issues and compare to our code
+
+For example usage of projects depending on gpui in rust: opensrc https://github.com/zed-industries/create-gpui-app
+
+For examples of NAPI rs native packages: https://github.com/napi-rs/package-template and https://github.com/Brooooooklyn/Image
+
+For reading gpui source code: https://github.com/zed-industries/sed inside crates/gpui
+
+For examples of a custom React renderer: https://github.com/anomalyco/opentui inside packages/react
