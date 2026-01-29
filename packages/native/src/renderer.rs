@@ -101,6 +101,9 @@ impl GpuixRenderer {
             cx.activate(true);
         });
 
+        let mut is_running = self.running.lock().unwrap();
+        *is_running = false;
+
         Ok(())
     }
 
@@ -224,33 +227,37 @@ fn build_div(
                 "click" => {
                     let id = element_id.clone();
                     let callback = event_callback.clone();
-                    el = el.on_click(move |click_event, _window, _cx| {
+                    el = el.on_click(move |click_event, _window, cx| {
                         eprintln!("[GPUIX-RUST] on_click fired for id={}", id);
                         emit_event(&callback, &id, "click", Some(click_event.position()));
+                        cx.refresh_windows();
                     });
                 }
                 "mouseDown" => {
                     let id = element_id.clone();
                     let callback = event_callback.clone();
-                    el = el.on_mouse_down(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                    el = el.on_mouse_down(gpui::MouseButton::Left, move |mouse_event, _window, cx| {
                         eprintln!("[GPUIX-RUST] on_mouse_down fired for id={}", id);
                         emit_event(&callback, &id, "mouseDown", Some(mouse_event.position));
+                        cx.refresh_windows();
                     });
                 }
                 "mouseUp" => {
                     let id = element_id.clone();
                     let callback = event_callback.clone();
-                    el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                    el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, cx| {
                         eprintln!("[GPUIX-RUST] on_mouse_up fired for id={}", id);
                         emit_event(&callback, &id, "mouseUp", Some(mouse_event.position));
+                        cx.refresh_windows();
                     });
                 }
                 "mouseMove" => {
                     let id = element_id.clone();
                     let callback = event_callback.clone();
-                    el = el.on_mouse_move(move |mouse_event, _window, _cx| {
+                    el = el.on_mouse_move(move |mouse_event, _window, cx| {
                         eprintln!("[GPUIX-RUST] on_mouse_move fired for id={}", id);
                         emit_event(&callback, &id, "mouseMove", Some(mouse_event.position));
+                        cx.refresh_windows();
                     });
                 }
                 _ => {}
@@ -503,7 +510,7 @@ fn emit_event(
             key: None,
             modifiers: Some(EventModifiers::default()),
         };
-        cb.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
+        cb.call(Ok(payload), ThreadsafeFunctionCallMode::Blocking);
     }
 }
 
