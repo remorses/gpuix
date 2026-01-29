@@ -137,17 +137,25 @@ Tailwind-like styling via the `style` prop:
 
 ⚠️ **Work in Progress**
 
-The core architecture is implemented but the actual GPUI integration is pending:
-
-- [x] React reconciler
+- [x] React reconciler (based on opentui)
 - [x] Element tree serialization
-- [x] napi-rs bindings structure
-- [x] Style mapping
+- [x] napi-rs bindings structure  
+- [x] Style mapping (CSS → GPUI)
 - [x] Event callback system
-- [ ] GPUI Application lifecycle
-- [ ] Element building from descriptions
-- [ ] Event wiring to GPUI
+- [x] GPUI element building (build_element, apply_styles)
+- [x] Event wiring (click, mouseDown, mouseUp, mouseMove)
+- [ ] **Standalone build** - Currently requires zed workspace
 - [ ] Focus management
+- [ ] Keyboard events
+- [ ] Text input
+
+### Current Blocker
+
+GPUI has complex dependencies (custom font-kit fork, core-graphics version conflicts) that prevent building outside the zed workspace. Development happens in `zed/crates/gpuix`.
+
+## Documentation
+
+See [AGENTS.md](./AGENTS.md) for detailed architecture, communication flow, and contributing guide.
 
 ## License
 
