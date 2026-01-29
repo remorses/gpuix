@@ -2,40 +2,29 @@ import React from "react"
 import type { ReactNode } from "react"
 import type { OpaqueRoot } from "react-reconciler"
 import { ConcurrentRoot } from "react-reconciler/constants"
-import { GpuixRenderer, type EventPayload } from "@gpuix/native"
+import { GpuixRenderer } from "@gpuix/native"
 import { reconciler } from "./reconciler"
 import type { Container, ElementDesc } from "../types/host"
+import {
+  clearEventHandlers,
+  handleGpuixEvent,
+} from "./event-registry"
 
-// Event handler registry
-const eventHandlers = new Map<string, Map<string, (event: EventPayload) => void>>()
-
-function handleGpuixEvent(payload: EventPayload): void {
-  const elementHandlers = eventHandlers.get(payload.elementId)
-  if (elementHandlers) {
-    const handler = elementHandlers.get(payload.eventType)
-    if (handler) {
-      handler(payload)
+export function createRenderer(
+  onEvent?: (event: import("@gpuix/native").EventPayload) => void
+): GpuixRenderer {
+  return new GpuixRenderer((err, event) => {
+    if (err) {
+      console.error("[GPUIX] Native event error:", err)
+      return
     }
-  }
-}
-
-// Register event handlers when building the tree
-export function registerEventHandler(
-  elementId: string,
-  eventType: string,
-  handler: (event: EventPayload) => void
-): void {
-  let elementHandlers = eventHandlers.get(elementId)
-  if (!elementHandlers) {
-    elementHandlers = new Map()
-    eventHandlers.set(elementId, elementHandlers)
-  }
-  elementHandlers.set(eventType, handler)
-}
-
-// Clear all event handlers (called before each render)
-export function clearEventHandlers(): void {
-  eventHandlers.clear()
+    if (event) {
+      handleGpuixEvent(event)
+      if (onEvent) {
+        onEvent(event)
+      }
+    }
+  })
 }
 
 export interface Root {

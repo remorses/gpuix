@@ -13,9 +13,11 @@ import type {
   PublicInstance,
   TextInstance,
 } from "../types/host"
+import { registerEventHandler } from "./event-registry"
 
 let elementIdCounter = 0
 let currentUpdatePriority = NoEventPriority
+let rootInstance: Instance | null = null
 
 function generateId(type: string): string {
   return `${type}_${++elementIdCounter}`
@@ -64,6 +66,7 @@ export const hostConfig = {
       child.parent = parent
       parent.children.push(child)
     } else {
+      child.parent = parent
       parent.textContent = (parent.textContent || "") + child.text
       console.log("[GPUIX] appendChild text node -> parent content:", parent.type, parent.textContent)
     }
@@ -117,6 +120,12 @@ export const hostConfig = {
   // Reset after commit - trigger GPUI render
   resetAfterCommit(containerInfo: Container): void {
     console.log("[GPUIX] resetAfterCommit called")
+    if (rootInstance) {
+      const tree = instanceToElementDesc(rootInstance)
+      console.log("[GPUIX] resetAfterCommit -> render updated tree")
+      containerInfo.render(tree)
+      return
+    }
     containerInfo.requestRender()
   },
 
@@ -209,11 +218,20 @@ export const hostConfig = {
     newText: string
   ): void {
     textInstance.text = newText
+    if (textInstance.parent) {
+      textInstance.parent.textContent = newText
+      console.log(
+        "[GPUIX] commitTextUpdate -> parent content:",
+        textInstance.parent.type,
+        newText
+      )
+    }
   },
 
   // Append child to container
   appendChildToContainer(container: Container, child: Instance): void {
     console.log("[GPUIX] appendChildToContainer called, child type:", child.type, "id:", child.id)
+    rootInstance = child
     // The container will serialize this for GPUI
     const tree = instanceToElementDesc(child)
     console.log("[GPUIX] instanceToElementDesc result:", JSON.stringify(tree, null, 2))
@@ -227,6 +245,7 @@ export const hostConfig = {
       parent.children.push(child)
     } else {
       // Text instance - store as text content
+      child.parent = parent
       parent.textContent = (parent.textContent || "") + child.text
       console.log("[GPUIX] appendInitialChild text node -> parent content:", parent.type, parent.textContent)
     }
@@ -342,17 +361,50 @@ function instanceToElementDesc(instance: Instance): ElementDesc {
   const events: string[] = []
 
   // Collect registered events
-  if (instance.props.onClick) events.push("click")
-  if (instance.props.onMouseDown) events.push("mouseDown")
-  if (instance.props.onMouseUp) events.push("mouseUp")
-  if (instance.props.onMouseEnter) events.push("mouseEnter")
-  if (instance.props.onMouseLeave) events.push("mouseLeave")
-  if (instance.props.onMouseMove) events.push("mouseMove")
-  if (instance.props.onKeyDown) events.push("keyDown")
-  if (instance.props.onKeyUp) events.push("keyUp")
-  if (instance.props.onFocus) events.push("focus")
-  if (instance.props.onBlur) events.push("blur")
-  if (instance.props.onScroll) events.push("scroll")
+  if (instance.props.onClick) {
+    events.push("click")
+    registerEventHandler(instance.id, "click", instance.props.onClick)
+  }
+  if (instance.props.onMouseDown) {
+    events.push("mouseDown")
+    registerEventHandler(instance.id, "mouseDown", instance.props.onMouseDown)
+  }
+  if (instance.props.onMouseUp) {
+    events.push("mouseUp")
+    registerEventHandler(instance.id, "mouseUp", instance.props.onMouseUp)
+  }
+  if (instance.props.onMouseEnter) {
+    events.push("mouseEnter")
+    registerEventHandler(instance.id, "mouseEnter", instance.props.onMouseEnter)
+  }
+  if (instance.props.onMouseLeave) {
+    events.push("mouseLeave")
+    registerEventHandler(instance.id, "mouseLeave", instance.props.onMouseLeave)
+  }
+  if (instance.props.onMouseMove) {
+    events.push("mouseMove")
+    registerEventHandler(instance.id, "mouseMove", instance.props.onMouseMove)
+  }
+  if (instance.props.onKeyDown) {
+    events.push("keyDown")
+    registerEventHandler(instance.id, "keyDown", instance.props.onKeyDown)
+  }
+  if (instance.props.onKeyUp) {
+    events.push("keyUp")
+    registerEventHandler(instance.id, "keyUp", instance.props.onKeyUp)
+  }
+  if (instance.props.onFocus) {
+    events.push("focus")
+    registerEventHandler(instance.id, "focus", instance.props.onFocus)
+  }
+  if (instance.props.onBlur) {
+    events.push("blur")
+    registerEventHandler(instance.id, "blur", instance.props.onBlur)
+  }
+  if (instance.props.onScroll) {
+    events.push("scroll")
+    registerEventHandler(instance.id, "scroll", instance.props.onScroll)
+  }
 
   const desc: ElementDesc = {
     elementType: instance.type,

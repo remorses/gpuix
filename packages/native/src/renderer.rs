@@ -21,6 +21,7 @@ pub struct GpuixRenderer {
     event_callback: Option<ThreadsafeFunction<EventPayload>>,
     current_tree: Arc<Mutex<Option<ElementDesc>>>,
     running: Arc<Mutex<bool>>,
+    window_title: Arc<Mutex<Option<String>>>,
 }
 
 #[napi]
@@ -31,6 +32,7 @@ impl GpuixRenderer {
             event_callback,
             current_tree: Arc::new(Mutex::new(None)),
             running: Arc::new(Mutex::new(false)),
+            window_title: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -72,6 +74,7 @@ impl GpuixRenderer {
 
         let tree = self.current_tree.clone();
         let callback = self.event_callback.clone();
+        let window_title = self.window_title.clone();
 
         gpui::Application::new().run(move |cx: &mut gpui::App| {
             let bounds = gpui::Bounds::centered(
@@ -89,6 +92,7 @@ impl GpuixRenderer {
                     cx.new(|_| GpuixView {
                         tree: tree.clone(),
                         event_callback: callback.clone(),
+                        window_title: window_title.clone(),
                     })
                 },
             )
@@ -124,7 +128,8 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn set_window_title(&self, _title: String) -> Result<()> {
+    pub fn set_window_title(&self, title: String) -> Result<()> {
+        *self.window_title.lock().unwrap() = Some(title);
         Ok(())
     }
 
@@ -142,11 +147,16 @@ impl GpuixRenderer {
 struct GpuixView {
     tree: Arc<Mutex<Option<ElementDesc>>>,
     event_callback: Option<ThreadsafeFunction<EventPayload>>,
+    window_title: Arc<Mutex<Option<String>>>,
 }
 
 impl gpui::Render for GpuixView {
-    fn render(&mut self, _window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl gpui::IntoElement {
+    fn render(&mut self, window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl gpui::IntoElement {
         use gpui::IntoElement;
+
+        if let Some(title) = self.window_title.lock().unwrap().as_ref() {
+            window.set_window_title(title);
+        }
         
         let tree = self.tree.lock().unwrap();
 
@@ -215,6 +225,7 @@ fn build_div(
                     let id = element_id.clone();
                     let callback = event_callback.clone();
                     el = el.on_click(move |click_event, _window, _cx| {
+                        eprintln!("[GPUIX-RUST] on_click fired for id={}", id);
                         emit_event(&callback, &id, "click", Some(click_event.position()));
                     });
                 }
@@ -222,6 +233,7 @@ fn build_div(
                     let id = element_id.clone();
                     let callback = event_callback.clone();
                     el = el.on_mouse_down(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                        eprintln!("[GPUIX-RUST] on_mouse_down fired for id={}", id);
                         emit_event(&callback, &id, "mouseDown", Some(mouse_event.position));
                     });
                 }
@@ -229,6 +241,7 @@ fn build_div(
                     let id = element_id.clone();
                     let callback = event_callback.clone();
                     el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                        eprintln!("[GPUIX-RUST] on_mouse_up fired for id={}", id);
                         emit_event(&callback, &id, "mouseUp", Some(mouse_event.position));
                     });
                 }
@@ -236,6 +249,7 @@ fn build_div(
                     let id = element_id.clone();
                     let callback = event_callback.clone();
                     el = el.on_mouse_move(move |mouse_event, _window, _cx| {
+                        eprintln!("[GPUIX-RUST] on_mouse_move fired for id={}", id);
                         emit_event(&callback, &id, "mouseMove", Some(mouse_event.position));
                     });
                 }
@@ -480,6 +494,7 @@ fn emit_event(
     position: Option<gpui::Point<gpui::Pixels>>,
 ) {
     if let Some(cb) = callback {
+        eprintln!("[GPUIX-RUST] emit_event -> id={} type={}", element_id, event_type);
         let payload = EventPayload {
             element_id: element_id.to_string(),
             event_type: event_type.to_string(),

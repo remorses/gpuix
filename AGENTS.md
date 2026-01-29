@@ -308,10 +308,34 @@ cd packages/native && cargo test
 ### Integration Test
 
 ```bash
-# Run example with tsx (use tmux for long-running sessions)
+# Run example with tsx (use tmux for long-running sessions so it does not block the shell)
 cd examples
 npx tsx counter.tsx
 ```
+
+### UI Screenshot Validation (macOS)
+
+To validate rendering changes, capture a window screenshot via CLI and then ask a task to describe it.
+
+```bash
+# Set a predictable window title in the example
+# renderer.setWindowTitle("GPUIX Counter")
+
+# List onscreen windows and get the window id (kCGWindowNumber)
+osascript -e 'tell application "System Events" to get the name of every process'
+
+# Capture the GPUI window by title (may prompt for Screen Recording permission)
+WINDOW_ID=$(osascript -l JavaScript -e 'ObjC.import("CoreGraphics"); var title="GPUIX Counter"; var info=ObjC.unwrap($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, $.kCGNullWindowID)); for (var i=0;i<info.length;i++){ var w=info[i]; if (w.kCGWindowLayer!==0) continue; if ((w.kCGWindowName||"")===title) { console.log(w.kCGWindowNumber); return; }}')
+screencapture -x -l "$WINDOW_ID" /tmp/gpuix-window.png
+```
+
+Then use the task tool to analyze the image:
+
+```text
+Use Task to analyze /tmp/gpuix-window.png and describe what UI elements and text are visible.
+```
+
+Note: `screencapture` and the JXA window listing may require Screen Recording permission in System Settings (Privacy & Security). If the command prints nothing, grant permission to the terminal/osascript process and retry.
 
 ## Related Projects
 

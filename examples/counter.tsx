@@ -6,7 +6,7 @@
  */
 
 import React, { useState } from 'react'
-import { createRoot, flushSync, GpuixRenderer } from '@gpuix/react'
+import { createRoot, createRenderer, flushSync } from '@gpuix/react'
 
 function Counter() {
   const [count, setCount] = useState(0)
@@ -122,9 +122,11 @@ function App() {
 // Initialize GPUIX
 async function main() {
   // Create the native GPUI renderer with event callback
-  const renderer = new GpuixRenderer((event) => {
+  const renderer = createRenderer((event) => {
     console.log('GPUI Event:', event.elementId, event.eventType)
   })
+
+  renderer.setWindowTitle('GPUIX Counter')
 
   // Create React root
   const root = createRoot(renderer)
