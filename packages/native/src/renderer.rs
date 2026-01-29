@@ -1,31 +1,30 @@
+use gpui::AppContext as _;
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::element_tree::{ElementDesc, EventModifiers, EventPayload};
-use crate::style::{parse_color, parse_color_hex};
+use crate::style::parse_color_hex;
+
+static ELEMENT_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn generate_element_id() -> String {
+    let id = ELEMENT_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+    format!("__gpuix_{}", id)
+}
 
 /// The main GPUI renderer exposed to Node.js
-///
-/// This struct manages the GPUI application lifecycle and provides
-/// methods to render element trees from JavaScript.
 #[napi]
 pub struct GpuixRenderer {
-    /// Callback to send events back to JS
     event_callback: Option<ThreadsafeFunction<EventPayload>>,
-    /// Current element tree
     current_tree: Arc<Mutex<Option<ElementDesc>>>,
-    /// Whether the renderer is running
     running: Arc<Mutex<bool>>,
 }
 
 #[napi]
 impl GpuixRenderer {
-    /// Create a new GPUI renderer
-    ///
-    /// The event_callback will be called whenever a GPUI event fires
-    /// that was registered by a React element.
     #[napi(constructor)]
     pub fn new(event_callback: Option<ThreadsafeFunction<EventPayload>>) -> Self {
         Self {
@@ -35,10 +34,6 @@ impl GpuixRenderer {
         }
     }
 
-    /// Render an element tree
-    ///
-    /// This method receives a JSON-serialized element tree from React
-    /// and triggers a GPUI re-render.
     #[napi]
     pub fn render(&self, tree_json: String) -> Result<()> {
         let tree: ElementDesc = serde_json::from_str(&tree_json)
@@ -47,23 +42,15 @@ impl GpuixRenderer {
         let mut current = self.current_tree.lock().unwrap();
         *current = Some(tree);
 
-        // TODO: Trigger GPUI re-render via cx.notify()
-        // This requires storing an Entity handle
-
         Ok(())
     }
 
-    /// Emit an event back to JavaScript
     pub fn emit_event(&self, payload: EventPayload) {
         if let Some(ref callback) = self.event_callback {
-            callback.call(payload, ThreadsafeFunctionCallMode::NonBlocking);
+            callback.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
         }
     }
 
-    /// Start the GPUI application
-    ///
-    /// This blocks the current thread and runs the GPUI event loop.
-    /// The renderer will process render requests from the JS side.
     #[napi]
     pub fn run(&self) -> Result<()> {
         {
@@ -77,7 +64,6 @@ impl GpuixRenderer {
         let tree = self.current_tree.clone();
         let callback = self.event_callback.clone();
 
-        // Run GPUI on the main thread
         gpui::Application::new().run(move |cx: &mut gpui::App| {
             let bounds = gpui::Bounds::centered(
                 None,
@@ -105,7 +91,6 @@ impl GpuixRenderer {
         Ok(())
     }
 
-    /// Stop the GPUI application
     #[napi]
     pub fn stop(&self) -> Result<()> {
         let mut running = self.running.lock().unwrap();
@@ -113,51 +98,38 @@ impl GpuixRenderer {
             return Err(Error::from_reason("Renderer is not running"));
         }
         *running = false;
-
-        // TODO: Signal GPUI to quit
-
         Ok(())
     }
 
-    /// Check if the renderer is running
     #[napi]
     pub fn is_running(&self) -> bool {
         *self.running.lock().unwrap()
     }
 
-    /// Get window dimensions
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
-        // TODO: Get actual window size from GPUI
         Ok(WindowSize {
             width: 800.0,
             height: 600.0,
         })
     }
 
-    /// Set window title
     #[napi]
     pub fn set_window_title(&self, _title: String) -> Result<()> {
-        // TODO: Set actual window title
         Ok(())
     }
 
-    /// Focus an element by ID
     #[napi]
     pub fn focus_element(&self, _element_id: String) -> Result<()> {
-        // TODO: Focus the element in GPUI
         Ok(())
     }
 
-    /// Blur the currently focused element
     #[napi]
     pub fn blur(&self) -> Result<()> {
-        // TODO: Blur in GPUI
         Ok(())
     }
 }
 
-/// The GPUI view that renders from the element tree
 struct GpuixView {
     tree: Arc<Mutex<Option<ElementDesc>>>,
     event_callback: Option<ThreadsafeFunction<EventPayload>>,
@@ -165,40 +137,41 @@ struct GpuixView {
 
 impl gpui::Render for GpuixView {
     fn render(&mut self, _window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl gpui::IntoElement {
+        use gpui::IntoElement;
+        
         let tree = self.tree.lock().unwrap();
 
         match tree.as_ref() {
             Some(desc) => build_element(desc, &self.event_callback),
-            None => gpui::div().into_any_element(),
+            None => gpui::Empty.into_any_element(),
         }
     }
 }
 
-/// Build a GPUI element from an ElementDesc
 fn build_element(
     desc: &ElementDesc,
     event_callback: &Option<ThreadsafeFunction<EventPayload>>,
 ) -> gpui::AnyElement {
+    use gpui::IntoElement;
+    
     match desc.element_type.as_str() {
         "div" => build_div(desc, event_callback),
         "text" => build_text(desc),
-        _ => gpui::div().into_any_element(),
+        _ => gpui::Empty.into_any_element(),
     }
 }
 
-/// Build a div element with styles and children
 fn build_div(
     desc: &ElementDesc,
     event_callback: &Option<ThreadsafeFunction<EventPayload>>,
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
-    let mut el = gpui::div();
-
-    // Apply ID if present (needed for events)
-    if let Some(ref id) = desc.id {
-        el = el.id(gpui::SharedString::from(id.clone()));
-    }
+    // Get or generate element ID
+    let element_id = desc.id.clone().unwrap_or_else(generate_element_id);
+    
+    // Create stateful div with ID
+    let mut el = gpui::div().id(gpui::SharedString::from(element_id.clone()));
 
     // Apply styles
     if let Some(ref style) = desc.style {
@@ -210,49 +183,32 @@ fn build_div(
         for event in events {
             match event.as_str() {
                 "click" => {
-                    if let Some(ref id) = desc.id {
-                        let id = id.clone();
-                        let callback = event_callback.clone();
-                        el = el.on_click(move |event, _window, _cx| {
-                            emit_event(&callback, &id, "click", Some(event.up.position));
-                        });
-                    }
-                }
-                "mouseEnter" => {
-                    if let Some(ref id) = desc.id {
-                        let id = id.clone();
-                        let callback = event_callback.clone();
-                        el = el.on_mouse_enter(move |event, _window, _cx| {
-                            emit_event(&callback, &id, "mouseEnter", Some(event.position));
-                        });
-                    }
-                }
-                "mouseLeave" => {
-                    if let Some(ref id) = desc.id {
-                        let id = id.clone();
-                        let callback = event_callback.clone();
-                        el = el.on_mouse_leave(move |event, _window, _cx| {
-                            emit_event(&callback, &id, "mouseLeave", Some(event.position));
-                        });
-                    }
+                    let id = element_id.clone();
+                    let callback = event_callback.clone();
+                    el = el.on_click(move |click_event, _window, _cx| {
+                        emit_event(&callback, &id, "click", Some(click_event.position()));
+                    });
                 }
                 "mouseDown" => {
-                    if let Some(ref id) = desc.id {
-                        let id = id.clone();
-                        let callback = event_callback.clone();
-                        el = el.on_mouse_down(gpui::MouseButton::Left, move |event, _window, _cx| {
-                            emit_event(&callback, &id, "mouseDown", Some(event.position));
-                        });
-                    }
+                    let id = element_id.clone();
+                    let callback = event_callback.clone();
+                    el = el.on_mouse_down(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                        emit_event(&callback, &id, "mouseDown", Some(mouse_event.position));
+                    });
                 }
                 "mouseUp" => {
-                    if let Some(ref id) = desc.id {
-                        let id = id.clone();
-                        let callback = event_callback.clone();
-                        el = el.on_mouse_up(gpui::MouseButton::Left, move |event, _window, _cx| {
-                            emit_event(&callback, &id, "mouseUp", Some(event.position));
-                        });
-                    }
+                    let id = element_id.clone();
+                    let callback = event_callback.clone();
+                    el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                        emit_event(&callback, &id, "mouseUp", Some(mouse_event.position));
+                    });
+                }
+                "mouseMove" => {
+                    let id = element_id.clone();
+                    let callback = event_callback.clone();
+                    el = el.on_mouse_move(move |mouse_event, _window, _cx| {
+                        emit_event(&callback, &id, "mouseMove", Some(mouse_event.position));
+                    });
                 }
                 _ => {}
             }
@@ -274,17 +230,14 @@ fn build_div(
     el.into_any_element()
 }
 
-/// Build a text element
 fn build_text(desc: &ElementDesc) -> gpui::AnyElement {
     use gpui::prelude::*;
 
     let content = desc.content.clone().unwrap_or_default();
 
-    // Text with optional styling
     if let Some(ref style) = desc.style {
         let mut el = gpui::div();
 
-        // Apply text styles
         if let Some(hex) = style.color.as_ref().and_then(|c| parse_color_hex(c)) {
             el = el.text_color(gpui::rgba(hex));
         }
@@ -298,11 +251,7 @@ fn build_text(desc: &ElementDesc) -> gpui::AnyElement {
     }
 }
 
-/// Apply styles from StyleDesc to a div
-fn apply_styles(
-    mut el: gpui::Div,
-    style: &crate::style::StyleDesc,
-) -> gpui::Div {
+fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> E {
     use gpui::prelude::*;
 
     // Display & flex
@@ -317,13 +266,11 @@ fn apply_styles(
     }
 
     // Flex properties
-    if let Some(grow) = style.flex_grow {
+    if style.flex_grow.is_some() {
         el = el.flex_grow();
-        let _ = grow; // TODO: support arbitrary grow values
     }
-    if let Some(shrink) = style.flex_shrink {
+    if style.flex_shrink.is_some() {
         el = el.flex_shrink();
-        let _ = shrink;
     }
 
     // Alignment
@@ -447,21 +394,19 @@ fn apply_styles(
     // Overflow
     match style.overflow.as_deref() {
         Some("hidden") => el = el.overflow_hidden(),
-        Some("scroll") => el = el.overflow_scroll(),
         _ => {}
     }
 
     el
 }
 
-/// Helper to emit an event back to JS
 fn emit_event(
     callback: &Option<ThreadsafeFunction<EventPayload>>,
     element_id: &str,
     event_type: &str,
     position: Option<gpui::Point<gpui::Pixels>>,
 ) {
-    if let Some(ref cb) = callback {
+    if let Some(cb) = callback {
         let payload = EventPayload {
             element_id: element_id.to_string(),
             event_type: event_type.to_string(),
@@ -470,7 +415,7 @@ fn emit_event(
             key: None,
             modifiers: Some(EventModifiers::default()),
         };
-        cb.call(payload, ThreadsafeFunctionCallMode::NonBlocking);
+        cb.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
     }
 }
 
@@ -481,7 +426,6 @@ pub struct WindowSize {
     pub height: f64,
 }
 
-/// Configuration for window creation
 #[derive(Debug, Clone)]
 #[napi(object)]
 pub struct WindowOptions {

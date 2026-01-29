@@ -1,10 +1,10 @@
 use napi_derive::napi;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::style::StyleDesc;
 
 /// Element description serialized from JS
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[napi(object)]
 pub struct ElementDesc {

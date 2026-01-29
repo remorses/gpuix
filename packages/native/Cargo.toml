@@ -6,7 +6,7 @@ description = "GPUI bindings for Node.js via napi-rs"
 license = "Apache-2.0"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 napi = { version = "2", features = ["napi8", "serde-json"] }
@@ -21,6 +21,10 @@ gpui = { git = "https://github.com/zed-industries/zed", branch = "main" }
 
 [build-dependencies]
 napi-build = "2"
+
+[[example]]
+name = "hello"
+path = "examples/hello.rs"
 
 [profile.release]
 lto = true
