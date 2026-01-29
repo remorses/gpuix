@@ -2,9 +2,9 @@ import React from "react"
 import type { ReactNode } from "react"
 import type { OpaqueRoot } from "react-reconciler"
 import { ConcurrentRoot } from "react-reconciler/constants"
-import { GpuixRenderer, type ElementDesc, type EventPayload } from "@gpuix/native"
+import { GpuixRenderer, type EventPayload } from "@gpuix/native"
 import { reconciler } from "./reconciler"
-import type { Container } from "../types/host"
+import type { Container, ElementDesc } from "../types/host"
 
 // Event handler registry
 const eventHandlers = new Map<string, Map<string, (event: EventPayload) => void>>()
@@ -53,13 +53,18 @@ export function createRoot(renderer: GpuixRenderer): Root {
   // Create a container that bridges React to GPUI
   const gpuixContainer: Container = {
     render(tree: ElementDesc): void {
+      console.log("[GPUIX] Container.render called with tree:", JSON.stringify(tree, null, 2))
       currentTree = tree
       // Register event handlers from the tree
       registerTreeEventHandlers(tree)
       // Send to native renderer
-      renderer.render(JSON.stringify(tree))
+      const jsonTree = JSON.stringify(tree)
+      console.log("[GPUIX] Sending to native renderer, JSON length:", jsonTree.length)
+      renderer.render(jsonTree)
+      console.log("[GPUIX] Native render() returned")
     },
     requestRender(): void {
+      console.log("[GPUIX] Container.requestRender called, has tree:", !!currentTree)
       if (currentTree) {
         this.render(currentTree)
       }
@@ -81,18 +86,19 @@ export function createRoot(renderer: GpuixRenderer): Root {
       // Clear previous event handlers
       clearEventHandlers()
 
-      container = reconciler.createContainer(
+      // Types are out of date with react-reconciler 0.31.0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      container = (reconciler.createContainer as any)(
         gpuixContainer,
         ConcurrentRoot,
-        null,
-        false,
-        null,
-        "",
-        console.error,
-        console.error,
-        console.error,
-        console.error,
-        null
+        null, // hydrationCallbacks
+        false, // isStrictMode
+        null, // concurrentUpdatesByDefaultOverride
+        "", // identifierPrefix
+        console.error, // onUncaughtError
+        console.error, // onCaughtError
+        console.error, // onRecoverableError
+        null // transitionCallbacks
       )
 
       reconciler.updateContainer(

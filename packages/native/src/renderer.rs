@@ -36,11 +36,20 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn render(&self, tree_json: String) -> Result<()> {
+        eprintln!("[GPUIX-RUST] render() called, JSON length: {}", tree_json.len());
+        eprintln!("[GPUIX-RUST] JSON preview: {}", &tree_json[..tree_json.len().min(500)]);
+        
         let tree: ElementDesc = serde_json::from_str(&tree_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse element tree: {}", e)))?;
+            .map_err(|e| {
+                eprintln!("[GPUIX-RUST] Failed to parse: {}", e);
+                Error::from_reason(format!("Failed to parse element tree: {}", e))
+            })?;
 
+        eprintln!("[GPUIX-RUST] Parsed tree type: {:?}", tree.element_type);
+        
         let mut current = self.current_tree.lock().unwrap();
         *current = Some(tree);
+        eprintln!("[GPUIX-RUST] Tree stored successfully");
 
         Ok(())
     }
@@ -142,8 +151,14 @@ impl gpui::Render for GpuixView {
         let tree = self.tree.lock().unwrap();
 
         match tree.as_ref() {
-            Some(desc) => build_element(desc, &self.event_callback),
-            None => gpui::Empty.into_any_element(),
+            Some(desc) => {
+                eprintln!("[GPUIX-RUST] GpuixView::render - building tree, root type: {:?}", desc.element_type);
+                build_element(desc, &self.event_callback)
+            },
+            None => {
+                eprintln!("[GPUIX-RUST] GpuixView::render - NO TREE, returning Empty");
+                gpui::Empty.into_any_element()
+            },
         }
     }
 }
@@ -153,7 +168,14 @@ fn build_element(
     event_callback: &Option<ThreadsafeFunction<EventPayload>>,
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
-    
+    eprintln!(
+        "[GPUIX-RUST] build_element: type={:?} id={:?} children={} style_present={}",
+        desc.element_type,
+        desc.id,
+        desc.children.as_ref().map(|c| c.len()).unwrap_or(0),
+        desc.style.is_some()
+    );
+
     match desc.element_type.as_str() {
         "div" => build_div(desc, event_callback),
         "text" => build_text(desc),
@@ -169,12 +191,19 @@ fn build_div(
 
     // Get or generate element ID
     let element_id = desc.id.clone().unwrap_or_else(generate_element_id);
+    eprintln!(
+        "[GPUIX-RUST] build_div: id={} children={} style_present={}",
+        element_id,
+        desc.children.as_ref().map(|c| c.len()).unwrap_or(0),
+        desc.style.is_some()
+    );
     
     // Create stateful div with ID
     let mut el = gpui::div().id(gpui::SharedString::from(element_id.clone()));
 
     // Apply styles
     if let Some(ref style) = desc.style {
+        eprintln!("[GPUIX-RUST] build_div: applying styles for id={}", element_id);
         el = apply_styles(el, style);
     }
 
@@ -222,6 +251,11 @@ fn build_div(
 
     // Add children recursively
     if let Some(ref children) = desc.children {
+        eprintln!(
+            "[GPUIX-RUST] build_div: rendering {} children for id={}",
+            children.len(),
+            element_id
+        );
         for child in children {
             el = el.child(build_element(child, event_callback));
         }
@@ -248,6 +282,25 @@ fn build_text(desc: &ElementDesc) -> gpui::AnyElement {
         el.child(content).into_any_element()
     } else {
         content.into_any_element()
+    }
+}
+
+// Helper functions for dimension handling
+fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
+    eprintln!("[GPUIX-RUST] apply_width: {:?}", dim);
+    match dim {
+        crate::style::DimensionValue::Pixels(v) => el.w(gpui::px(*v as f32)),
+        crate::style::DimensionValue::Percentage(v) => el.w(gpui::relative(*v as f32)),
+        crate::style::DimensionValue::Auto => el, // auto is default
+    }
+}
+
+fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
+    eprintln!("[GPUIX-RUST] apply_height: {:?}", dim);
+    match dim {
+        crate::style::DimensionValue::Pixels(v) => el.h(gpui::px(*v as f32)),
+        crate::style::DimensionValue::Percentage(v) => el.h(gpui::relative(*v as f32)),
+        crate::style::DimensionValue::Auto => el, // auto is default
     }
 }
 
@@ -293,23 +346,39 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
     }
 
     // Sizing
-    if let Some(w) = style.width {
-        el = el.w(gpui::px(w as f32));
+    if let Some(ref w) = style.width {
+        el = apply_width(el, w);
     }
-    if let Some(h) = style.height {
-        el = el.h(gpui::px(h as f32));
+    if let Some(ref h) = style.height {
+        el = apply_height(el, h);
     }
-    if let Some(min_w) = style.min_width {
-        el = el.min_w(gpui::px(min_w as f32));
+    if let Some(ref min_w) = style.min_width {
+        match min_w {
+            crate::style::DimensionValue::Pixels(v) => el = el.min_w(gpui::px(*v as f32)),
+            crate::style::DimensionValue::Percentage(v) => el = el.min_w(gpui::relative(*v as f32)),
+            crate::style::DimensionValue::Auto => {}
+        }
     }
-    if let Some(min_h) = style.min_height {
-        el = el.min_h(gpui::px(min_h as f32));
+    if let Some(ref min_h) = style.min_height {
+        match min_h {
+            crate::style::DimensionValue::Pixels(v) => el = el.min_h(gpui::px(*v as f32)),
+            crate::style::DimensionValue::Percentage(v) => el = el.min_h(gpui::relative(*v as f32)),
+            crate::style::DimensionValue::Auto => {}
+        }
     }
-    if let Some(max_w) = style.max_width {
-        el = el.max_w(gpui::px(max_w as f32));
+    if let Some(ref max_w) = style.max_width {
+        match max_w {
+            crate::style::DimensionValue::Pixels(v) => el = el.max_w(gpui::px(*v as f32)),
+            crate::style::DimensionValue::Percentage(v) => el = el.max_w(gpui::relative(*v as f32)),
+            crate::style::DimensionValue::Auto => {}
+        }
     }
-    if let Some(max_h) = style.max_height {
-        el = el.max_h(gpui::px(max_h as f32));
+    if let Some(ref max_h) = style.max_height {
+        match max_h {
+            crate::style::DimensionValue::Pixels(v) => el = el.max_h(gpui::px(*v as f32)),
+            crate::style::DimensionValue::Percentage(v) => el = el.max_h(gpui::relative(*v as f32)),
+            crate::style::DimensionValue::Auto => {}
+        }
     }
 
     // Padding
@@ -348,15 +417,21 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
 
     // Background color
     if let Some(ref bg) = style.background_color.as_ref().or(style.background.as_ref()) {
+        eprintln!("[GPUIX-RUST] apply_styles: background={}", bg);
         if let Some(hex) = parse_color_hex(bg) {
             el = el.bg(gpui::rgba(hex));
+        } else {
+            eprintln!("[GPUIX-RUST] apply_styles: failed to parse background color {}", bg)
         }
     }
 
     // Text color
     if let Some(ref color) = style.color {
+        eprintln!("[GPUIX-RUST] apply_styles: text color={}", color);
         if let Some(hex) = parse_color_hex(color) {
             el = el.text_color(gpui::rgba(hex));
+        } else {
+            eprintln!("[GPUIX-RUST] apply_styles: failed to parse text color {}", color)
         }
     }
 

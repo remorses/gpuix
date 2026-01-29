@@ -6,7 +6,7 @@
  */
 
 import React, { useState } from 'react'
-import { createRoot, GpuixRenderer } from '@gpuix/react'
+import { createRoot, flushSync, GpuixRenderer } from '@gpuix/react'
 
 function Counter() {
   const [count, setCount] = useState(0)
@@ -32,9 +32,20 @@ function Counter() {
           fontSize: 48,
           fontWeight: 'bold',
           color: '#cdd6f4',
+          cursor: 'pointer',
         }}
+        onClick={() => setCount(c => c + 1)}
       >
         {count}
+      </div>
+
+      <div
+        style={{
+          color: '#a6adc8',
+          fontSize: 14,
+        }}
+      >
+        Click the number or + to increment
       </div>
 
       <div
@@ -81,6 +92,7 @@ function Counter() {
           padding: 16,
           backgroundColor: '#313244',
           borderRadius: 8,
+          cursor: 'pointer',
         }}
         onClick={() => setCount(0)}
       >
@@ -117,8 +129,12 @@ async function main() {
   // Create React root
   const root = createRoot(renderer)
 
-  // Render the app
-  root.render(<App />)
+  // Render the app synchronously to ensure tree is ready before GPUI starts
+  flushSync(() => {
+    root.render(<App />)
+  })
+
+  console.log('[GPUIX] Initial render complete, starting GPUI event loop')
 
   // Start the GPUI event loop (blocks)
   renderer.run()

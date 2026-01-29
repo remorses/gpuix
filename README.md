@@ -73,12 +73,16 @@ bun run build
 # Build React package
 cd ../react
 bun run build
+
+# Run example (use tmux for long-running sessions)
+cd ../../examples
+npx tsx counter.tsx
 ```
 
 ## Usage
 
 ```tsx
-import { createRoot, GpuixRenderer } from '@gpuix/react'
+import { createRoot, flushSync, GpuixRenderer } from '@gpuix/react'
 
 // Create the native renderer
 const renderer = new GpuixRenderer((event) => {
@@ -90,7 +94,9 @@ const renderer = new GpuixRenderer((event) => {
 const root = createRoot(renderer)
 
 // Render your app
-root.render(<App />)
+flushSync(() => {
+  root.render(<App />)
+})
 
 // Start the GPUI event loop
 renderer.run()
@@ -144,14 +150,14 @@ Tailwind-like styling via the `style` prop:
 - [x] Event callback system
 - [x] GPUI element building (build_element, apply_styles)
 - [x] Event wiring (click, mouseDown, mouseUp, mouseMove)
-- [ ] **Standalone build** - Currently requires zed workspace
+- [x] **Standalone build** - Pinned GPUI and macOS deps for compatibility
 - [ ] Focus management
 - [ ] Keyboard events
 - [ ] Text input
 
 ### Current Blocker
 
-GPUI has complex dependencies (custom font-kit fork, core-graphics version conflicts) that prevent building outside the zed workspace. Development happens in `zed/crates/gpuix`.
+None currently. If native builds regress, check the GPUI pin and macOS `core-text`/`core-graphics` versions in `packages/native/Cargo.toml`.
 
 ## Documentation
 

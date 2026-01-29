@@ -1,10 +1,87 @@
-use napi_derive::napi;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum DimensionValue {
+    Pixels(f64),
+    Percentage(f64),  // 0.0 to 1.0
+    Auto,
+}
+
+impl Default for DimensionValue {
+    fn default() -> Self {
+        DimensionValue::Auto
+    }
+}
+
+impl<'de> Deserialize<'de> for DimensionValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+        
+        struct DimensionVisitor;
+        
+        impl<'de> Visitor<'de> for DimensionVisitor {
+            type Value = DimensionValue;
+            
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a number or a string like '100%' or 'auto'")
+            }
+            
+            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(DimensionValue::Pixels(v))
+            }
+            
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(DimensionValue::Pixels(v as f64))
+            }
+            
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(DimensionValue::Pixels(v as f64))
+            }
+            
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v == "auto" {
+                    Ok(DimensionValue::Auto)
+                } else if v.ends_with('%') {
+                    let num_str = v.trim_end_matches('%');
+                    match num_str.parse::<f64>() {
+                        Ok(n) => Ok(DimensionValue::Percentage(n / 100.0)),
+                        Err(_) => Err(de::Error::custom(format!("invalid percentage: {}", v))),
+                    }
+                } else {
+                    // Try to parse as a number
+                    match v.parse::<f64>() {
+                        Ok(n) => Ok(DimensionValue::Pixels(n)),
+                        Err(_) => Err(de::Error::custom(format!("invalid dimension: {}", v))),
+                    }
+                }
+            }
+        }
+        
+        deserializer.deserialize_any(DimensionVisitor)
+    }
+}
 
 /// Style description that can be serialized from JS
+/// Note: This is only used for JSON deserialization, not direct napi binding
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[napi(object)]
 pub struct StyleDesc {
     // Display
     pub display: Option<String>,
@@ -24,13 +101,13 @@ pub struct StyleDesc {
     pub row_gap: Option<f64>,
     pub column_gap: Option<f64>,
 
-    // Sizing
-    pub width: Option<f64>,
-    pub height: Option<f64>,
-    pub min_width: Option<f64>,
-    pub min_height: Option<f64>,
-    pub max_width: Option<f64>,
-    pub max_height: Option<f64>,
+    // Sizing - now supports both numbers and strings like "100%" or "auto"
+    pub width: Option<DimensionValue>,
+    pub height: Option<DimensionValue>,
+    pub min_width: Option<DimensionValue>,
+    pub min_height: Option<DimensionValue>,
+    pub max_width: Option<DimensionValue>,
+    pub max_height: Option<DimensionValue>,
 
     // Spacing (padding)
     pub padding: Option<f64>,

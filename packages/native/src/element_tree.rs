@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 use crate::style::StyleDesc;
 
 /// Element description serialized from JS
+/// Note: This is only used for JSON deserialization, not direct napi binding
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[napi(object)]
 pub struct ElementDesc {
     /// Element type: "div", "text", "img", "svg", etc.
-    #[serde(rename = "type")]
+    #[serde(rename = "elementType", alias = "type")]
     pub element_type: String,
 
     /// Unique element ID for event handling

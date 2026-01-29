@@ -107,6 +107,7 @@ gpuix/
 │       └── package.json
 │
 ├── examples/
+│   ├── package.json            # Workspace package for examples
 │   └── counter.tsx             # Example React app
 │
 └── AGENTS.md                   # This file
@@ -186,8 +187,8 @@ pub struct StyleDesc {
     pub gap: Option<f64>,
     
     // Sizing
-    pub width: Option<f64>,
-    pub height: Option<f64>,
+    pub width: Option<DimensionValue>,
+    pub height: Option<DimensionValue>,
     
     // Spacing
     pub padding: Option<f64>,
@@ -229,13 +230,14 @@ cd crates/gpuix
 cargo run --example hello --release
 ```
 
-### Standalone Build (blocked)
+### Standalone Build
 
-Building outside zed workspace fails due to dependency conflicts:
-- `core-graphics` version mismatch (0.24 vs 0.25)
-- `font-kit` fork requirements
+Standalone builds now work by pinning GPUI and macOS text dependencies:
 
-See "Current Blockers" below.
+- `gpui` pinned to commit `83ca31055cf3e56aa8a704ac49e1686434f4e640`
+- `core-text = 21.0.0`, `core-graphics = 0.24.0` for macOS
+
+These avoid the core-graphics 0.24 vs 0.25 conflict between `core-text` and Zed's `font-kit` fork.
 
 ## Current Status
 
@@ -256,9 +258,9 @@ See "Current Blockers" below.
 
 #### High Priority
 
-- [ ] **Build native package standalone** - Resolve GPUI dependency conflicts
-- [ ] **Generate TypeScript types** - Run napi build to create .d.ts files
-- [ ] **Test full pipeline** - JS → native → GPUI → screen
+- [x] **Build native package standalone** - Resolve GPUI dependency conflicts
+- [x] **Generate TypeScript types** - Run napi build to create .d.ts files
+- [x] **Test full pipeline** - JS → native → GPUI → screen
 - [ ] **Re-render triggering** - Store Entity handle, call cx.notify() on tree update
 
 #### Medium Priority
@@ -279,24 +281,7 @@ See "Current Blockers" below.
 
 ## Current Blockers
 
-### 1. GPUI Dependency Resolution
-
-GPUI uses workspace-level dependencies and a custom font-kit fork. Building outside zed fails:
-
-```
-error: two different versions of crate `core_graphics` in the dependency graph
-  - core-graphics 0.24.0 (from core-text)
-  - core-graphics 0.25.0 (from font-kit fork)
-```
-
-**Workaround**: Develop in `zed/crates/gpuix`, copy built artifacts.
-
-**Solution needed**: Either:
-- Zed publishes GPUI as standalone crate
-- We vendor all dependencies
-- We patch Cargo.toml with exact version pins
-
-### 2. napi-rs in Non-Node Context
+### napi-rs in Non-Node Context
 
 The Rust example can't link because napi symbols aren't available outside Node.js:
 
@@ -306,7 +291,7 @@ Undefined symbols: _napi_call_function, _napi_create_string_utf8, ...
 
 **Solution**: Examples should either:
 - Be pure GPUI (like hello.rs)
-- Run via Node.js/Bun with the built .node binary
+- Run via Node.js with tsx and the built .node binary
 
 ## Testing
 
@@ -323,8 +308,9 @@ cd packages/native && cargo test
 ### Integration Test
 
 ```bash
-# Once native builds work:
-bun examples/counter.tsx
+# Run example with tsx (use tmux for long-running sessions)
+cd examples
+npx tsx counter.tsx
 ```
 
 ## Related Projects

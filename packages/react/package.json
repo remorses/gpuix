@@ -5,15 +5,22 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "bun": "./src/index.ts",
+      "import": "./src/index.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js",
+      "types": "./src/index.ts"
     },
     "./jsx-runtime": {
+      "bun": "./jsx-runtime.js",
       "import": "./jsx-runtime.js",
+      "require": "./jsx-runtime.js",
       "types": "./jsx-runtime.d.ts"
     },
     "./jsx-dev-runtime": {
+      "bun": "./jsx-dev-runtime.js",
       "import": "./jsx-dev-runtime.js",
+      "require": "./jsx-dev-runtime.js",
       "types": "./jsx-dev-runtime.d.ts"
     }
   },

@@ -1,0 +1,16 @@
+{
+  "name": "@gpuix/examples",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "counter": "tsx counter.tsx"
+  },
+  "dependencies": {
+    "@gpuix/react": "workspace:*",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "@types/react": "^18.2.0"
+  }
+}

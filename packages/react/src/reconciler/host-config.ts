@@ -1,6 +1,9 @@
 import { createContext } from "react"
-import type { HostConfig, ReactContext } from "react-reconciler"
-import { DefaultEventPriority, NoEventPriority } from "react-reconciler/constants"
+import type { ReactContext } from "react-reconciler"
+import { DefaultEventPriority } from "react-reconciler/constants"
+
+// NoEventPriority = 0 in react-reconciler, but types don't export it
+const NoEventPriority = 0
 import type {
   Container,
   ElementType,
@@ -37,22 +40,8 @@ function createTextInstance(text: string): TextInstance {
 }
 
 // https://github.com/facebook/react/tree/main/packages/react-reconciler#practical-examples
-export const hostConfig: HostConfig<
-  ElementType,
-  Props,
-  Container,
-  Instance,
-  TextInstance,
-  unknown, // SuspenseInstance
-  unknown, // HydratableInstance
-  unknown, // FormInstance
-  PublicInstance,
-  HostContext,
-  unknown, // ChildSet
-  unknown, // TimeoutHandle
-  unknown, // NoTimeout
-  unknown // TransitionStatus
-> = {
+// Type annotation removed - @types/react-reconciler is out of date with react-reconciler 0.31.0
+export const hostConfig = {
   supportsMutation: true,
   supportsPersistence: false,
   supportsHydration: false,
@@ -64,7 +53,9 @@ export const hostConfig: HostConfig<
     _rootContainerInstance: Container,
     _hostContext: HostContext
   ): Instance {
-    return createInstance(type, props)
+    const instance = createInstance(type, props)
+    console.log("[GPUIX] createInstance:", type, "id:", instance.id)
+    return instance
   },
 
   // Append a child to a parent
@@ -72,6 +63,9 @@ export const hostConfig: HostConfig<
     if ("type" in child) {
       child.parent = parent
       parent.children.push(child)
+    } else {
+      parent.textContent = (parent.textContent || "") + child.text
+      console.log("[GPUIX] appendChild text node -> parent content:", parent.type, parent.textContent)
     }
   },
 
@@ -122,6 +116,7 @@ export const hostConfig: HostConfig<
 
   // Reset after commit - trigger GPUI render
   resetAfterCommit(containerInfo: Container): void {
+    console.log("[GPUIX] resetAfterCommit called")
     containerInfo.requestRender()
   },
 
@@ -195,6 +190,7 @@ export const hostConfig: HostConfig<
   // Commit update
   commitUpdate(
     instance: Instance,
+    _updatePayload: unknown,
     _type: ElementType,
     _oldProps: Props,
     newProps: Props,
@@ -217,20 +213,22 @@ export const hostConfig: HostConfig<
 
   // Append child to container
   appendChildToContainer(container: Container, child: Instance): void {
+    console.log("[GPUIX] appendChildToContainer called, child type:", child.type, "id:", child.id)
     // The container will serialize this for GPUI
     const tree = instanceToElementDesc(child)
+    console.log("[GPUIX] instanceToElementDesc result:", JSON.stringify(tree, null, 2))
     container.render(tree)
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
+    console.log("[GPUIX] appendInitialChild:", "type" in child ? child.type : "text", "to parent:", parent.type)
     if ("type" in child) {
       child.parent = parent
       parent.children.push(child)
     } else {
       // Text instance - store as text content
-      if (parent.type === "text") {
-        parent.textContent = (parent.textContent || "") + child.text
-      }
+      parent.textContent = (parent.textContent || "") + child.text
+      console.log("[GPUIX] appendInitialChild text node -> parent content:", parent.type, parent.textContent)
     }
   },
 
@@ -338,7 +336,7 @@ export const hostConfig: HostConfig<
 }
 
 // Convert Instance tree to ElementDesc for GPUI
-import type { ElementDesc, StyleDesc } from "@gpuix/native"
+import type { ElementDesc, StyleDesc } from "../types/host"
 
 function instanceToElementDesc(instance: Instance): ElementDesc {
   const events: string[] = []
@@ -356,7 +354,7 @@ function instanceToElementDesc(instance: Instance): ElementDesc {
   if (instance.props.onBlur) events.push("blur")
   if (instance.props.onScroll) events.push("scroll")
 
-  return {
+  const desc: ElementDesc = {
     elementType: instance.type,
     id: instance.id,
     style: instance.props.style as StyleDesc | undefined,
@@ -370,4 +368,6 @@ function instanceToElementDesc(instance: Instance): ElementDesc {
         ? instance.children.map(instanceToElementDesc)
         : undefined,
   }
+  console.log("[GPUIX] instanceToElementDesc:", desc.elementType, "id:", desc.id, "children:", desc.children?.length ?? 0)
+  return desc
 }
