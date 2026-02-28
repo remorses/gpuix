@@ -1,8 +1,12 @@
 /**
  * GPUIX Counter Example
- * 
+ *
  * This example shows how to use React with GPUI via GPUIX.
  * The element tree is serialized and sent to Rust/GPUI for rendering.
+ *
+ * Key change from the old API: instead of renderer.run() (which blocked forever),
+ * we now use renderer.init() + setImmediate tick loop, so Node.js stays alive
+ * and React state updates work.
  */
 
 import React, { useState } from 'react'
@@ -119,27 +123,37 @@ function App() {
   )
 }
 
-// Initialize GPUIX
+// Initialize GPUIX with non-blocking platform
 async function main() {
   // Create the native GPUI renderer with event callback
   const renderer = createRenderer((event) => {
     console.log('GPUI Event:', event.elementId, event.eventType)
   })
 
-  renderer.setWindowTitle('GPUIX Counter')
+  // Initialize GPUI with NodePlatform (non-blocking — returns immediately)
+  renderer.init({
+    title: 'GPUIX Counter',
+    width: 800,
+    height: 600,
+  })
 
   // Create React root
   const root = createRoot(renderer)
 
-  // Render the app synchronously to ensure tree is ready before GPUI starts
+  // Render the app synchronously to ensure tree is ready
   flushSync(() => {
     root.render(<App />)
   })
 
-  console.log('[GPUIX] Initial render complete, starting GPUI event loop')
+  console.log('[GPUIX] Initial render complete, starting tick loop')
 
-  // Start the GPUI event loop (blocks)
-  renderer.run()
+  // Drive the frame loop — Node.js event loop stays alive,
+  // React state updates work, events flow back from GPUI
+  function loop() {
+    renderer.tick()
+    setImmediate(loop)
+  }
+  loop()
 }
 
 main().catch(console.error)

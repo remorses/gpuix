@@ -196,15 +196,19 @@ export const hostConfig = {
     // Focus handling could happen here
   },
 
-  // Commit update
+  // commitUpdate — called when a host instance's props change.
+  // react-reconciler 0.31+ (React 19) removed prepareUpdate and updatePayload.
+  // The reconciler now uses reference equality (oldProps !== newProps) to decide
+  // whether to call commitUpdate. The signature is 5 params, NOT the old 6-param
+  // form that included updatePayload.
   commitUpdate(
     instance: Instance,
-    _updatePayload: unknown,
     _type: ElementType,
     _oldProps: Props,
     newProps: Props,
     _internalInstanceHandle: unknown
   ): void {
+    // console.log("[GPUIX] commitUpdate:", instance.id)
     instance.props = newProps
     if (newProps.id) {
       instance.id = newProps.id

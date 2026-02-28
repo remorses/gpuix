@@ -32,13 +32,32 @@ export interface WindowOptions {
   fullscreen?: boolean
   transparent?: boolean
 }
-/** The main GPUI renderer exposed to Node.js */
+/**
+ * The main GPUI renderer exposed to Node.js.
+ *
+ * Lifecycle:
+ * 1. new GpuixRenderer(eventCallback) — creates the binding
+ * 2. renderer.init({ ... }) — creates NodePlatform + window (non-blocking)
+ * 3. renderer.render(json) — sends element tree to GPUI
+ * 4. renderer.tick() — pumps events + renders frame (call from setImmediate loop)
+ */
 export declare class GpuixRenderer {
   constructor(eventCallback?: (err: Error | null, arg: EventPayload) => any | undefined | null)
+  /**
+   * Initialize the GPUI application with a non-blocking NodePlatform.
+   * Creates a native window and wgpu rendering surface.
+   * This returns immediately — it does NOT block like the old run().
+   */
+  init(options?: WindowOptions | undefined | null): void
+  /** Send a new element tree to GPUI. Triggers re-render on next tick(). */
   render(treeJson: string): void
-  run(): void
-  stop(): void
-  isRunning(): boolean
+  /**
+   * Pump the event loop. Call this from JS on every tick (via setImmediate).
+   * Processes: OS events, GPUI foreground tasks, delayed tasks, frame rendering.
+   */
+  tick(): void
+  /** Check if the renderer has been initialized. */
+  isInitialized(): boolean
   getWindowSize(): WindowSize
   setWindowTitle(title: string): void
   focusElement(elementId: string): void
