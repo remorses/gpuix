@@ -2,11 +2,8 @@
  * GPUIX Counter Example
  *
  * This example shows how to use React with GPUI via GPUIX.
- * The element tree is serialized and sent to Rust/GPUI for rendering.
- *
- * Key change from the old API: instead of renderer.run() (which blocked forever),
- * we now use renderer.init() + setImmediate tick loop, so Node.js stays alive
- * and React state updates work.
+ * React reconciler mutations go directly to Rust via napi calls —
+ * no JSON serialization of the full tree.
  */
 
 import React, { useState } from 'react'

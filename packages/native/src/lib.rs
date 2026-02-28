@@ -3,6 +3,7 @@
 mod element_tree;
 mod platform;
 mod renderer;
+mod retained_tree;
 mod style;
 
 pub use element_tree::*;

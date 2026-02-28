@@ -1,18 +1,19 @@
 /// GpuixRenderer — napi-rs binding exposed to Node.js.
 ///
-/// This is the main entry point for JS. Instead of the old blocking run() API,
-/// we now have init() + render() + tick():
+/// Mutation-based API: React's reconciler sends individual mutations
+/// (createElement, appendChild, setStyle, etc.) instead of a full JSON tree.
+/// Rust maintains a RetainedTree and rebuilds GPUI elements from it each frame.
 ///
+/// Lifecycle:
+///   const renderer = new GpuixRenderer(eventCallback)
 ///   renderer.init({ title: 'My App', width: 800, height: 600 })
-///   renderer.render(jsonTree)          // send element tree
-///   setImmediate(function loop() {     // drive the frame loop
+///   renderer.createElement(1, "div")     // mutations from React reconciler
+///   renderer.appendChild(0, 1)
+///   renderer.commitMutations()           // signal batch complete
+///   setImmediate(function loop() {       // drive the frame loop
 ///     renderer.tick()
 ///     setImmediate(loop)
 ///   })
-///
-/// init() creates a NodePlatform (non-blocking), opens a GPUI window with wgpu.
-/// render() updates the element tree and notifies GPUI to re-render.
-/// tick() pumps the GPUI foreground task queue and triggers frame rendering.
 
 use gpui::AppContext as _;
 use napi::bindgen_prelude::*;
@@ -20,53 +21,29 @@ use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::element_tree::{ElementDesc, EventModifiers, EventPayload};
+use crate::element_tree::{EventModifiers, EventPayload};
 use crate::platform::NodePlatform;
-use crate::style::parse_color_hex;
-
-static ELEMENT_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+use crate::retained_tree::RetainedTree;
+use crate::style::{parse_color_hex, StyleDesc};
 
 // Thread-local storage for the NodePlatform reference.
 // NodePlatform contains RefCell fields (making it !Send/!Sync), but napi-rs
 // requires GpuixRenderer to be Send. Since all napi methods are called from
-// the JS main thread, storing the platform in a thread_local is safe and
-// avoids the Arc<Mutex<Rc<...>>> impossibility.
-//
-// The on_quit callback registered by GPUI's Application::new_app() stores
-// an Rc<AppCell> clone inside NodePlatform.callbacks.quit, which keeps the
-// entire GPUI app state alive as long as this thread_local holds the platform.
+// the JS main thread, storing the platform in a thread_local is safe.
 thread_local! {
     static NODE_PLATFORM: RefCell<Option<Rc<NodePlatform>>> = const { RefCell::new(None) };
-    // Store the GPUI window handle so render() can notify it to re-render.
-    // cx.notify() is GPUI's proper invalidation mechanism — it marks the entity
-    // dirty so the next frame calls Render::render(). This is better than
-    // force_render which bypasses GPUI's dirty tracking.
     static GPUI_WINDOW: RefCell<Option<gpui::AnyWindowHandle>> = const { RefCell::new(None) };
 }
 
-fn generate_element_id() -> String {
-    let id = ELEMENT_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
-    format!("__gpuix_{}", id)
-}
-
 /// The main GPUI renderer exposed to Node.js.
-///
-/// Lifecycle:
-/// 1. new GpuixRenderer(eventCallback) — creates the binding
-/// 2. renderer.init({ ... }) — creates NodePlatform + window (non-blocking)
-/// 3. renderer.render(json) — sends element tree to GPUI
-/// 4. renderer.tick() — pumps events + renders frame (call from setImmediate loop)
 #[napi]
 pub struct GpuixRenderer {
     event_callback: Option<ThreadsafeFunction<EventPayload>>,
-    current_tree: Arc<Mutex<Option<ElementDesc>>>,
+    tree: Arc<Mutex<RetainedTree>>,
     initialized: Arc<Mutex<bool>>,
-    /// Set to true by render() when a new tree arrives, cleared by tick().
-    /// Controls whether request_frame uses force_render: true.
-    /// Without this, GPUI won't know the view is dirty and won't call Render::render().
     needs_redraw: Arc<AtomicBool>,
 }
 
@@ -74,20 +51,16 @@ pub struct GpuixRenderer {
 impl GpuixRenderer {
     #[napi(constructor)]
     pub fn new(event_callback: Option<ThreadsafeFunction<EventPayload>>) -> Self {
-        // Initialize logging
         let _ = env_logger::try_init();
-
         Self {
             event_callback,
-            current_tree: Arc::new(Mutex::new(None)),
+            tree: Arc::new(Mutex::new(RetainedTree::new())),
             initialized: Arc::new(Mutex::new(false)),
             needs_redraw: Arc::new(AtomicBool::new(true)),
         }
     }
 
     /// Initialize the GPUI application with a non-blocking NodePlatform.
-    /// Creates a native window and wgpu rendering surface.
-    /// This returns immediately — it does NOT block like the old run().
     #[napi]
     pub fn init(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
@@ -103,19 +76,14 @@ impl GpuixRenderer {
         let height = options.height.unwrap_or(600.0);
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
 
-        // Create the NodePlatform
         let platform = Rc::new(NodePlatform::new());
-
-        // Store platform reference in thread_local for tick()
         NODE_PLATFORM.with(|p| {
             *p.borrow_mut() = Some(platform.clone());
         });
 
-        let tree = self.current_tree.clone();
+        let tree = self.tree.clone();
         let callback = self.event_callback.clone();
 
-        // Create the GPUI Application with our custom platform
-        // Application::with_platform() + run() — run() returns immediately for NodePlatform
         let app = gpui::Application::with_platform(platform);
         app.run(move |cx: &mut gpui::App| {
             let bounds = gpui::Bounds::centered(
@@ -133,13 +101,12 @@ impl GpuixRenderer {
                     cx.new(|_| GpuixView {
                         tree: tree.clone(),
                         event_callback: callback.clone(),
-                        window_title: Arc::new(Mutex::new(Some(title))),
+                        window_title: title,
                     })
                 },
             )
             .unwrap();
 
-            // Store window handle for render() to notify GPUI of tree changes
             GPUI_WINDOW.with(|w| {
                 *w.borrow_mut() = Some(window_handle.into());
             });
@@ -153,25 +120,84 @@ impl GpuixRenderer {
         Ok(())
     }
 
-    /// Send a new element tree to GPUI. Triggers re-render on next tick().
+    // ── Mutation API ─────────────────────────────────────────────────
+
     #[napi]
-    pub fn render(&self, tree_json: String) -> Result<()> {
-        let tree: ElementDesc = serde_json::from_str(&tree_json).map_err(|e| {
-            Error::from_reason(format!("Failed to parse element tree: {}", e))
-        })?;
-
-        let mut current = self.current_tree.lock().unwrap();
-        *current = Some(tree);
-
-        // Signal that the tree changed — tick() will pass force_render: true
-        // to the request_frame callback, making GPUI call GpuixView::render()
-        self.needs_redraw.store(true, Ordering::SeqCst);
-
+    pub fn create_element(&self, id: f64, element_type: String) -> Result<()> {
+        let mut tree = self.tree.lock().unwrap();
+        tree.create_element(id as u64, element_type);
         Ok(())
     }
 
-    /// Pump the event loop. Call this from JS on every tick (via setImmediate).
-    /// Processes: OS events, GPUI foreground tasks, delayed tasks, frame rendering.
+    #[napi]
+    pub fn destroy_element(&self, id: f64) -> Result<()> {
+        let mut tree = self.tree.lock().unwrap();
+        tree.destroy_element(id as u64);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
+        let mut tree = self.tree.lock().unwrap();
+        tree.append_child(parent_id as u64, child_id as u64);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn remove_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
+        let mut tree = self.tree.lock().unwrap();
+        tree.remove_child(parent_id as u64, child_id as u64);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn insert_before(&self, parent_id: f64, child_id: f64, before_id: f64) -> Result<()> {
+        let mut tree = self.tree.lock().unwrap();
+        tree.insert_before(parent_id as u64, child_id as u64, before_id as u64);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
+        let style: StyleDesc = serde_json::from_str(&style_json).map_err(|e| {
+            Error::from_reason(format!("Failed to parse style: {}", e))
+        })?;
+        let mut tree = self.tree.lock().unwrap();
+        tree.set_style(id as u64, style);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn set_text(&self, id: f64, content: String) -> Result<()> {
+        let mut tree = self.tree.lock().unwrap();
+        tree.set_text(id as u64, content);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn set_event_listener(&self, id: f64, event_type: String, has_handler: bool) -> Result<()> {
+        let mut tree = self.tree.lock().unwrap();
+        tree.set_event_listener(id as u64, event_type, has_handler);
+        Ok(())
+    }
+
+    /// Set the root element (called from appendChildToContainer).
+    #[napi]
+    pub fn set_root(&self, id: f64) -> Result<()> {
+        let mut tree = self.tree.lock().unwrap();
+        tree.root_id = Some(id as u64);
+        Ok(())
+    }
+
+    /// Signal that a batch of mutations is complete. Triggers re-render.
+    #[napi]
+    pub fn commit_mutations(&self) -> Result<()> {
+        self.needs_redraw.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    // ── Frame loop ───────────────────────────────────────────────────
+
     #[napi]
     pub fn tick(&self) -> Result<()> {
         let initialized = *self.initialized.lock().unwrap();
@@ -179,10 +205,8 @@ impl GpuixRenderer {
             return Err(Error::from_reason("Renderer not initialized. Call init() first."));
         }
 
-        // Check if render() sent a new tree — if so, force GPUI to redraw
         let force_render = self.needs_redraw.swap(false, Ordering::SeqCst);
 
-        // Pump OS events + drain GPUI tasks + trigger frame render
         NODE_PLATFORM.with(|p| {
             if let Some(ref platform) = *p.borrow() {
                 platform.tick(force_render);
@@ -192,7 +216,6 @@ impl GpuixRenderer {
         Ok(())
     }
 
-    /// Check if the renderer has been initialized.
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.initialized.lock().unwrap()
@@ -200,20 +223,16 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
-        Ok(WindowSize {
-            width: 800.0,
-            height: 600.0,
-        })
+        Ok(WindowSize { width: 800.0, height: 600.0 })
     }
 
-    // Keep these for backwards compatibility during transition
     #[napi]
     pub fn set_window_title(&self, _title: String) -> Result<()> {
         Ok(())
     }
 
     #[napi]
-    pub fn focus_element(&self, _element_id: String) -> Result<()> {
+    pub fn focus_element(&self, _element_id: f64) -> Result<()> {
         Ok(())
     }
 
@@ -223,10 +242,12 @@ impl GpuixRenderer {
     }
 }
 
+// ── GPUI View ────────────────────────────────────────────────────────
+
 struct GpuixView {
-    tree: Arc<Mutex<Option<ElementDesc>>>,
+    tree: Arc<Mutex<RetainedTree>>,
     event_callback: Option<ThreadsafeFunction<EventPayload>>,
-    window_title: Arc<Mutex<Option<String>>>,
+    window_title: String,
 }
 
 impl gpui::Render for GpuixView {
@@ -237,145 +258,117 @@ impl gpui::Render for GpuixView {
     ) -> impl gpui::IntoElement {
         use gpui::IntoElement;
 
-        let has_tree = self.tree.lock().unwrap().is_some();
-        eprintln!("[GPUIX-RUST] GpuixView::render() called, has_tree={has_tree}");
-
-        if let Some(title) = self.window_title.lock().unwrap().as_ref() {
-            window.set_window_title(title);
-        }
+        window.set_window_title(&self.window_title);
 
         let tree = self.tree.lock().unwrap();
 
-        match tree.as_ref() {
-            Some(desc) => build_element(desc, &self.event_callback),
+        match tree.root_id {
+            Some(root_id) => build_element(root_id, &tree, &self.event_callback),
             None => gpui::Empty.into_any_element(),
         }
     }
 }
 
+// ── Element builders ─────────────────────────────────────────────────
+
 fn build_element(
-    desc: &ElementDesc,
+    id: u64,
+    tree: &RetainedTree,
     event_callback: &Option<ThreadsafeFunction<EventPayload>>,
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
 
-    match desc.element_type.as_str() {
-        "div" => build_div(desc, event_callback),
-        "text" => build_text(desc),
+    let Some(element) = tree.elements.get(&id) else {
+        return gpui::Empty.into_any_element();
+    };
+
+    match element.element_type.as_str() {
+        "div" => build_div(element, tree, event_callback),
+        "text" => build_text(element),
         _ => gpui::Empty.into_any_element(),
     }
 }
 
 fn build_div(
-    desc: &ElementDesc,
+    element: &crate::retained_tree::RetainedElement,
+    tree: &RetainedTree,
     event_callback: &Option<ThreadsafeFunction<EventPayload>>,
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
-    let element_id = desc.id.clone().unwrap_or_else(generate_element_id);
+    let element_id_str = format!("__gpuix_{}", element.id);
+    let mut el = gpui::div().id(gpui::SharedString::from(element_id_str));
 
-    // Debug: log what styles this div gets
-    if let Some(ref style) = desc.style {
-        if style.background_color.is_some() || style.background.is_some() {
-            eprintln!("[GPUIX-RUST] build_div id={element_id} bg={:?} w={:?} h={:?} p={:?} display={:?}",
-                style.background_color.as_ref().or(style.background.as_ref()),
-                style.width, style.height, style.padding, style.display);
-        }
-    }
-
-    let mut el = gpui::div().id(gpui::SharedString::from(element_id.clone()));
-
-    // Apply styles
-    if let Some(ref style) = desc.style {
+    if let Some(ref style) = element.style {
         el = apply_styles(el, style);
     }
 
     // Wire up events
-    if let Some(ref events) = desc.events {
-        for event in events {
-            match event.as_str() {
-                "click" => {
-                    let id = element_id.clone();
-                    let callback = event_callback.clone();
-                    el = el.on_click(move |click_event, _window, _cx| {
-                        // Don't call cx.refresh_windows() — let JS-driven
-                        // renderer.render() be the re-render trigger via tick()
-                        emit_event(&callback, &id, "click", Some(click_event.position()));
-                    });
-                }
-                "mouseDown" => {
-                    let id = element_id.clone();
-                    let callback = event_callback.clone();
-                    el = el.on_mouse_down(
-                        gpui::MouseButton::Left,
-                        move |mouse_event, _window, _cx| {
-                            emit_event(&callback, &id, "mouseDown", Some(mouse_event.position));
-                        },
-                    );
-                }
-                "mouseUp" => {
-                    let id = element_id.clone();
-                    let callback = event_callback.clone();
-                    el = el.on_mouse_up(
-                        gpui::MouseButton::Left,
-                        move |mouse_event, _window, _cx| {
-                            emit_event(&callback, &id, "mouseUp", Some(mouse_event.position));
-                        },
-                    );
-                }
-                "mouseMove" => {
-                    let id = element_id.clone();
-                    let callback = event_callback.clone();
-                    el = el.on_mouse_move(move |mouse_event, _window, _cx| {
-                        emit_event(&callback, &id, "mouseMove", Some(mouse_event.position));
-                    });
-                }
-                _ => {}
+    for event_type in &element.events {
+        let id = element.id;
+        let callback = event_callback.clone();
+        match event_type.as_str() {
+            "click" => {
+                el = el.on_click(move |click_event, _window, _cx| {
+                    emit_event(&callback, id, "click", Some(click_event.position()));
+                });
             }
+            "mouseDown" => {
+                el = el.on_mouse_down(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                    emit_event(&callback, id, "mouseDown", Some(mouse_event.position));
+                });
+            }
+            "mouseUp" => {
+                el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                    emit_event(&callback, id, "mouseUp", Some(mouse_event.position));
+                });
+            }
+            "mouseMove" => {
+                el = el.on_mouse_move(move |mouse_event, _window, _cx| {
+                    emit_event(&callback, id, "mouseMove", Some(mouse_event.position));
+                });
+            }
+            _ => {}
         }
     }
 
-    // Add text content if present
-    if let Some(ref content) = desc.content {
+    // Text content
+    if let Some(ref content) = element.content {
         el = el.child(content.clone());
     }
 
-    // Add children recursively
-    if let Some(ref children) = desc.children {
-        for child in children {
-            el = el.child(build_element(child, event_callback));
-        }
+    // Children
+    for &child_id in &element.children {
+        el = el.child(build_element(child_id, tree, event_callback));
     }
 
     el.into_any_element()
 }
 
-fn build_text(desc: &ElementDesc) -> gpui::AnyElement {
+fn build_text(element: &crate::retained_tree::RetainedElement) -> gpui::AnyElement {
     use gpui::prelude::*;
 
-    let content = desc.content.clone().unwrap_or_default();
+    let content = element.content.clone().unwrap_or_default();
 
-    if let Some(ref style) = desc.style {
+    if let Some(ref style) = element.style {
         let mut el = gpui::div();
-
         if let Some(hex) = style.color.as_ref().and_then(|c| parse_color_hex(c)) {
             el = el.text_color(gpui::rgba(hex));
         }
         if let Some(size) = style.font_size {
             el = el.text_size(gpui::px(size as f32));
         }
-
         el.child(content).into_any_element()
     } else {
         content.into_any_element()
     }
 }
 
-// Helper functions for dimension handling
+// ── Style application ────────────────────────────────────────────────
+
 fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
     match dim {
         crate::style::DimensionValue::Pixels(v) => el.w(gpui::px(*v as f32)),
-        // relative(1.0) = 100% of parent width
         crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.w_full(),
         crate::style::DimensionValue::Percentage(v) => el.w(gpui::relative(*v as f32)),
         crate::style::DimensionValue::Auto => el,
@@ -385,15 +378,13 @@ fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E 
 fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
     match dim {
         crate::style::DimensionValue::Pixels(v) => el.h(gpui::px(*v as f32)),
-        // relative(1.0) = 100% of parent height
         crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.h_full(),
         crate::style::DimensionValue::Percentage(v) => el.h(gpui::relative(*v as f32)),
         crate::style::DimensionValue::Auto => el,
     }
 }
 
-fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> E {
-    // Display & flex
+fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if style.display.as_deref() == Some("flex") {
         el = el.flex();
     }
@@ -403,16 +394,12 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
     if style.flex_direction.as_deref() == Some("row") {
         el = el.flex_row();
     }
-
-    // Flex properties
     if style.flex_grow.is_some() {
         el = el.flex_grow();
     }
     if style.flex_shrink.is_some() {
         el = el.flex_shrink();
     }
-
-    // Alignment
     match style.align_items.as_deref() {
         Some("center") => el = el.items_center(),
         Some("start") | Some("flex-start") => el = el.items_start(),
@@ -427,13 +414,9 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
         Some("around") | Some("space-around") => el = el.justify_around(),
         _ => {}
     }
-
-    // Gap
     if let Some(gap) = style.gap {
         el = el.gap(gpui::px(gap as f32));
     }
-
-    // Sizing
     if let Some(ref w) = style.width {
         el = apply_width(el, w);
     }
@@ -443,41 +426,31 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
     if let Some(ref min_w) = style.min_width {
         match min_w {
             crate::style::DimensionValue::Pixels(v) => el = el.min_w(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => {
-                el = el.min_w(gpui::relative(*v as f32))
-            }
+            crate::style::DimensionValue::Percentage(v) => el = el.min_w(gpui::relative(*v as f32)),
             crate::style::DimensionValue::Auto => {}
         }
     }
     if let Some(ref min_h) = style.min_height {
         match min_h {
             crate::style::DimensionValue::Pixels(v) => el = el.min_h(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => {
-                el = el.min_h(gpui::relative(*v as f32))
-            }
+            crate::style::DimensionValue::Percentage(v) => el = el.min_h(gpui::relative(*v as f32)),
             crate::style::DimensionValue::Auto => {}
         }
     }
     if let Some(ref max_w) = style.max_width {
         match max_w {
             crate::style::DimensionValue::Pixels(v) => el = el.max_w(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => {
-                el = el.max_w(gpui::relative(*v as f32))
-            }
+            crate::style::DimensionValue::Percentage(v) => el = el.max_w(gpui::relative(*v as f32)),
             crate::style::DimensionValue::Auto => {}
         }
     }
     if let Some(ref max_h) = style.max_height {
         match max_h {
             crate::style::DimensionValue::Pixels(v) => el = el.max_h(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => {
-                el = el.max_h(gpui::relative(*v as f32))
-            }
+            crate::style::DimensionValue::Percentage(v) => el = el.max_h(gpui::relative(*v as f32)),
             crate::style::DimensionValue::Auto => {}
         }
     }
-
-    // Padding
     if let Some(p) = style.padding {
         el = el.p(gpui::px(p as f32));
     }
@@ -493,8 +466,6 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
     if let Some(pl) = style.padding_left {
         el = el.pl(gpui::px(pl as f32));
     }
-
-    // Margin
     if let Some(m) = style.margin {
         el = el.m(gpui::px(m as f32));
     }
@@ -510,31 +481,19 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
     if let Some(ml) = style.margin_left {
         el = el.ml(gpui::px(ml as f32));
     }
-
-    // Background color
-    if let Some(ref bg) = style
-        .background_color
-        .as_ref()
-        .or(style.background.as_ref())
-    {
+    if let Some(ref bg) = style.background_color.as_ref().or(style.background.as_ref()) {
         if let Some(hex) = parse_color_hex(bg) {
             el = el.bg(gpui::rgba(hex));
         }
     }
-
-    // Text color
     if let Some(ref color) = style.color {
         if let Some(hex) = parse_color_hex(color) {
             el = el.text_color(gpui::rgba(hex));
         }
     }
-
-    // Border radius
     if let Some(radius) = style.border_radius {
         el = el.rounded(gpui::px(radius as f32));
     }
-
-    // Border
     if let Some(width) = style.border_width {
         if width > 0.0 {
             el = el.border(gpui::px(width as f32));
@@ -545,20 +504,14 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
             el = el.border_color(gpui::rgba(hex));
         }
     }
-
-    // Opacity
     if let Some(opacity) = style.opacity {
         el = el.opacity(opacity as f32);
     }
-
-    // Cursor
     match style.cursor.as_deref() {
         Some("pointer") => el = el.cursor_pointer(),
         Some("default") => el = el.cursor_default(),
         _ => {}
     }
-
-    // Overflow
     match style.overflow.as_deref() {
         Some("hidden") => el = el.overflow_hidden(),
         _ => {}
@@ -567,15 +520,17 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &crate::style::StyleDesc) -> 
     el
 }
 
+// ── Event emission ───────────────────────────────────────────────────
+
 fn emit_event(
     callback: &Option<ThreadsafeFunction<EventPayload>>,
-    element_id: &str,
+    element_id: u64,
     event_type: &str,
     position: Option<gpui::Point<gpui::Pixels>>,
 ) {
     if let Some(cb) = callback {
         let payload = EventPayload {
-            element_id: element_id.to_string(),
+            element_id: element_id as f64,
             event_type: event_type.to_string(),
             x: position.map(|p| f64::from(f32::from(p.x))),
             y: position.map(|p| f64::from(f32::from(p.y))),
@@ -585,6 +540,8 @@ fn emit_event(
         cb.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
     }
 }
+
+// ── Types ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 #[napi(object)]

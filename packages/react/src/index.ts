@@ -6,8 +6,8 @@ export { useWindowSize } from "./hooks/use-window-size"
 export type { Root } from "./reconciler/renderer"
 export type { WindowSize } from "./hooks/use-window-size"
 
-// Re-export native types
-export type { ElementDesc, StyleDesc } from "./types/host"
+// Re-export types
+export type { StyleDesc } from "./types/host"
 export type {
   EventPayload,
   EventModifiers,

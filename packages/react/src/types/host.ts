@@ -1,4 +1,4 @@
-import type { EventPayload } from "@gpuix/native"
+import type { EventPayload, GpuixRenderer } from "@gpuix/native"
 
 export type DimensionValue = number | string
 
@@ -68,20 +68,6 @@ export interface StyleDesc {
   cursor?: string
 }
 
-export interface ElementDesc {
-  elementType: ElementType
-  id?: string
-  style?: StyleDesc
-  content?: string
-  src?: string
-  path?: string
-  events?: string[]
-  tabIndex?: number
-  tabStop?: boolean
-  autoFocus?: boolean
-  children?: ElementDesc[]
-}
-
 // Element types supported by GPUIX
 export type ElementType = "div" | "text" | "img" | "svg" | "canvas"
 
@@ -108,27 +94,25 @@ export type Props = Record<string, unknown> & {
   autoFocus?: boolean
 }
 
-// Container is the root renderer
+// Container holds the native renderer reference.
+// Mutations go directly via napi calls, no JSON serialization.
 export interface Container {
-  render(tree: ElementDesc): void
-  requestRender(): void
+  renderer: GpuixRenderer
 }
 
-// Instance represents a GPUIX element in the tree
+// Instance — minimal handle for React's reconciler.
+// The real element state lives in Rust's RetainedTree.
 export interface Instance {
-  id: string
+  id: number
   type: ElementType
   props: Props
-  children: Instance[]
-  parent: Instance | null
-  textContent?: string
 }
 
 // Text instance for raw text nodes
 export interface TextInstance {
-  id: string
+  id: number
   text: string
-  parent: Instance | null
+  parentId: number | null
 }
 
 // Public instance exposed via refs
