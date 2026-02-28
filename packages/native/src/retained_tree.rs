@@ -53,15 +53,23 @@ impl RetainedTree {
         self.elements.insert(id, RetainedElement::new(id, element_type));
     }
 
-    pub fn destroy_element(&mut self, id: u64) {
-        // Recursively remove children first
-        if let Some(element) = self.elements.remove(&id) {
-            for child_id in element.children {
-                self.destroy_element(child_id);
-            }
-        }
+    /// Recursively destroy an element and all its children.
+    /// Returns all destroyed IDs so the caller can clean up JS-side state.
+    pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
+        let mut destroyed = Vec::new();
+        self.destroy_element_recursive(id, &mut destroyed);
         if self.root_id == Some(id) {
             self.root_id = None;
+        }
+        destroyed
+    }
+
+    fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
+        if let Some(element) = self.elements.remove(&id) {
+            destroyed.push(id);
+            for child_id in element.children {
+                self.destroy_element_recursive(child_id, destroyed);
+            }
         }
     }
 
@@ -111,6 +119,7 @@ impl RetainedTree {
 
     pub fn set_style(&mut self, id: u64, style: StyleDesc) {
         if let Some(element) = self.elements.get_mut(&id) {
+            // StyleDesc with all None fields = no style (cleared)
             element.style = Some(style);
         }
     }

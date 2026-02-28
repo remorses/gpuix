@@ -26,6 +26,13 @@ export function registerEventHandler(
   elementHandlers.set(eventType, handler)
 }
 
+export function unregisterEventHandler(elementId: number, eventType: string): void {
+  const m = eventHandlers.get(elementId)
+  if (!m) return
+  m.delete(eventType)
+  if (m.size === 0) eventHandlers.delete(elementId)
+}
+
 export function unregisterEventHandlers(elementId: number): void {
   eventHandlers.delete(elementId)
 }

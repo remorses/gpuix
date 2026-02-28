@@ -29,6 +29,15 @@ use crate::platform::NodePlatform;
 use crate::retained_tree::RetainedTree;
 use crate::style::{parse_color_hex, StyleDesc};
 
+/// Validate and convert a JS number (f64) to a u64 element ID.
+/// JS numbers are f64 — lossless for integers up to 2^53.
+fn to_element_id(id: f64) -> Result<u64> {
+    if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > 9_007_199_254_740_991.0 {
+        return Err(Error::from_reason(format!("Invalid element id: {}", id)));
+    }
+    Ok(id as u64)
+}
+
 // Thread-local storage for the NodePlatform reference.
 // NodePlatform contains RefCell fields (making it !Send/!Sync), but napi-rs
 // requires GpuixRenderer to be Send. Since all napi methods are called from
@@ -124,68 +133,83 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn create_element(&self, id: f64, element_type: String) -> Result<()> {
+        let id = to_element_id(id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.create_element(id as u64, element_type);
+        tree.create_element(id, element_type);
         Ok(())
     }
 
+    /// Destroy an element and all descendants. Returns array of destroyed IDs
+    /// so JS can clean up event handlers for the entire subtree.
     #[napi]
-    pub fn destroy_element(&self, id: f64) -> Result<()> {
+    pub fn destroy_element(&self, id: f64) -> Result<Vec<f64>> {
+        let id = to_element_id(id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.destroy_element(id as u64);
-        Ok(())
+        let destroyed = tree.destroy_element(id);
+        Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
     #[napi]
     pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
+        let parent_id = to_element_id(parent_id)?;
+        let child_id = to_element_id(child_id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.append_child(parent_id as u64, child_id as u64);
+        tree.append_child(parent_id, child_id);
         Ok(())
     }
 
     #[napi]
     pub fn remove_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
+        let parent_id = to_element_id(parent_id)?;
+        let child_id = to_element_id(child_id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.remove_child(parent_id as u64, child_id as u64);
+        tree.remove_child(parent_id, child_id);
         Ok(())
     }
 
     #[napi]
     pub fn insert_before(&self, parent_id: f64, child_id: f64, before_id: f64) -> Result<()> {
+        let parent_id = to_element_id(parent_id)?;
+        let child_id = to_element_id(child_id)?;
+        let before_id = to_element_id(before_id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.insert_before(parent_id as u64, child_id as u64, before_id as u64);
+        tree.insert_before(parent_id, child_id, before_id);
         Ok(())
     }
 
     #[napi]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
+        let id = to_element_id(id)?;
         let style: StyleDesc = serde_json::from_str(&style_json).map_err(|e| {
             Error::from_reason(format!("Failed to parse style: {}", e))
         })?;
         let mut tree = self.tree.lock().unwrap();
-        tree.set_style(id as u64, style);
+        tree.set_style(id, style);
         Ok(())
     }
 
     #[napi]
     pub fn set_text(&self, id: f64, content: String) -> Result<()> {
+        let id = to_element_id(id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.set_text(id as u64, content);
+        tree.set_text(id, content);
         Ok(())
     }
 
     #[napi]
     pub fn set_event_listener(&self, id: f64, event_type: String, has_handler: bool) -> Result<()> {
+        let id = to_element_id(id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.set_event_listener(id as u64, event_type, has_handler);
+        tree.set_event_listener(id, event_type, has_handler);
         Ok(())
     }
 
     /// Set the root element (called from appendChildToContainer).
     #[napi]
     pub fn set_root(&self, id: f64) -> Result<()> {
+        let id = to_element_id(id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.root_id = Some(id as u64);
+        tree.root_id = Some(id);
         Ok(())
     }
 

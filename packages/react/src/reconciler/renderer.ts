@@ -54,23 +54,24 @@ export function createRoot(renderer: GpuixRenderer): Root {
     clearEventHandlers()
   }
 
+  // Create container once — reuse on subsequent render() calls
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  container = (reconciler.createContainer as any)(
+    gpuixContainer,
+    ConcurrentRoot,
+    null,
+    false,
+    null,
+    "",
+    console.error,
+    console.error,
+    console.error,
+    null
+  )
+
   return {
     render: (node: ReactNode): void => {
       clearEventHandlers()
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      container = (reconciler.createContainer as any)(
-        gpuixContainer,
-        ConcurrentRoot,
-        null,
-        false,
-        null,
-        "",
-        console.error,
-        console.error,
-        console.error,
-        null
-      )
 
       reconciler.updateContainer(
         React.createElement(React.Fragment, null, node),

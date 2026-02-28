@@ -21,6 +21,7 @@ import type {
 } from "../types/host"
 import {
   registerEventHandler,
+  unregisterEventHandler,
   unregisterEventHandlers,
 } from "./event-registry"
 
@@ -77,7 +78,8 @@ function diffEventListeners(id: number, oldProps: Props, newProps: Props): void 
     const newHandler = newProps[propName] as ((event: any) => void) | undefined
 
     if (oldHandler && !newHandler) {
-      // Removed
+      // Removed — clean up both JS closure and Rust listener
+      unregisterEventHandler(id, eventType)
       r.setEventListener(id, eventType, false)
     } else if (newHandler && newHandler !== oldHandler) {
       // Added or changed
@@ -92,9 +94,9 @@ function diffEventListeners(id: number, oldProps: Props, newProps: Props): void 
 // ── Style helper ─────────────────────────────────────────────────────
 
 function sendStyle(id: number, props: Props): void {
-  if (props.style) {
-    getRenderer().setStyle(id, JSON.stringify(props.style))
-  }
+  // Always send — handles style removal (undefined → {}) and avoids
+  // missed updates from same-reference style objects.
+  getRenderer().setStyle(id, JSON.stringify(props.style ?? {}))
 }
 
 // ── Host config ──────────────────────────────────────────────────────
@@ -141,8 +143,10 @@ export const hostConfig = {
   ): void {},
 
   removeChildFromContainer(_parent: Container, child: Instance): void {
-    getRenderer().destroyElement(child.id)
-    unregisterEventHandlers(child.id)
+    const destroyed = getRenderer().destroyElement(child.id)
+    for (const id of destroyed) {
+      unregisterEventHandlers(id)
+    }
   },
 
   prepareForCommit(_containerInfo: Container): Record<string, unknown> | null {
@@ -214,10 +218,9 @@ export const hostConfig = {
     newProps: Props,
     _internalInstanceHandle: unknown
   ): void {
-    // Style diff — just resend full style (small per-element JSON)
-    if (newProps.style !== oldProps.style) {
-      sendStyle(instance.id, newProps)
-    }
+    // Always resend style — per-element JSON is small, and this avoids
+    // bugs from same-reference mutations or style removal.
+    sendStyle(instance.id, newProps)
     // Event diff
     diffEventListeners(instance.id, oldProps, newProps)
     instance.props = newProps
@@ -296,8 +299,10 @@ export const hostConfig = {
   },
 
   detachDeletedInstance(instance: Instance): void {
-    unregisterEventHandlers(instance.id)
-    getRenderer().destroyElement(instance.id)
+    const destroyed = getRenderer().destroyElement(instance.id)
+    for (const id of destroyed) {
+      unregisterEventHandlers(id)
+    }
   },
 
   getPublicInstance(instance: Instance): PublicInstance {

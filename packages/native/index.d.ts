@@ -38,7 +38,11 @@ export declare class GpuixRenderer {
   /** Initialize the GPUI application with a non-blocking NodePlatform. */
   init(options?: WindowOptions | undefined | null): void
   createElement(id: number, elementType: string): void
-  destroyElement(id: number): void
+  /**
+   * Destroy an element and all descendants. Returns array of destroyed IDs
+   * so JS can clean up event handlers for the entire subtree.
+   */
+  destroyElement(id: number): Array<number>
   appendChild(parentId: number, childId: number): void
   removeChild(parentId: number, childId: number): void
   insertBefore(parentId: number, childId: number, beforeId: number): void
