@@ -16,6 +16,7 @@ use crate::renderer::EventCallback;
 
 pub mod input;
 pub mod anchored;
+pub mod img;
 
 // ── Render context ───────────────────────────────────────────────────
 
@@ -103,6 +104,7 @@ impl CustomElementRegistry {
         let mut registry = Self::new();
         registry.register(Box::new(input::InputFactory));
         registry.register(Box::new(anchored::AnchoredFactory));
+        registry.register(Box::new(img::ImgFactory));
         registry
     }
 

@@ -1,7 +1,7 @@
 /// GPUIX JSX runtime types — maps intrinsic elements to GPUIX Props
 /// instead of DOM types. Activated via "jsxImportSource": "@gpuix/react".
 
-import type { AnchoredProps, Props, InputProps } from "./src/types/host"
+import type { AnchoredProps, ImgProps, Props, InputProps } from "./src/types/host"
 
 export { jsx, jsxs, Fragment } from "react/jsx-runtime"
 
@@ -16,7 +16,7 @@ export namespace JSX {
   interface IntrinsicElements {
     div: Props
     text: Props
-    img: Props
+    img: ImgProps
     svg: Props
     canvas: Props
     input: InputProps

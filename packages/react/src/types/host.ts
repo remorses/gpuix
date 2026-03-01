@@ -118,6 +118,13 @@ export interface InputProps extends Props {
   readOnly?: boolean
 }
 
+// Props for native <img> rendering.
+export interface ImgProps extends Props {
+  src?: string
+  objectFit?: "fill" | "contain" | "cover" | "scaleDown" | "none"
+  alt?: string
+}
+
 // Props for the <anchored> custom element.
 export interface AnchoredProps extends Props {
   x?: number

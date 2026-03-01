@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-01 19:07 UTC
+
+- Add native `<img>` custom element backed by `gpui::img(PathBuf)` with `src` and `objectFit` custom props and fallback rendering states for missing/failed sources
+- Register image factory in the custom element registry and expose `ImgProps` in React JSX runtime/dev-runtime type surfaces
+- Add new end-to-end `img.test.tsx` suite including screenshot regression that captures before/after PNGs when image `src` is set
+
 ## 2026-03-01 18:52 UTC
 
 - Add new `<anchored>` custom element with GPUI `anchored()` positioning props (`x`/`y`, `position`, `anchor`, `snapToWindow`, `snapMargin`) and optional deferred overlay rendering (`deferred`, `priority`)
