@@ -304,6 +304,50 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    /// Simulate a mouse down event at the given window coordinates.
+    /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
+    #[napi]
+    pub fn simulate_mouse_down(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+        let vcx_ptr = get_vcx_ptr()?;
+        let vcx = unsafe { &mut *vcx_ptr };
+
+        let mouse_button = match button.unwrap_or(0) {
+            1 => gpui::MouseButton::Middle,
+            2 => gpui::MouseButton::Right,
+            _ => gpui::MouseButton::Left,
+        };
+
+        vcx.simulate_mouse_down(
+            gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+            mouse_button,
+            gpui::Modifiers::default(),
+        );
+
+        Ok(())
+    }
+
+    /// Simulate a mouse up event at the given window coordinates.
+    /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
+    #[napi]
+    pub fn simulate_mouse_up(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+        let vcx_ptr = get_vcx_ptr()?;
+        let vcx = unsafe { &mut *vcx_ptr };
+
+        let mouse_button = match button.unwrap_or(0) {
+            1 => gpui::MouseButton::Middle,
+            2 => gpui::MouseButton::Right,
+            _ => gpui::MouseButton::Left,
+        };
+
+        vcx.simulate_mouse_up(
+            gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+            mouse_button,
+            gpui::Modifiers::default(),
+        );
+
+        Ok(())
+    }
+
     /// Simulate a scroll wheel event at the given position.
     /// delta_x and delta_y are in pixels (negative = scroll up/left).
     #[napi]

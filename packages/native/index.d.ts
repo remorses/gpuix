@@ -192,6 +192,16 @@ export declare class TestGpuixRenderer {
    */
   focusElement(id: number): void
   /**
+   * Simulate a mouse down event at the given window coordinates.
+   * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
+   */
+  simulateMouseDown(x: number, y: number, button?: number | undefined | null): void
+  /**
+   * Simulate a mouse up event at the given window coordinates.
+   * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
+   */
+  simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
+  /**
    * Simulate a scroll wheel event at the given position.
    * delta_x and delta_y are in pixels (negative = scroll up/left).
    */

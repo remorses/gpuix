@@ -5,10 +5,10 @@
 /// The native side runs the real GpuixView::render(), build_element(),
 /// apply_styles(), and event wiring — same code as production.
 ///
-/// Event simulation currently dispatches through the JS event registry
-/// (not GPUI hit testing). This tests React event handling. Full GPUI
-/// event simulation (coordinate-based clicks) is available via the native
-/// simulateClick/simulateKeystrokes methods.
+/// All event simulation goes through the native GPUI pipeline (coordinate-based
+/// hit testing, GPUI dispatch, emit_event_full). The nativeSimulate* methods
+/// flush the tree, dispatch through GPUI, drain events, and feed them into
+/// the React event registry via handleGpuixEvent.
 
 import React from "react"
 import type { ReactNode } from "react"
@@ -195,141 +195,6 @@ export class TestRenderer implements NativeRenderer {
     return this.native?.drainEvents() ?? []
   }
 
-  // ── Mock event simulation (dispatches through JS event registry) ──
-
-  /** Simulate an event as if GPUI fired it. Dispatches through the JS event registry.
-   *  Wrapped in flushSync so React state updates are applied synchronously. */
-  simulateEvent(payload: EventPayload): void {
-    flushSync(() => {
-      handleGpuixEvent(payload)
-    })
-  }
-
-  /** Simulate a click on an element by ID. */
-  simulateClick(elementId: number, options?: Partial<EventPayload>): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "click",
-      x: 0,
-      y: 0,
-      clickCount: 1,
-      ...options,
-    })
-  }
-
-  /** Simulate a key down event on an element. */
-  simulateKeyDown(
-    elementId: number,
-    key: string,
-    options?: Partial<EventPayload>
-  ): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "keyDown",
-      key,
-      isHeld: false,
-      ...options,
-    })
-  }
-
-  /** Simulate a key up event on an element. */
-  simulateKeyUp(
-    elementId: number,
-    key: string,
-    options?: Partial<EventPayload>
-  ): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "keyUp",
-      key,
-      ...options,
-    })
-  }
-
-  /** Simulate mouse enter on an element. */
-  simulateMouseEnter(elementId: number): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "mouseEnter",
-      hovered: true,
-    })
-  }
-
-  /** Simulate mouse leave on an element. */
-  simulateMouseLeave(elementId: number): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "mouseLeave",
-      hovered: false,
-    })
-  }
-
-  /** Simulate a mouse down event on an element. */
-  simulateMouseDown(
-    elementId: number,
-    options?: Partial<EventPayload>
-  ): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "mouseDown",
-      x: 0,
-      y: 0,
-      button: 0,
-      clickCount: 1,
-      ...options,
-    })
-  }
-
-  /** Simulate a mouse up event on an element. */
-  simulateMouseUp(
-    elementId: number,
-    options?: Partial<EventPayload>
-  ): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "mouseUp",
-      x: 0,
-      y: 0,
-      button: 0,
-      clickCount: 1,
-      ...options,
-    })
-  }
-
-  /** Simulate a mouse move event on an element. */
-  simulateMouseMove(
-    elementId: number,
-    options?: Partial<EventPayload>
-  ): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "mouseMove",
-      x: 0,
-      y: 0,
-      ...options,
-    })
-  }
-
-  /** Simulate a scroll event on an element. */
-  simulateScroll(
-    elementId: number,
-    deltaX: number,
-    deltaY: number,
-    options?: Partial<EventPayload>
-  ): void {
-    this.simulateEvent({
-      elementId,
-      eventType: "scroll",
-      x: 0,
-      y: 0,
-      deltaX,
-      deltaY,
-      precise: false,
-      touchPhase: "moved",
-      ...options,
-    })
-  }
-
   // ── Native end-to-end simulation ────────────────────────────────
   // These methods go through the full GPUI pipeline:
   //   native simulate → GPUI dispatch → hit test → event handler →
@@ -402,6 +267,30 @@ export class TestRenderer implements NativeRenderer {
     }
     this.native.flush()
     this.native.simulateMouseMove(x, y)
+    this.dispatchNativeEvents()
+  }
+
+  /** End-to-end: simulate mouse down through GPUI hit testing →
+   *  dispatch resulting events to React.
+   *  @param button - 0=left (default), 1=middle, 2=right */
+  nativeSimulateMouseDown(x: number, y: number, button?: number): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for nativeSimulateMouseDown")
+    }
+    this.native.flush()
+    this.native.simulateMouseDown(x, y, button ?? 0)
+    this.dispatchNativeEvents()
+  }
+
+  /** End-to-end: simulate mouse up through GPUI hit testing →
+   *  dispatch resulting events to React.
+   *  @param button - 0=left (default), 1=middle, 2=right */
+  nativeSimulateMouseUp(x: number, y: number, button?: number): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for nativeSimulateMouseUp")
+    }
+    this.native.flush()
+    this.native.simulateMouseUp(x, y, button ?? 0)
     this.dispatchNativeEvents()
   }
 
