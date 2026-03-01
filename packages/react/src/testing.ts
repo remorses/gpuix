@@ -1,0 +1,396 @@
+/// GPUIX TestRenderer — wraps the native TestGpuixRenderer (real GPUI pipeline)
+/// with a local element map for test inspection.
+///
+/// All mutations go to BOTH the native Rust RetainedTree and a local JS map.
+/// The native side runs the real GpuixView::render(), build_element(),
+/// apply_styles(), and event wiring — same code as production.
+///
+/// Event simulation currently dispatches through the JS event registry
+/// (not GPUI hit testing). This tests React event handling. Full GPUI
+/// event simulation (coordinate-based clicks) is available via the native
+/// simulateClick/simulateKeystrokes methods.
+
+import React from "react"
+import type { ReactNode } from "react"
+import type { EventPayload } from "@gpuix/native"
+import type { NativeRenderer } from "./types/host"
+import type { Root } from "./reconciler/renderer"
+import { reconciler } from "./reconciler/reconciler"
+import { setNativeRenderer, resetIdCounter } from "./reconciler/host-config"
+import { clearEventHandlers, handleGpuixEvent } from "./reconciler/event-registry"
+import type { OpaqueRoot } from "react-reconciler"
+import { ConcurrentRoot } from "react-reconciler/constants"
+
+// Try to load the native TestGpuixRenderer (only available when built with test-support).
+let NativeTestRenderer: (new () => import("@gpuix/native").TestGpuixRenderer) | null = null
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const native = require("@gpuix/native")
+  if (native.TestGpuixRenderer) {
+    NativeTestRenderer = native.TestGpuixRenderer
+  }
+} catch {
+  // Native module not available — tests will run with mock-only mode.
+}
+
+// Access reconciler.flushSync (name varies by version)
+const _r = reconciler as typeof reconciler & {
+  flushSyncFromReconciler?: typeof reconciler.flushSync
+}
+const flushSync = _r.flushSyncFromReconciler ?? _r.flushSync
+
+// ── Test element tree ────────────────────────────────────────────────
+
+export interface TestElement {
+  id: number
+  type: string
+  style: Record<string, unknown>
+  text: string | null
+  events: Set<string>
+  children: number[]
+  parentId: number | null
+}
+
+// ── TestRenderer ─────────────────────────────────────────────────────
+
+export class TestRenderer implements NativeRenderer {
+  /** Local element map for test inspection (findByType, getElement, etc.). */
+  elements = new Map<number, TestElement>()
+  rootId: number | null = null
+  commitCount = 0
+
+  /** Native TestGpuixRenderer — runs real GPUI pipeline. Null if not available. */
+  private native: import("@gpuix/native").TestGpuixRenderer | null = null
+
+  constructor() {
+    if (NativeTestRenderer) {
+      this.native = new NativeTestRenderer()
+    }
+  }
+
+  // ── NativeRenderer interface (mutations go to both native + local) ──
+
+  createElement(id: number, elementType: string): void {
+    this.native?.createElement(id, elementType)
+    this.elements.set(id, {
+      id,
+      type: elementType,
+      style: {},
+      text: null,
+      events: new Set(),
+      children: [],
+      parentId: null,
+    })
+  }
+
+  destroyElement(id: number): Array<number> {
+    this.native?.destroyElement(id)
+    const destroyed: number[] = []
+    const destroy = (eid: number) => {
+      const el = this.elements.get(eid)
+      if (!el) return
+      destroyed.push(eid)
+      for (const childId of el.children) {
+        destroy(childId)
+      }
+      this.elements.delete(eid)
+    }
+    destroy(id)
+    if (this.rootId === id) this.rootId = null
+    return destroyed
+  }
+
+  appendChild(parentId: number, childId: number): void {
+    this.native?.appendChild(parentId, childId)
+    const child = this.elements.get(childId)
+    if (child?.parentId != null) {
+      const oldParent = this.elements.get(child.parentId)
+      if (oldParent) {
+        oldParent.children = oldParent.children.filter((c) => c !== childId)
+      }
+    }
+    if (child) child.parentId = parentId
+    const parent = this.elements.get(parentId)
+    if (parent) parent.children.push(childId)
+  }
+
+  removeChild(parentId: number, childId: number): void {
+    this.native?.removeChild(parentId, childId)
+    const parent = this.elements.get(parentId)
+    if (parent) {
+      parent.children = parent.children.filter((c) => c !== childId)
+    }
+    const child = this.elements.get(childId)
+    if (child) child.parentId = null
+  }
+
+  insertBefore(parentId: number, childId: number, beforeId: number): void {
+    this.native?.insertBefore(parentId, childId, beforeId)
+    const child = this.elements.get(childId)
+    if (child?.parentId != null) {
+      const oldParent = this.elements.get(child.parentId)
+      if (oldParent) {
+        oldParent.children = oldParent.children.filter((c) => c !== childId)
+      }
+    }
+    if (child) child.parentId = parentId
+    const parent = this.elements.get(parentId)
+    if (parent) {
+      const idx = parent.children.indexOf(beforeId)
+      if (idx !== -1) {
+        parent.children.splice(idx, 0, childId)
+      } else {
+        parent.children.push(childId)
+      }
+    }
+  }
+
+  setStyle(id: number, styleJson: string): void {
+    this.native?.setStyle(id, styleJson)
+    const el = this.elements.get(id)
+    if (el) el.style = JSON.parse(styleJson)
+  }
+
+  setText(id: number, content: string): void {
+    this.native?.setText(id, content)
+    const el = this.elements.get(id)
+    if (el) el.text = content
+  }
+
+  setEventListener(id: number, eventType: string, hasHandler: boolean): void {
+    this.native?.setEventListener(id, eventType, hasHandler)
+    const el = this.elements.get(id)
+    if (!el) return
+    if (hasHandler) {
+      el.events.add(eventType)
+    } else {
+      el.events.delete(eventType)
+    }
+  }
+
+  setRoot(id: number): void {
+    this.native?.setRoot(id)
+    this.rootId = id
+  }
+
+  commitMutations(): void {
+    this.native?.commitMutations()
+    this.commitCount++
+  }
+
+  // ── GPUI pipeline methods ───────────────────────────────────────
+
+  /** Trigger the real GPUI rendering pipeline (GpuixView::render() →
+   *  build_element() → apply_styles() → layout). No-op if native not available. */
+  flush(): void {
+    this.native?.flush()
+  }
+
+  /** Drain events collected by the native GPUI event handlers.
+   *  Returns an empty array if native not available. */
+  drainEvents(): EventPayload[] {
+    return this.native?.drainEvents() ?? []
+  }
+
+  // ── Mock event simulation (dispatches through JS event registry) ──
+
+  /** Simulate an event as if GPUI fired it. Dispatches through the JS event registry.
+   *  Wrapped in flushSync so React state updates are applied synchronously. */
+  simulateEvent(payload: EventPayload): void {
+    flushSync(() => {
+      handleGpuixEvent(payload)
+    })
+  }
+
+  /** Simulate a click on an element by ID. */
+  simulateClick(elementId: number, options?: Partial<EventPayload>): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "click",
+      x: 0,
+      y: 0,
+      clickCount: 1,
+      ...options,
+    })
+  }
+
+  /** Simulate a key down event on an element. */
+  simulateKeyDown(
+    elementId: number,
+    key: string,
+    options?: Partial<EventPayload>
+  ): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "keyDown",
+      key,
+      isHeld: false,
+      ...options,
+    })
+  }
+
+  /** Simulate a key up event on an element. */
+  simulateKeyUp(
+    elementId: number,
+    key: string,
+    options?: Partial<EventPayload>
+  ): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "keyUp",
+      key,
+      ...options,
+    })
+  }
+
+  /** Simulate mouse enter on an element. */
+  simulateMouseEnter(elementId: number): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "mouseEnter",
+      hovered: true,
+    })
+  }
+
+  /** Simulate mouse leave on an element. */
+  simulateMouseLeave(elementId: number): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "mouseLeave",
+      hovered: false,
+    })
+  }
+
+  // ── Tree inspection (reads from local element map) ─────────────
+
+  /** Get the root element. */
+  getRoot(): TestElement | undefined {
+    return this.rootId != null ? this.elements.get(this.rootId) : undefined
+  }
+
+  /** Get an element by ID. */
+  getElement(id: number): TestElement | undefined {
+    return this.elements.get(id)
+  }
+
+  /** Find elements by type (e.g. "div", "text"). */
+  findByType(type: string): TestElement[] {
+    return [...this.elements.values()].filter((el) => el.type === type)
+  }
+
+  /** Find the first text element containing the given string. */
+  findByText(text: string): TestElement | undefined {
+    return [...this.elements.values()].find(
+      (el) => el.text != null && el.text.includes(text)
+    )
+  }
+
+  /** Get all text content in the tree (depth-first). */
+  getAllText(): string[] {
+    const texts: string[] = []
+    const walk = (id: number) => {
+      const el = this.elements.get(id)
+      if (!el) return
+      if (el.text != null) texts.push(el.text)
+      for (const childId of el.children) {
+        walk(childId)
+      }
+    }
+    if (this.rootId != null) walk(this.rootId)
+    return texts
+  }
+
+  /** Print the tree structure for debugging. Only includes non-empty fields. */
+  toJSON(): unknown {
+    const serialize = (id: number): Record<string, unknown> | null => {
+      const el = this.elements.get(id)
+      if (!el) return null
+      const result: Record<string, unknown> = {
+        type: el.type,
+        id: el.id,
+      }
+      if (el.text != null) result.text = el.text
+      if (Object.keys(el.style).length > 0) result.style = el.style
+      if (el.events.size > 0) result.events = [...el.events].sort()
+      if (el.children.length > 0)
+        result.children = el.children
+          .map(serialize)
+          .filter(Boolean)
+      return result
+    }
+    return this.rootId != null ? serialize(this.rootId) : null
+  }
+
+  /** Whether the native GPUI test renderer is available. */
+  get hasNative(): boolean {
+    return this.native != null
+  }
+}
+
+// ── Test root helper ─────────────────────────────────────────────────
+
+export interface TestRoot {
+  root: Root
+  renderer: TestRenderer
+  render: (node: ReactNode) => void
+  unmount: () => void
+}
+
+/**
+ * Create a test root for rendering React components.
+ * If built with test-support, mutations also go to the real GPUI pipeline.
+ * Returns the Root (for rendering), the TestRenderer (for inspection/events),
+ * and convenience methods.
+ */
+export function createTestRoot(): TestRoot {
+  // Reset ID counter so tests are deterministic
+  resetIdCounter()
+
+  const renderer = new TestRenderer()
+  setNativeRenderer(renderer)
+
+  const gpuixContainer = { renderer }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const container: OpaqueRoot = (reconciler.createContainer as any)(
+    gpuixContainer,
+    ConcurrentRoot,
+    null,
+    false,
+    null,
+    "",
+    console.error,
+    console.error,
+    console.error,
+    null
+  )
+
+  const render = (node: ReactNode) => {
+    // Wrap in flushSync so updates are applied synchronously for tests
+    flushSync(() => {
+      clearEventHandlers()
+      reconciler.updateContainer(
+        React.createElement(React.Fragment, null, node),
+        container,
+        null,
+        () => {}
+      )
+    })
+    // Trigger GPUI rendering pipeline if native is available.
+    renderer.flush()
+  }
+
+  const unmount = () => {
+    reconciler.updateContainer(null, container, null, () => {})
+    // @ts-expect-error types not up to date
+    reconciler.flushSyncWork?.()
+    clearEventHandlers()
+  }
+
+  return {
+    root: { render, unmount },
+    renderer,
+    render,
+    unmount,
+  }
+}

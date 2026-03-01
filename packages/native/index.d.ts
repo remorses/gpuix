@@ -5,11 +5,79 @@
 
 /** Event payload sent back to JS when a user interacts with an element. */
 export interface EventPayload {
+  /** Numeric element ID (matches the ID assigned in JS via createElement). */
   elementId: number
+  /**
+   * Event type string — matches the key used in EVENT_PROPS on the JS side.
+   * e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
+   */
   eventType: string
+  /** Mouse X position in window coordinates (pixels). */
   x?: number
+  /** Mouse Y position in window coordinates (pixels). */
   y?: number
+  /**
+   * Which mouse button: 0=left, 1=middle, 2=right.
+   * Populated for: mouseDown, mouseUp, click, mouseDownOutside, contextMenu.
+   */
+  button?: number
+  /**
+   * Number of consecutive clicks (1=single, 2=double, 3=triple).
+   * Populated for: mouseDown, mouseUp, click.
+   */
+  clickCount?: number
+  /**
+   * Whether this is a right-click (convenience for click events).
+   * true when button==2 or ClickEvent::is_right_click().
+   */
+  isRightClick?: boolean
+  /**
+   * Which mouse button is currently held during a mouseMove.
+   * Same encoding as `button`: 0=left, 1=middle, 2=right.
+   * Populated for: mouseMove.
+   */
+  pressedButton?: number
+  /**
+   * Key name, e.g. "a", "enter", "escape", "arrowDown", "f1".
+   * Populated for: keyDown, keyUp.
+   */
   key?: string
+  /**
+   * The character produced by the key press (e.g. "ß" for option-s).
+   * May differ from `key` when modifiers are active.
+   * Populated for: keyDown, keyUp.
+   */
+  keyChar?: string
+  /**
+   * Whether this is a key-repeat event (key held down).
+   * Populated for: keyDown.
+   */
+  isHeld?: boolean
+  /**
+   * Scroll delta on the X axis (pixels or lines, see `precise`).
+   * Populated for: scroll.
+   */
+  deltaX?: number
+  /**
+   * Scroll delta on the Y axis (pixels or lines, see `precise`).
+   * Populated for: scroll.
+   */
+  deltaY?: number
+  /**
+   * true = pixel-precise (trackpad), false = line-based (mouse wheel).
+   * Populated for: scroll.
+   */
+  precise?: boolean
+  /**
+   * Touch phase for scroll: "started", "moved", "ended".
+   * Populated for: scroll (trackpad gestures).
+   */
+  touchPhase?: string
+  /**
+   * true = mouse entered element, false = mouse left element.
+   * Populated for: mouseEnter, mouseLeave.
+   */
+  hovered?: boolean
   modifiers?: EventModifiers
 }
 export interface EventModifiers {
@@ -59,4 +127,76 @@ export declare class GpuixRenderer {
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
+}
+/**
+ * Headless GPUI test renderer. Uses the same GpuixView and rendering
+ * pipeline as production, but backed by gpui::TestPlatform (no GPU, no window).
+ *
+ * Usage from JS:
+ *   const r = new TestGpuixRenderer()
+ *   r.createElement(1, "div")
+ *   r.setRoot(1)
+ *   r.commitMutations()
+ *   r.flush()                  // triggers GpuixView::render()
+ *   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
+ *   const events = r.drainEvents()
+ */
+export declare class TestGpuixRenderer {
+  constructor()
+  createElement(id: number, elementType: string): void
+  /**
+   * Destroy an element and all descendants. Returns destroyed IDs
+   * so JS can clean up event handlers.
+   */
+  destroyElement(id: number): Array<number>
+  appendChild(parentId: number, childId: number): void
+  removeChild(parentId: number, childId: number): void
+  insertBefore(parentId: number, childId: number, beforeId: number): void
+  setStyle(id: number, styleJson: string): void
+  setText(id: number, content: string): void
+  setEventListener(id: number, eventType: string, hasHandler: boolean): void
+  /** Set the root element (called from appendChildToContainer). */
+  setRoot(id: number): void
+  /**
+   * Signal that a batch of mutations is complete.
+   * In tests, this is a no-op — flush() handles the actual re-render.
+   */
+  commitMutations(): void
+  /**
+   * Notify the view entity and run GPUI until parked.
+   * This triggers GpuixView::render() → build_element() → GPUI layout.
+   * Must be called after mutations and before simulating events (GPUI's
+   * hit testing requires elements to be laid out).
+   */
+  flush(): void
+  /**
+   * Simulate a click at the given window coordinates.
+   * Dispatches MouseDown + MouseUp through GPUI's input pipeline,
+   * which triggers the same event handlers as production.
+   * IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
+   */
+  simulateClick(x: number, y: number): void
+  /**
+   * Simulate key strokes through GPUI's input pipeline.
+   * Format: space-separated keys, e.g. "a", "enter", "cmd-shift-p".
+   * The focused element receives keyDown/keyUp events.
+   */
+  simulateKeystrokes(keystrokes: string): void
+  /** Simulate a mouse move to the given coordinates. */
+  simulateMouseMove(x: number, y: number): void
+  /**
+   * Return and clear all collected events since the last drain.
+   * Events are collected synchronously — no event loop queuing.
+   */
+  drainEvents(): Array<EventPayload>
+  /** Get all text content in the tree (depth-first order). */
+  getAllText(): Array<string>
+  /** Find element IDs matching the given type (e.g. "div", "text"). */
+  findByType(elementType: string): Array<number>
+  /** Check if an element has a specific event listener. */
+  hasEventListener(id: number, eventType: string): boolean
+  /** Get the text content of an element. */
+  getText(id: number): string | null
+  /** Get the full tree as JSON for snapshot testing. */
+  getTreeJson(): string
 }

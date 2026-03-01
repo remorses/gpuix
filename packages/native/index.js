@@ -310,6 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { GpuixRenderer } = nativeBinding
+const { GpuixRenderer, TestGpuixRenderer } = nativeBinding
 
 module.exports.GpuixRenderer = GpuixRenderer
+module.exports.TestGpuixRenderer = TestGpuixRenderer

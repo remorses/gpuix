@@ -20,18 +20,24 @@ use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::element_tree::{EventModifiers, EventPayload};
+use crate::element_tree::EventPayload;
 use crate::platform::NodePlatform;
 use crate::retained_tree::RetainedTree;
 use crate::style::{parse_color_hex, StyleDesc};
 
+/// Abstracted event callback — both production and test renderers use this.
+/// Production: wraps ThreadsafeFunction (async, queued on Node.js event loop).
+/// Tests: wraps Arc<Mutex<Vec<EventPayload>>> (synchronous collection).
+pub(crate) type EventCallback = Arc<dyn Fn(EventPayload) + Send + Sync>;
+
 /// Validate and convert a JS number (f64) to a u64 element ID.
 /// JS numbers are f64 — lossless for integers up to 2^53.
-fn to_element_id(id: f64) -> Result<u64> {
+pub(crate) fn to_element_id(id: f64) -> Result<u64> {
     if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > 9_007_199_254_740_991.0 {
         return Err(Error::from_reason(format!("Invalid element id: {}", id)));
     }
@@ -91,7 +97,13 @@ impl GpuixRenderer {
         });
 
         let tree = self.tree.clone();
-        let callback = self.event_callback.clone();
+        // Wrap ThreadsafeFunction in Arc so GpuixView uses the abstracted EventCallback.
+        let callback: Option<EventCallback> = self.event_callback.as_ref().map(|tsf| {
+            let tsf = tsf.clone();
+            Arc::new(move |payload: EventPayload| {
+                tsf.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
+            }) as EventCallback
+        });
 
         let app = gpui::Application::with_platform(platform);
         app.run(move |cx: &mut gpui::App| {
@@ -111,6 +123,8 @@ impl GpuixRenderer {
                         tree: tree.clone(),
                         event_callback: callback.clone(),
                         window_title: title,
+                        focus_handles: HashMap::new(),
+                        _focus_subscriptions: Vec::new(),
                     })
                 },
             )
@@ -268,26 +282,91 @@ impl GpuixRenderer {
 
 // ── GPUI View ────────────────────────────────────────────────────────
 
-struct GpuixView {
-    tree: Arc<Mutex<RetainedTree>>,
-    event_callback: Option<ThreadsafeFunction<EventPayload>>,
-    window_title: String,
+pub(crate) struct GpuixView {
+    pub(crate) tree: Arc<Mutex<RetainedTree>>,
+    pub(crate) event_callback: Option<EventCallback>,
+    pub(crate) window_title: String,
+    /// Persistent FocusHandles keyed by element ID.
+    /// Created lazily for elements with keyboard or focus/blur listeners.
+    /// Handles persist across renders so GPUI maintains focus state.
+    pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
+    /// Keep subscriptions alive — dropping them unsubscribes.
+    pub(crate) _focus_subscriptions: Vec<gpui::Subscription>,
+}
+
+impl GpuixView {
+    /// Sync focus handles with the current element tree.
+    /// Creates handles for new focusable elements, subscribes on_focus/on_blur,
+    /// and cleans up handles for destroyed elements.
+    fn sync_focus_handles(
+        &mut self,
+        tree: &RetainedTree,
+        callback: &Option<EventCallback>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        // Create handles for elements that need focus but don't have one yet.
+        for (&id, element) in &tree.elements {
+            let needs_focus = element.events.contains("keyDown")
+                || element.events.contains("keyUp")
+                || element.events.contains("focus")
+                || element.events.contains("blur");
+
+            if needs_focus && !self.focus_handles.contains_key(&id) {
+                let handle = cx.focus_handle();
+
+                // Subscribe to focus events if listeners exist.
+                if element.events.contains("focus") {
+                    let cb = callback.clone();
+                    self._focus_subscriptions.push(cx.on_focus(
+                        &handle,
+                        window,
+                        move |_this, _window, _cx| {
+                            emit_event_full(&cb, id, "focus", |_| {});
+                        },
+                    ));
+                }
+                if element.events.contains("blur") {
+                    let cb = callback.clone();
+                    self._focus_subscriptions.push(cx.on_blur(
+                        &handle,
+                        window,
+                        move |_this, _window, _cx| {
+                            emit_event_full(&cb, id, "blur", |_| {});
+                        },
+                    ));
+                }
+
+                self.focus_handles.insert(id, handle);
+            }
+        }
+
+        // Clean up handles for elements that no longer exist.
+        self.focus_handles
+            .retain(|id, _| tree.elements.contains_key(id));
+    }
 }
 
 impl gpui::Render for GpuixView {
     fn render(
         &mut self,
         window: &mut gpui::Window,
-        _cx: &mut gpui::Context<Self>,
+        cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
         use gpui::IntoElement;
 
         window.set_window_title(&self.window_title);
 
-        let tree = self.tree.lock().unwrap();
+        // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
+        let tree_arc = self.tree.clone();
+        let tree = tree_arc.lock().unwrap();
+        let callback = self.event_callback.clone();
+
+        // Sync focus handles before building elements.
+        self.sync_focus_handles(&tree, &callback, window, cx);
 
         match tree.root_id {
-            Some(root_id) => build_element(root_id, &tree, &self.event_callback),
+            Some(root_id) => build_element(root_id, &tree, &callback, &self.focus_handles),
             None => gpui::Empty.into_any_element(),
         }
     }
@@ -295,10 +374,11 @@ impl gpui::Render for GpuixView {
 
 // ── Element builders ─────────────────────────────────────────────────
 
-fn build_element(
+pub(crate) fn build_element(
     id: u64,
     tree: &RetainedTree,
-    event_callback: &Option<ThreadsafeFunction<EventPayload>>,
+    event_callback: &Option<EventCallback>,
+    focus_handles: &HashMap<u64, gpui::FocusHandle>,
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
 
@@ -307,16 +387,17 @@ fn build_element(
     };
 
     match element.element_type.as_str() {
-        "div" => build_div(element, tree, event_callback),
+        "div" => build_div(element, tree, event_callback, focus_handles),
         "text" => build_text(element),
         _ => gpui::Empty.into_any_element(),
     }
 }
 
-fn build_div(
+pub(crate) fn build_div(
     element: &crate::retained_tree::RetainedElement,
     tree: &RetainedTree,
-    event_callback: &Option<ThreadsafeFunction<EventPayload>>,
+    event_callback: &Option<EventCallback>,
+    focus_handles: &HashMap<u64, gpui::FocusHandle>,
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
@@ -327,31 +408,182 @@ fn build_div(
         el = apply_styles(el, style);
     }
 
-    // Wire up events
+    // If a FocusHandle was pre-created for this element (by sync_focus_handles),
+    // attach it via track_focus. This makes the element focusable — clicking it
+    // or tabbing to it gives it keyboard focus. The handle persists across renders
+    // because it's stored in GpuixView::focus_handles.
+    if let Some(handle) = focus_handles.get(&element.id) {
+        el = el.track_focus(handle);
+    }
+
+    // Wire up events.
+    // Some events (on_hover, on_click) require a stateful element (.id()),
+    // which we already set above. Others (on_mouse_down, on_key_down) work
+    // on any InteractiveElement.
     for event_type in &element.events {
         let id = element.id;
         let callback = event_callback.clone();
         match event_type.as_str() {
+            // ── Click ────────────────────────────────────────────
             "click" => {
                 el = el.on_click(move |click_event, _window, _cx| {
-                    emit_event(&callback, id, "click", Some(click_event.position()));
+                    emit_event_full(&callback, id, "click", |p| {
+                        let (x, y) = point_to_xy(click_event.position());
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.modifiers = Some(click_event.modifiers().into());
+                        p.click_count = Some(click_event.click_count() as u32);
+                        p.is_right_click = Some(click_event.is_right_click());
+                    });
                 });
             }
+
+            // ── Mouse down (all buttons) ─────────────────────────
             "mouseDown" => {
-                el = el.on_mouse_down(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
-                    emit_event(&callback, id, "mouseDown", Some(mouse_event.position));
-                });
+                // Wire all three buttons so JS gets right-click, middle-click, etc.
+                for &button in &[gpui::MouseButton::Left, gpui::MouseButton::Middle, gpui::MouseButton::Right] {
+                    let callback = callback.clone();
+                    el = el.on_mouse_down(button, move |mouse_event, _window, _cx| {
+                        emit_event_full(&callback, id, "mouseDown", |p| {
+                            let (x, y) = point_to_xy(mouse_event.position);
+                            p.x = Some(x);
+                            p.y = Some(y);
+                            p.button = Some(mouse_button_to_u32(mouse_event.button));
+                            p.click_count = Some(mouse_event.click_count as u32);
+                            p.modifiers = Some(mouse_event.modifiers.into());
+                        });
+                    });
+                }
             }
+
+            // ── Mouse up (all buttons) ───────────────────────────
             "mouseUp" => {
-                el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
-                    emit_event(&callback, id, "mouseUp", Some(mouse_event.position));
-                });
+                for &button in &[gpui::MouseButton::Left, gpui::MouseButton::Middle, gpui::MouseButton::Right] {
+                    let callback = callback.clone();
+                    el = el.on_mouse_up(button, move |mouse_event, _window, _cx| {
+                        emit_event_full(&callback, id, "mouseUp", |p| {
+                            let (x, y) = point_to_xy(mouse_event.position);
+                            p.x = Some(x);
+                            p.y = Some(y);
+                            p.button = Some(mouse_button_to_u32(mouse_event.button));
+                            p.click_count = Some(mouse_event.click_count as u32);
+                            p.modifiers = Some(mouse_event.modifiers.into());
+                        });
+                    });
+                }
             }
+
+            // ── Mouse move ───────────────────────────────────────
             "mouseMove" => {
                 el = el.on_mouse_move(move |mouse_event, _window, _cx| {
-                    emit_event(&callback, id, "mouseMove", Some(mouse_event.position));
+                    emit_event_full(&callback, id, "mouseMove", |p| {
+                        let (x, y) = point_to_xy(mouse_event.position);
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.modifiers = Some(mouse_event.modifiers.into());
+                        p.pressed_button = mouse_event.pressed_button.map(mouse_button_to_u32);
+                    });
                 });
             }
+
+            // ── Hover (mouseEnter + mouseLeave) ──────────────────
+            // GPUI's on_hover fires with true on enter, false on leave.
+            // We split into two distinct event types for the React side.
+            "mouseEnter" | "mouseLeave" => {
+                // Only wire once even if both mouseEnter and mouseLeave are registered.
+                // Check if we already wired on_hover via the other event.
+                let has_enter = element.events.contains("mouseEnter");
+                let has_leave = element.events.contains("mouseLeave");
+                // Wire on first encounter (mouseEnter sorts before mouseLeave).
+                if event_type.as_str() == "mouseEnter" || !has_enter {
+                    let callback_enter = if has_enter { event_callback.clone() } else { None };
+                    let callback_leave = if has_leave { event_callback.clone() } else { None };
+                    el = el.on_hover(move |&is_hovered, _window, _cx| {
+                        if is_hovered {
+                            emit_event_full(&callback_enter, id, "mouseEnter", |p| {
+                                p.hovered = Some(true);
+                            });
+                        } else {
+                            emit_event_full(&callback_leave, id, "mouseLeave", |p| {
+                                p.hovered = Some(false);
+                            });
+                        }
+                    });
+                }
+            }
+
+            // ── Mouse down outside ───────────────────────────────
+            // Fires when the user clicks OUTSIDE this element.
+            // Critical for "click outside to close" pattern (dropdowns, modals).
+            "mouseDownOutside" => {
+                el = el.on_mouse_down_out(move |mouse_event, _window, _cx| {
+                    emit_event_full(&callback, id, "mouseDownOutside", |p| {
+                        let (x, y) = point_to_xy(mouse_event.position);
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.button = Some(mouse_button_to_u32(mouse_event.button));
+                        p.modifiers = Some(mouse_event.modifiers.into());
+                    });
+                });
+            }
+
+            // ── Scroll wheel ─────────────────────────────────────
+            "scroll" => {
+                el = el.on_scroll_wheel(move |scroll_event, _window, _cx| {
+                    emit_event_full(&callback, id, "scroll", |p| {
+                        let (x, y) = point_to_xy(scroll_event.position);
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.modifiers = Some(scroll_event.modifiers.into());
+                        p.precise = Some(scroll_event.delta.precise());
+
+                        // Convert ScrollDelta to pixel values.
+                        // For Lines delta, we use a default line height of 20px.
+                        let line_height = gpui::px(20.0);
+                        let pixel_delta = scroll_event.delta.pixel_delta(line_height);
+                        p.delta_x = Some(f64::from(f32::from(pixel_delta.x)));
+                        p.delta_y = Some(f64::from(f32::from(pixel_delta.y)));
+
+                        p.touch_phase = Some(match scroll_event.touch_phase {
+                            gpui::TouchPhase::Started => "started".to_string(),
+                            gpui::TouchPhase::Moved => "moved".to_string(),
+                            gpui::TouchPhase::Ended => "ended".to_string(),
+                        });
+                    });
+                });
+            }
+
+            // ── Key down ─────────────────────────────────────────
+            // Requires .focusable() (set above). Element must be focused
+            // (clicked or tabbed to) for these to fire.
+            "keyDown" => {
+                el = el.on_key_down(move |key_event, _window, _cx| {
+                    emit_event_full(&callback, id, "keyDown", |p| {
+                        p.key = Some(key_event.keystroke.key.clone());
+                        p.key_char = key_event.keystroke.key_char.clone();
+                        p.is_held = Some(key_event.is_held);
+                        p.modifiers = Some(key_event.keystroke.modifiers.into());
+                    });
+                });
+            }
+
+            // ── Key up ───────────────────────────────────────────
+            "keyUp" => {
+                el = el.on_key_up(move |key_event, _window, _cx| {
+                    emit_event_full(&callback, id, "keyUp", |p| {
+                        p.key = Some(key_event.keystroke.key.clone());
+                        p.key_char = key_event.keystroke.key_char.clone();
+                        p.modifiers = Some(key_event.keystroke.modifiers.into());
+                    });
+                });
+            }
+
+            // ── Focus / Blur ─────────────────────────────────────
+            // Event emission is handled by FocusHandle subscriptions
+            // set up in GpuixView::sync_focus_handles(). The handle is
+            // attached to this element via .track_focus() above.
+            "focus" | "blur" => {}
+
             _ => {}
         }
     }
@@ -363,13 +595,13 @@ fn build_div(
 
     // Children
     for &child_id in &element.children {
-        el = el.child(build_element(child_id, tree, event_callback));
+        el = el.child(build_element(child_id, tree, event_callback, focus_handles));
     }
 
     el.into_any_element()
 }
 
-fn build_text(element: &crate::retained_tree::RetainedElement) -> gpui::AnyElement {
+pub(crate) fn build_text(element: &crate::retained_tree::RetainedElement) -> gpui::AnyElement {
     use gpui::prelude::*;
 
     let content = element.content.clone().unwrap_or_default();
@@ -390,7 +622,7 @@ fn build_text(element: &crate::retained_tree::RetainedElement) -> gpui::AnyEleme
 
 // ── Style application ────────────────────────────────────────────────
 
-fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
+pub(crate) fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
     match dim {
         crate::style::DimensionValue::Pixels(v) => el.w(gpui::px(*v as f32)),
         crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.w_full(),
@@ -399,7 +631,7 @@ fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E 
     }
 }
 
-fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
+pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
     match dim {
         crate::style::DimensionValue::Pixels(v) => el.h(gpui::px(*v as f32)),
         crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.h_full(),
@@ -408,7 +640,7 @@ fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E
     }
 }
 
-fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
+pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if style.display.as_deref() == Some("flex") {
         el = el.flex();
     }
@@ -546,24 +778,43 @@ fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
 
 // ── Event emission ───────────────────────────────────────────────────
 
-fn emit_event(
-    callback: &Option<ThreadsafeFunction<EventPayload>>,
-    element_id: u64,
-    event_type: &str,
-    position: Option<gpui::Point<gpui::Pixels>>,
-) {
-    if let Some(cb) = callback {
-        let payload = EventPayload {
-            element_id: element_id as f64,
-            event_type: event_type.to_string(),
-            x: position.map(|p| f64::from(f32::from(p.x))),
-            y: position.map(|p| f64::from(f32::from(p.y))),
-            key: None,
-            modifiers: Some(EventModifiers::default()),
-        };
-        cb.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
+/// Helper to convert a GPUI Point<Pixels> to (f64, f64).
+pub(crate) fn point_to_xy(p: gpui::Point<gpui::Pixels>) -> (f64, f64) {
+    (f64::from(f32::from(p.x)), f64::from(f32::from(p.y)))
+}
+
+/// Convert GPUI MouseButton to our u32 encoding: 0=left, 1=middle, 2=right.
+pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
+    match button {
+        gpui::MouseButton::Left => 0,
+        gpui::MouseButton::Middle => 1,
+        gpui::MouseButton::Right => 2,
+        gpui::MouseButton::Navigate(_) => 3,
     }
 }
+
+/// General-purpose event emitter. Builds a default EventPayload, lets the
+/// caller customize it via a closure, then sends it through the callback.
+/// Production: queues on Node.js event loop via ThreadsafeFunction.
+/// Tests: pushes to a synchronous Vec for drainEvents().
+pub(crate) fn emit_event_full(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    event_type: &str,
+    build: impl FnOnce(&mut EventPayload),
+) {
+    if let Some(cb) = callback {
+        let mut payload = EventPayload {
+            element_id: element_id as f64,
+            event_type: event_type.to_string(),
+            ..Default::default()
+        };
+        build(&mut payload);
+        cb(payload);
+    }
+}
+
+
 
 // ── Types ────────────────────────────────────────────────────────────
 

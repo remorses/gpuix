@@ -43,6 +43,10 @@ objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSThread"] }
 objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSRunningApplication", "NSWindow", "NSResponder"] }
 
+[features]
+default = ["test-support"]
+test-support = ["gpui/test-support"]
+
 [build-dependencies]
 napi-build = "2"
 
