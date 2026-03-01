@@ -4,3 +4,4 @@ dist/
 *.node
 .DS_Store
 opensrc
+tmp/
