@@ -2,54 +2,116 @@
 
 React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
+Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal/Vulkan — no Electron, no web views.
+
 ## Architecture
 
-GPUIX bridges React to GPUI using a **description-based renderer** that matches GPUI's immediate-mode architecture:
+GPUIX bridges React to GPUI using a **mutation-based protocol** over napi-rs FFI. React's reconciler sends individual DOM-like mutations (`createElement`, `appendChild`, `setStyle`, etc.) directly to Rust — no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  React (JavaScript)                                     │
-│                                                         │
-│  function App() {                                       │
-│    const [count, setCount] = useState(0)                │
-│    return (                                             │
-│      <div style={{ display: 'flex', gap: 8 }}>          │
-│        <text>Count: {count}</text>                      │
-│        <div onClick={() => setCount(c => c + 1)}>       │
-│          Click me                                       │
-│        </div>                                           │
-│      </div>                                             │
-│    )                                                    │
-│  }                                                      │
-└─────────────────────────────────────────────────────────┘
-                         ↓ JSON element tree
-┌─────────────────────────────────────────────────────────┐
-│  Rust (napi-rs)                                         │
-│                                                         │
-│  // Rebuild GPUI elements from description each frame   │
-│  fn build_element(desc: &ElementDesc) -> AnyElement     │
-└─────────────────────────────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────────────┐
-│  GPUI                                                   │
-│                                                         │
-│  GPU-accelerated rendering via Metal/Vulkan             │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  React (JavaScript)                                             │
+│                                                                 │
+│  function App() {                                               │
+│    const [count, setCount] = useState(0)                        │
+│    return (                                                     │
+│      <div style={{ display: 'flex', gap: 8 }}>                  │
+│        <div onClick={() => setCount(c => c + 1)}>               │
+│          Count: {count}                                         │
+│        </div>                                                   │
+│      </div>                                                     │
+│    )                                                            │
+│  }                                                              │
+└─────────────────────────────────────────────────────────────────┘
+                    │ napi FFI mutations
+                    │ createElement(1, "div")
+                    │ appendChild(0, 1)
+                    │ setStyle(1, "{...}")
+                    │ commitMutations()
+                    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Rust (napi-rs)                                                 │
+│                                                                 │
+│  RetainedTree ── stores elements, styles, event flags           │
+│       │                                                         │
+│       ▼  each GPUI frame                                        │
+│  GpuixView::render() → build_element() → GPUI elements         │
+└─────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  GPUI                                                           │
+│                                                                 │
+│  GPU-accelerated rendering via Metal (macOS) / Vulkan (Linux)   │
+│  Flexbox layout via Taffy                                       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Why This Works
 
-GPUI is an **immediate-mode** UI framework - it rebuilds the entire element tree every frame. This actually aligns perfectly with React's declarative model:
+GPUI is an **immediate-mode** UI framework — it rebuilds the entire element tree every frame. Instead of fighting this, GPUIX embraces it:
 
-1. React reconciler builds a virtual element tree
-2. Tree is serialized to JSON and sent to Rust via napi-rs
-3. Rust rebuilds GPUI elements from the description
-4. GPUI renders to GPU
+1. React reconciler detects a state change and calls napi mutations (`createElement`, `setStyle`, `appendChild`, etc.)
+2. Each mutation updates a **RetainedTree** on the Rust side — a HashMap of element nodes with styles, children, and event flags
+3. On each GPUI frame, `GpuixView::render()` walks the RetainedTree and calls `build_element()` to produce ephemeral GPUI elements
+4. GPUI lays them out (Taffy flexbox) and renders to the GPU
+5. Only **changed elements** cross the FFI boundary — React's reconciler diffs the virtual tree and sends minimal mutations
+
+This is the same protocol React uses for the DOM (`createElement`, `appendChild`, `removeChild`, `commitUpdate`), but targeting a GPU renderer instead of a browser.
+
+## Mutation API
+
+The FFI surface between JS and Rust is a set of direct napi calls — the `NativeRenderer` interface:
+
+```ts
+interface NativeRenderer {
+  createElement(id: number, elementType: string): void
+  destroyElement(id: number): Array<number>
+  appendChild(parentId: number, childId: number): void
+  removeChild(parentId: number, childId: number): void
+  insertBefore(parentId: number, childId: number, beforeId: number): void
+  setStyle(id: number, styleJson: string): void
+  setText(id: number, content: string): void
+  setEventListener(id: number, eventType: string, hasHandler: boolean): void
+  setRoot(id: number): void
+  commitMutations(): void
+}
+```
+
+Element IDs are plain numbers generated by an incrementing counter in JS. `commitMutations()` signals the end of a batch — Rust marks the view dirty so GPUI re-renders on the next frame.
+
+## Event Flow
+
+Events travel from GPUI back to React through a `ThreadsafeFunction` callback:
+
+```
+User clicks element id=3
+       │
+       ▼
+GPUI fires on_click on the element
+       │
+       ▼
+Rust closure calls emit_event_full(callback, 3, "click", {x, y, ...})
+       │
+       ▼
+ThreadsafeFunction queues EventPayload on Node.js event loop
+       │
+       ▼
+JS event registry: eventHandlers.get(3)?.get("click")?.(payload)
+       │
+       ▼
+React handler runs: onClick={() => setCount(c => c + 1)}
+       │
+       ▼
+State update triggers re-render → reconciler sends mutations back to Rust
+```
+
+Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)`. Rust only knows **whether** an element has a listener (via `setEventListener`), not the closure itself — the actual handler lives in JS.
 
 ## Packages
 
-- **`@gpuix/native`** - Rust/napi-rs bindings to GPUI
-- **`@gpuix/react`** - React reconciler and components
+- **`@gpuix/native`** — Rust/napi-rs bindings to GPUI. Contains `GpuixRenderer`, `RetainedTree`, `build_element()`, `apply_styles()`, and the event wiring.
+- **`@gpuix/react`** — React reconciler, event registry, and TypeScript types. Implements the `react-reconciler` host config using the mutation API.
 
 ## Building
 
@@ -82,47 +144,75 @@ npx tsx counter.tsx
 ## Usage
 
 ```tsx
-import { createRoot, flushSync, GpuixRenderer } from '@gpuix/react'
+import React, { useState } from 'react'
+import { createRoot, createRenderer, flushSync } from '@gpuix/react'
 
-// Create the native renderer
-const renderer = new GpuixRenderer((event) => {
-  // Handle events from GPUI
-  console.log('Event:', event)
+function App() {
+  const [count, setCount] = useState(0)
+  return (
+    <div style={{ display: 'flex', gap: 8, padding: 16 }}>
+      <div
+        style={{ backgroundColor: '#3b82f6', borderRadius: 8, padding: 12, cursor: 'pointer' }}
+        onClick={() => setCount(c => c + 1)}
+      >
+        <div style={{ color: '#ffffff' }}>Count: {count}</div>
+      </div>
+    </div>
+  )
+}
+
+// Create the native renderer with event callback
+const renderer = createRenderer((event) => {
+  console.log('Event:', event.elementId, event.eventType)
 })
 
-// Create React root
+// Initialize GPUI (non-blocking — returns immediately)
+renderer.init({ title: 'My App', width: 800, height: 600 })
+
+// Create React root and render
 const root = createRoot(renderer)
+flushSync(() => root.render(<App />))
 
-// Render your app
-flushSync(() => {
-  root.render(<App />)
-})
-
-// Start the GPUI event loop
-renderer.run()
+// Drive the frame loop
+function loop() {
+  renderer.tick()
+  setImmediate(loop)
+}
+loop()
 ```
 
 ## Supported Elements
 
-| Element | Description |
-|---------|-------------|
-| `div` | Container with flexbox layout |
-| `text` | Text content |
-| `img` | Images |
-| `svg` | Vector graphics |
-| `canvas` | Custom drawing |
+| Element  | Description              |
+|----------|--------------------------|
+| `div`    | Container with flexbox layout |
+| `text`   | Text content             |
+| `img`    | Images (planned)         |
+| `svg`    | Vector graphics (planned) |
+| `canvas` | Custom drawing (planned) |
 
 ## Supported Events
 
-- `onClick`, `onMouseDown`, `onMouseUp`
-- `onMouseEnter`, `onMouseLeave`, `onMouseMove`
-- `onKeyDown`, `onKeyUp`
-- `onFocus`, `onBlur`
-- `onScroll`
+| Event | Props | Payload fields |
+|-------|-------|----------------|
+| Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` |
+| Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
+| Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
+| Mouse enter | `onMouseEnter` | `hovered` |
+| Mouse leave | `onMouseLeave` | `hovered` |
+| Mouse move | `onMouseMove` | `x`, `y`, `pressedButton`, `modifiers` |
+| Click outside | `onMouseDownOutside` | `x`, `y`, `button`, `modifiers` |
+| Key down | `onKeyDown` | `key`, `keyChar`, `isHeld`, `modifiers` |
+| Key up | `onKeyUp` | `key`, `keyChar`, `modifiers` |
+| Focus | `onFocus` | — |
+| Blur | `onBlur` | — |
+| Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
+
+Keyboard and focus events require the element to be focusable (has `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` listeners). GPUI creates a `FocusHandle` automatically for these elements.
 
 ## Supported Styles
 
-Tailwind-like styling via the `style` prop:
+CSS-like styling via the `style` prop:
 
 ```tsx
 <div style={{
@@ -133,31 +223,64 @@ Tailwind-like styling via the `style` prop:
   backgroundColor: '#3b82f6',
   borderRadius: 8,
 }}>
-  <text style={{ color: '#ffffff', fontSize: 18 }}>
+  <div style={{ color: '#ffffff', fontSize: 18 }}>
     Hello GPUI!
-  </text>
+  </div>
 </div>
 ```
 
+**Layout:** `display`, `flexDirection`, `flexGrow`, `flexShrink`, `alignItems`, `justifyContent`, `gap`
+
+**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
+
+**Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`
+
+**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `overflow`, `borderRadius`, `borderWidth`, `borderColor`
+
+**Text:** `fontSize`, `fontWeight`
+
+## Testing
+
+GPUIX includes a **GPU-backed test renderer** (`TestGpuixRenderer`) that runs the full GPUI rendering pipeline — same `GpuixView`, `build_element()`, `apply_styles()`, and event handlers as production. Windows are positioned offscreen but fully rendered by Metal.
+
+```ts
+import { createTestRoot } from '@gpuix/react/testing'
+
+const { root, renderer } = createTestRoot()
+
+root.render(<MyComponent />)
+renderer.flush()  // triggers GpuixView::render() via Metal
+
+// Simulate events through GPUI's native input pipeline
+renderer.nativeSimulateClick(50, 50)
+renderer.nativeSimulateKeystrokes('enter')
+
+// Inspect results
+const events = renderer.drainNativeEvents()
+const screenshot = renderer.captureScreenshot('/tmp/test.png')
+const text = renderer.getAllText()
+```
+
+The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for deterministic scheduling. Event simulation goes through GPUI's coordinate-based hit testing and dispatch — not synthetic JS events.
+
 ## Status
 
-⚠️ **Work in Progress**
-
-- [x] React reconciler (based on opentui)
-- [x] Element tree serialization
-- [x] napi-rs bindings structure  
-- [x] Style mapping (CSS → GPUI)
-- [x] Event callback system
-- [x] GPUI element building (build_element, apply_styles)
-- [x] Event wiring (click, mouseDown, mouseUp, mouseMove)
-- [x] **Standalone build** - Pinned GPUI and macOS deps for compatibility
-- [ ] Focus management
-- [ ] Keyboard events
-- [ ] Text input
-
-### Current Blocker
-
-None currently. If native builds regress, check the GPUI pin and macOS `core-text`/`core-graphics` versions in `packages/native/Cargo.toml`.
+- [x] React reconciler with mutation-based protocol
+- [x] napi-rs FFI bindings (createElement, appendChild, setStyle, etc.)
+- [x] RetainedTree (Rust-side element storage)
+- [x] Style mapping (CSS properties → GPUI style methods)
+- [x] Mouse events (click, mouseDown, mouseUp, mouseMove, mouseEnter, mouseLeave)
+- [x] Click outside (`onMouseDownOutside`)
+- [x] Scroll wheel events with delta and touch phase
+- [x] Keyboard events (keyDown, keyUp) with focus management
+- [x] Focus/blur events with automatic FocusHandle creation
+- [x] GPU-backed test renderer with screenshot capture
+- [x] Standalone build (pinned GPUI + macOS deps)
+- [ ] Text input (GPUI has no built-in input element)
+- [ ] Image and SVG elements
+- [ ] Multiple windows
+- [ ] Hot reload
+- [ ] Animations
 
 ## Documentation
 

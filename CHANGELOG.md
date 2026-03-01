@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-01 17:15 UTC
+
+- Rewrite README to reflect current mutation-based architecture (was describing old JSON tree approach)
+- Replace "description-based renderer" language with "mutation-based protocol over napi-rs FFI"
+- Add architecture diagram showing individual napi calls (createElement, appendChild, setStyle, commitMutations)
+- Add Mutation API section documenting the full NativeRenderer interface
+- Add Event Flow section with pipeline diagram (GPUI → Rust closure → ThreadsafeFunction → JS event registry → React handler)
+- Add detailed events table with payload fields for each event type
+- Add Testing section covering TestGpuixRenderer (GPU-backed Metal tests, screenshot capture, native event simulation)
+- Update status checklist: mark keyboard events, focus/blur, scroll, click-outside, and test renderer as completed
+- Update usage example to use createRenderer() instead of raw GpuixRenderer constructor
+
 ## 2026-03-01 16:48 UTC
 
 - Center screenshot probe cards in the visual renderer tests so captured frames represent realistic composition instead of top-left anchored blocks
