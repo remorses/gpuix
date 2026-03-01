@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-03-01 12:50 UTC
+
+- Add plan for GPU-backed test renderer with screenshot support (`docs/visual-screenshot-plan.md`)
+- Plan uses GPUI's `VisualTestAppContext` + Metal rendering on macOS (Oracle-reviewed, original headless wgpu approach rejected due to `WgpuRenderer` being surface-bound)
+
 ## 2026-03-01 12:25 UTC
 
 - Add changelog requirement to AGENTS.md
