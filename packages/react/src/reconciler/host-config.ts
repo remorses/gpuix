@@ -191,6 +191,13 @@ export const hostConfig = {
   supportsPersistence: false,
   supportsHydration: false,
 
+  // NOTE: createInstance is called during React's RENDER phase, not the commit
+  // phase. In concurrent mode, React can abandon a render and retry — mutations
+  // from abandoned renders stay in the batch queue and get flushed with the next
+  // successful commit, potentially creating orphaned elements in Rust's retained
+  // tree. This is a pre-existing issue (pre-batching, calls went directly to
+  // native with the same orphan risk). Proper fix: defer element creation to
+  // commit phase callbacks.
   createInstance(
     type: ElementType,
     props: Props,
@@ -239,6 +246,9 @@ export const hostConfig = {
     return null
   },
 
+  // Batch flush point: commitMutations() sends all queued mutations to Rust
+  // in a single applyBatch() FFI call. This is the end of React's synchronous
+  // commit phase — all mutations from this render are flushed together.
   resetAfterCommit(_containerInfo: Container): void {
     getRenderer().commitMutations()
   },
