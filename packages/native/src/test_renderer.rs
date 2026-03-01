@@ -22,6 +22,7 @@ use napi_derive::napi;
 
 use gpui::AppContext as _;
 
+use crate::custom_elements::CustomElementRegistry;
 use crate::element_tree::EventPayload;
 use crate::renderer::{to_element_id, EventCallback, GpuixView};
 use crate::retained_tree::RetainedTree;
@@ -121,6 +122,7 @@ impl TestGpuixRenderer {
                     window_title: "GPUIX Test".to_string(),
                     focus_handles: HashMap::new(),
                     _focus_subscriptions: Vec::new(),
+                    custom_registry: CustomElementRegistry::with_defaults(),
                 })
             })
             .map_err(|e| Error::from_reason(format!("Failed to open test window: {}", e)))?;
@@ -224,6 +226,27 @@ impl TestGpuixRenderer {
         let id = to_element_id(id)?;
         self.tree.lock().unwrap().root_id = Some(id);
         Ok(())
+    }
+
+    /// Set a custom prop on an element (for non-div/text elements like input, editor, diff).
+    #[napi]
+    pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
+        let id = to_element_id(id)?;
+        let value: serde_json::Value = serde_json::from_str(&value_json).map_err(|e| {
+            Error::from_reason(format!("Failed to parse custom prop value: {}", e))
+        })?;
+        self.tree.lock().unwrap().set_custom_prop(id, key, value);
+        Ok(())
+    }
+
+    /// Get a custom prop value from an element.
+    #[napi]
+    pub fn get_custom_prop(&self, id: f64, key: String) -> Result<Option<String>> {
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        Ok(tree
+            .get_custom_prop(id, &key)
+            .map(|v| serde_json::to_string(v).unwrap_or_default()))
     }
 
     /// Signal that a batch of mutations is complete.

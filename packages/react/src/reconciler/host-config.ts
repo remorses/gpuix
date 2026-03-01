@@ -108,6 +108,62 @@ function sendStyle(id: number, props: Props): void {
   getRenderer().setStyle(id, JSON.stringify(props.style ?? {}))
 }
 
+// ── Custom prop forwarding ───────────────────────────────────────────
+
+// Props that are handled by the reconciler directly (not forwarded as custom props).
+const RESERVED_PROPS = new Set([
+  "style",
+  "className",
+  "children",
+  "key",
+  "ref",
+  "tabIndex",
+  "tabStop",
+  "autoFocus",
+])
+
+// Built-in element types that don't use custom props.
+const BUILT_IN_TYPES = new Set(["div", "text"])
+
+function isReservedProp(name: string): boolean {
+  return RESERVED_PROPS.has(name) || name in EVENT_PROPS
+}
+
+/** Send all custom props to Rust for non-built-in element types. */
+function syncCustomProps(id: number, type: string, props: Props): void {
+  if (BUILT_IN_TYPES.has(type)) return
+  const r = getRenderer()
+  for (const [key, value] of Object.entries(props)) {
+    if (isReservedProp(key)) continue
+    r.setCustomProp(id, key, JSON.stringify(value ?? null))
+  }
+}
+
+/** Diff and send changed custom props to Rust. */
+function diffCustomProps(
+  id: number,
+  type: string,
+  oldProps: Props,
+  newProps: Props
+): void {
+  if (BUILT_IN_TYPES.has(type)) return
+  const r = getRenderer()
+  // Updated or added props
+  for (const [key, value] of Object.entries(newProps)) {
+    if (isReservedProp(key)) continue
+    if (oldProps[key] !== value) {
+      r.setCustomProp(id, key, JSON.stringify(value ?? null))
+    }
+  }
+  // Removed props
+  for (const key of Object.keys(oldProps)) {
+    if (isReservedProp(key)) continue
+    if (!(key in newProps)) {
+      r.setCustomProp(id, key, JSON.stringify(null))
+    }
+  }
+}
+
 // ── Host config ──────────────────────────────────────────────────────
 
 export const hostConfig = {
@@ -126,6 +182,7 @@ export const hostConfig = {
     r.createElement(id, type)
     sendStyle(id, props)
     syncEventListeners(id, props)
+    syncCustomProps(id, type, props)
     return { id, type, props }
   },
 
@@ -232,6 +289,8 @@ export const hostConfig = {
     sendStyle(instance.id, newProps)
     // Event diff
     diffEventListeners(instance.id, oldProps, newProps)
+    // Custom prop diff (for non-div/text elements)
+    diffCustomProps(instance.id, instance.type, oldProps, newProps)
     instance.props = newProps
   },
 

@@ -19,6 +19,9 @@ pub struct RetainedElement {
     pub events: HashSet<String>,
     pub children: Vec<u64>,
     pub parent: Option<u64>,
+    /// Props for custom elements (input, editor, diff, etc.).
+    /// Keyed by prop name, values are JSON. Ignored for "div" and "text".
+    pub custom_props: HashMap<String, serde_json::Value>,
 }
 
 impl RetainedElement {
@@ -31,6 +34,7 @@ impl RetainedElement {
             events: HashSet::new(),
             children: Vec::new(),
             parent: None,
+            custom_props: HashMap::new(),
         }
     }
 }
@@ -138,5 +142,21 @@ impl RetainedTree {
                 element.events.remove(&event_type);
             }
         }
+    }
+
+    /// Set a custom prop on an element (for non-div/text elements).
+    pub fn set_custom_prop(&mut self, id: u64, key: String, value: serde_json::Value) {
+        if let Some(element) = self.elements.get_mut(&id) {
+            if value.is_null() {
+                element.custom_props.remove(&key);
+            } else {
+                element.custom_props.insert(key, value);
+            }
+        }
+    }
+
+    /// Read a custom prop value from an element.
+    pub fn get_custom_prop(&self, id: u64, key: &str) -> Option<&serde_json::Value> {
+        self.elements.get(&id)?.custom_props.get(key)
     }
 }

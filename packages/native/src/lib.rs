@@ -1,5 +1,6 @@
 #![deny(clippy::all)]
 
+mod custom_elements;
 mod element_tree;
 mod platform;
 mod renderer;

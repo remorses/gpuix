@@ -69,7 +69,7 @@ export interface StyleDesc {
 }
 
 // Element types supported by GPUIX
-export type ElementType = "div" | "text" | "img" | "svg" | "canvas"
+export type ElementType = "div" | "text" | "img" | "svg" | "canvas" | "input"
 
 // Props passed to elements
 export type Props = Record<string, unknown> & {
@@ -104,6 +104,13 @@ export type Props = Record<string, unknown> & {
   autoFocus?: boolean
 }
 
+// Props for the <input> custom element (controlled component).
+export interface InputProps extends Props {
+  value?: string
+  placeholder?: string
+  readOnly?: boolean
+}
+
 /// Interface for the renderer that receives mutations from the reconciler.
 /// Implemented by the real napi GpuixRenderer and by TestRenderer for tests.
 export interface NativeRenderer {
@@ -117,6 +124,7 @@ export interface NativeRenderer {
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   setRoot(id: number): void
   commitMutations(): void
+  setCustomProp(id: number, key: string, valueJson: string): void
 }
 
 // Container holds the renderer reference.

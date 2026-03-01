@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-01 18:35 UTC
+
+- Add polymorphic custom element trait infrastructure (`CustomElement`, `CustomElementFactory`, `CustomElementRegistry`)
+- Implement `<input>` as first custom element with value/placeholder/readOnly props and keyboard event handling
+- Add `custom_props` field to `RetainedElement` for storing non-style/non-event props on custom elements
+- Add `setCustomProp`/`getCustomProp` napi methods on both `GpuixRenderer` and `TestGpuixRenderer`
+- Add custom prop forwarding in React reconciler (`host-config.ts`) — automatically syncs non-reserved props for non-div/text elements
+- Add `InputProps` type and `input` to JSX IntrinsicElements
+- Add 6 end-to-end tests: input rendering, keyboard typing (controlled component), backspace, screenshot before/after, tree structure
+- Fix jsx-dev-runtime.js to export `jsxDEV` for React 19 compatibility with vitest (was breaking all tests)
+- All 27 tests pass (6 new input + 21 existing events)
+
 ## 2026-03-01 17:15 UTC
 
 - Rewrite README to reflect current mutation-based architecture (was describing old JSON tree approach)

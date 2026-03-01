@@ -176,6 +176,25 @@ export class TestRenderer implements NativeRenderer {
     this.rootId = id
   }
 
+  setCustomProp(id: number, key: string, valueJson: string): void {
+    this.native?.setCustomProp(id, key, valueJson)
+    // Also store in local element map for test inspection.
+    const el = this.elements.get(id)
+    if (el) {
+      try {
+        const value = JSON.parse(valueJson)
+        if (value === null) {
+          delete (el as any).customProps?.[key]
+        } else {
+          if (!(el as any).customProps) (el as any).customProps = {}
+          ;(el as any).customProps[key] = value
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }
+
   commitMutations(): void {
     this.native?.commitMutations()
     this.commitCount++

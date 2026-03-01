@@ -119,6 +119,13 @@ export declare class GpuixRenderer {
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   /** Set the root element (called from appendChildToContainer). */
   setRoot(id: number): void
+  /**
+   * Set a custom prop on an element (for non-div/text elements like input, editor, diff).
+   * Key is the prop name, value is JSON-encoded.
+   */
+  setCustomProp(id: number, key: string, valueJson: string): void
+  /** Get a custom prop value from an element. Returns JSON string or null. */
+  getCustomProp(id: number, key: string): string | null
   /** Signal that a batch of mutations is complete. Triggers re-render. */
   commitMutations(): void
   tick(): void
@@ -159,6 +166,10 @@ export declare class TestGpuixRenderer {
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   /** Set the root element (called from appendChildToContainer). */
   setRoot(id: number): void
+  /** Set a custom prop on an element (for non-div/text elements like input, editor, diff). */
+  setCustomProp(id: number, key: string, valueJson: string): void
+  /** Get a custom prop value from an element. */
+  getCustomProp(id: number, key: string): string | null
   /**
    * Signal that a batch of mutations is complete.
    * In tests, this is a no-op — flush() handles the actual re-render.

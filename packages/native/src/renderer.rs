@@ -25,6 +25,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::platform::NodePlatform;
 use crate::retained_tree::RetainedTree;
@@ -125,6 +126,7 @@ impl GpuixRenderer {
                         window_title: title,
                         focus_handles: HashMap::new(),
                         _focus_subscriptions: Vec::new(),
+                        custom_registry: CustomElementRegistry::with_defaults(),
                     })
                 },
             )
@@ -227,6 +229,29 @@ impl GpuixRenderer {
         Ok(())
     }
 
+    /// Set a custom prop on an element (for non-div/text elements like input, editor, diff).
+    /// Key is the prop name, value is JSON-encoded.
+    #[napi]
+    pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
+        let id = to_element_id(id)?;
+        let value: serde_json::Value = serde_json::from_str(&value_json).map_err(|e| {
+            Error::from_reason(format!("Failed to parse custom prop value: {}", e))
+        })?;
+        let mut tree = self.tree.lock().unwrap();
+        tree.set_custom_prop(id, key, value);
+        Ok(())
+    }
+
+    /// Get a custom prop value from an element. Returns JSON string or null.
+    #[napi]
+    pub fn get_custom_prop(&self, id: f64, key: String) -> Result<Option<String>> {
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        Ok(tree
+            .get_custom_prop(id, &key)
+            .map(|v| serde_json::to_string(v).unwrap_or_default()))
+    }
+
     /// Signal that a batch of mutations is complete. Triggers re-render.
     #[napi]
     pub fn commit_mutations(&self) -> Result<()> {
@@ -292,6 +317,9 @@ pub(crate) struct GpuixView {
     pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
     /// Keep subscriptions alive — dropping them unsubscribes.
     pub(crate) _focus_subscriptions: Vec<gpui::Subscription>,
+    /// Registry for custom element types (input, editor, diff, etc.).
+    /// Stores factories (one per type) and live instances (one per element ID).
+    pub(crate) custom_registry: CustomElementRegistry,
 }
 
 impl GpuixView {
@@ -365,8 +393,18 @@ impl gpui::Render for GpuixView {
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
 
+        // Build the element tree. custom_registry and focus_handles are different
+        // fields of self, so Rust allows borrowing both simultaneously.
         match tree.root_id {
-            Some(root_id) => build_element(root_id, &tree, &callback, &self.focus_handles),
+            Some(root_id) => build_element(
+                root_id,
+                &tree,
+                &callback,
+                &self.focus_handles,
+                &mut self.custom_registry,
+                window,
+                cx,
+            ),
             None => gpui::Empty.into_any_element(),
         }
     }
@@ -379,6 +417,9 @@ pub(crate) fn build_element(
     tree: &RetainedTree,
     event_callback: &Option<EventCallback>,
     focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    custom_registry: &mut CustomElementRegistry,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
 
@@ -387,9 +428,30 @@ pub(crate) fn build_element(
     };
 
     match element.element_type.as_str() {
-        "div" => build_div(element, tree, event_callback, focus_handles),
-        "text" => build_text(element, tree, event_callback, focus_handles),
-        _ => gpui::Empty.into_any_element(),
+        "div" => build_div(element, tree, event_callback, focus_handles, custom_registry, window, cx),
+        "text" => build_text(element, tree, event_callback, focus_handles, custom_registry, window, cx),
+
+        // Polymorphic dispatch for all custom elements.
+        custom_type => {
+            if let Some(instance) = custom_registry.get_or_create(id, custom_type) {
+                // Sync props from RetainedElement to the CustomElement instance.
+                for (key, value) in &element.custom_props {
+                    instance.set_prop(key, value.clone());
+                }
+
+                let ctx = CustomRenderContext {
+                    id,
+                    events: &element.events,
+                    event_callback,
+                    focus_handle: focus_handles.get(&id),
+                };
+
+                instance.render(&ctx, window, cx)
+            } else {
+                log::warn!("Unknown element type: {}", custom_type);
+                gpui::Empty.into_any_element()
+            }
+        }
     }
 }
 
@@ -398,6 +460,9 @@ pub(crate) fn build_div(
     tree: &RetainedTree,
     event_callback: &Option<EventCallback>,
     focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    custom_registry: &mut CustomElementRegistry,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
@@ -595,7 +660,15 @@ pub(crate) fn build_div(
 
     // Children
     for &child_id in &element.children {
-        el = el.child(build_element(child_id, tree, event_callback, focus_handles));
+        el = el.child(build_element(
+            child_id,
+            tree,
+            event_callback,
+            focus_handles,
+            custom_registry,
+            window,
+            cx,
+        ));
     }
 
     el.into_any_element()
@@ -606,6 +679,9 @@ pub(crate) fn build_text(
     tree: &RetainedTree,
     event_callback: &Option<EventCallback>,
     focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    custom_registry: &mut CustomElementRegistry,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
@@ -634,7 +710,15 @@ pub(crate) fn build_text(
     }
 
     for &child_id in &element.children {
-        el = el.child(build_element(child_id, tree, event_callback, focus_handles));
+        el = el.child(build_element(
+            child_id,
+            tree,
+            event_callback,
+            focus_handles,
+            custom_registry,
+            window,
+            cx,
+        ));
     }
 
     el.into_any_element()
