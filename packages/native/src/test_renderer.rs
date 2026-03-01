@@ -438,6 +438,14 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
+
+            // Force a window refresh before capture so render_to_image reads
+            // the most recent frame scene.
+            cx.update_window(window, |_, window, _app| {
+                window.refresh();
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
             cx.run_until_parked();
 
             // Capture via GPUI's render_to_image (Metal texture → RgbaImage).

@@ -47,7 +47,7 @@ gpui_macos = { git = "https://github.com/zed-industries/zed", rev = "14f37ed5024
 
 [features]
 default = ["test-support"]
-test-support = ["gpui/test-support"]
+test-support = ["gpui/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
 
 [build-dependencies]
 napi-build = "2"

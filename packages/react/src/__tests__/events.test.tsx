@@ -672,26 +672,35 @@ describeNative("events", () => {
   })
 
   describe("screenshot", () => {
-    it("should capture screenshot after interaction", () => {
-      function Counter() {
-        const [count, setCount] = useState(0)
+    const expectScreenshotsDiffer = (beforePath: string, afterPath: string) => {
+      expect(fs.existsSync(beforePath)).toBe(true)
+      expect(fs.existsSync(afterPath)).toBe(true)
+      expect(fs.statSync(beforePath).size).toBeGreaterThan(0)
+      expect(fs.statSync(afterPath).size).toBeGreaterThan(0)
+
+      const before = fs.readFileSync(beforePath)
+      const after = fs.readFileSync(afterPath)
+      expect(before.equals(after)).toBe(false)
+    }
+
+    it("should capture screenshot and reflect visual state changes", () => {
+      function ScreenshotProbe() {
+        const [active, setActive] = useState(false)
         return (
           <div
             style={{
               width: 200,
               height: 50,
-              backgroundColor: "#1e1e2e",
+              backgroundColor: active ? "#ffffff" : "#000000",
             }}
-            onClick={() => setCount((c) => c + 1)}
+            onClick={() => setActive((v) => !v)}
           >
-            <text style={{ color: "#cdd6f4", fontSize: 14 }}>
-              {`Count: ${count}`}
-            </text>
+            <text>{active ? "active" : "idle"}</text>
           </div>
         )
       }
 
-      testRoot.render(<Counter />)
+      testRoot.render(<ScreenshotProbe />)
 
       // Capture initial state
       const path0 = "/tmp/gpuix-counter-0.png"
@@ -707,12 +716,81 @@ describeNative("events", () => {
       testRoot.renderer.nativeSimulateClick(10, 10)
       testRoot.renderer.captureScreenshot(path1)
 
-      // Verify files exist and have non-zero size
-      expect(fs.existsSync(path0)).toBe(true)
-      expect(fs.existsSync(path1)).toBe(true)
-      expect(fs.statSync(path0).size).toBeGreaterThan(0)
-      expect(fs.statSync(path1).size).toBeGreaterThan(0)
+      expectScreenshotsDiffer(path0, path1)
     })
+
+    it("should capture screenshot changes for keyDown interactions", () => {
+      function KeydownScreenshotProbe() {
+        const [state, setState] = useState("idle")
+        return (
+          <div
+            style={{
+              width: 220,
+              height: 60,
+              backgroundColor: state === "idle" ? "#2f2f3f" : "#20513f",
+            }}
+            tabIndex={0}
+            onKeyDown={(e: EventPayload) => {
+              if (e.key === "enter") setState("enter")
+            }}
+          >
+            <text>{`State: ${state}`}</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<KeydownScreenshotProbe />)
+
+      const keyTarget = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.events.has("keyDown"))!
+
+      const path0 = "/tmp/gpuix-keydown-0.png"
+      const path1 = "/tmp/gpuix-keydown-1.png"
+
+      if (fs.existsSync(path0)) fs.unlinkSync(path0)
+      if (fs.existsSync(path1)) fs.unlinkSync(path1)
+
+      testRoot.renderer.captureScreenshot(path0)
+      testRoot.renderer.nativeSimulateKeyDown(keyTarget.id, "enter")
+      testRoot.renderer.captureScreenshot(path1)
+
+      expectScreenshotsDiffer(path0, path1)
+    })
+
+    it("should capture screenshot changes for hover interactions", () => {
+      function HoverScreenshotProbe() {
+        const [hovered, setHovered] = useState(false)
+        return (
+          <div
+            style={{
+              width: 220,
+              height: 60,
+              backgroundColor: hovered ? "#f9e2af" : "#313244",
+            }}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+          >
+            <text>{hovered ? "hovered" : "not-hovered"}</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<HoverScreenshotProbe />)
+
+      const path0 = "/tmp/gpuix-hover-0.png"
+      const path1 = "/tmp/gpuix-hover-1.png"
+
+      if (fs.existsSync(path0)) fs.unlinkSync(path0)
+      if (fs.existsSync(path1)) fs.unlinkSync(path1)
+
+      testRoot.renderer.captureScreenshot(path0)
+      testRoot.renderer.nativeSimulateMouseMove(15, 15)
+      testRoot.renderer.captureScreenshot(path1)
+
+      expectScreenshotsDiffer(path0, path1)
+    })
+
   })
 
   describe("tree structure", () => {

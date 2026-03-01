@@ -388,7 +388,7 @@ pub(crate) fn build_element(
 
     match element.element_type.as_str() {
         "div" => build_div(element, tree, event_callback, focus_handles),
-        "text" => build_text(element),
+        "text" => build_text(element, tree, event_callback, focus_handles),
         _ => gpui::Empty.into_any_element(),
     }
 }
@@ -601,23 +601,43 @@ pub(crate) fn build_div(
     el.into_any_element()
 }
 
-pub(crate) fn build_text(element: &crate::retained_tree::RetainedElement) -> gpui::AnyElement {
+pub(crate) fn build_text(
+    element: &crate::retained_tree::RetainedElement,
+    tree: &RetainedTree,
+    event_callback: &Option<EventCallback>,
+    focus_handles: &HashMap<u64, gpui::FocusHandle>,
+) -> gpui::AnyElement {
     use gpui::prelude::*;
 
-    let content = element.content.clone().unwrap_or_default();
+    // Fast path: plain text leaf without style.
+    if element.style.is_none() && element.children.is_empty() {
+        return element
+            .content
+            .clone()
+            .unwrap_or_default()
+            .into_any_element();
+    }
+
+    let mut el = gpui::div();
 
     if let Some(ref style) = element.style {
-        let mut el = gpui::div();
         if let Some(hex) = style.color.as_ref().and_then(|c| parse_color_hex(c)) {
             el = el.text_color(gpui::rgba(hex));
         }
         if let Some(size) = style.font_size {
             el = el.text_size(gpui::px(size as f32));
         }
-        el.child(content).into_any_element()
-    } else {
-        content.into_any_element()
     }
+
+    if let Some(ref content) = element.content {
+        el = el.child(content.clone());
+    }
+
+    for &child_id in &element.children {
+        el = el.child(build_element(child_id, tree, event_callback, focus_handles));
+    }
+
+    el.into_any_element()
 }
 
 // ── Style application ────────────────────────────────────────────────

@@ -129,17 +129,19 @@ export declare class GpuixRenderer {
   blur(): void
 }
 /**
- * Headless GPUI test renderer. Uses the same GpuixView and rendering
- * pipeline as production, but backed by gpui::TestPlatform (no GPU, no window).
+ * GPU-backed GPUI test renderer. Uses VisualTestAppContext (real Metal
+ * rendering on macOS) with TestDispatcher for deterministic scheduling.
+ * Same GpuixView and rendering pipeline as production.
  *
  * Usage from JS:
  *   const r = new TestGpuixRenderer()
  *   r.createElement(1, "div")
  *   r.setRoot(1)
  *   r.commitMutations()
- *   r.flush()                  // triggers GpuixView::render()
+ *   r.flush()                  // triggers GpuixView::render() via Metal
  *   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
  *   const events = r.drainEvents()
+ *   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
  */
 export declare class TestGpuixRenderer {
   constructor()
@@ -224,6 +226,11 @@ export declare class TestGpuixRenderer {
    * delta_x and delta_y are in pixels (negative = scroll up/left).
    */
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
+  /**
+   * Capture a screenshot of the current rendered state and save as PNG.
+   * macOS only — requires Metal GPU rendering via VisualTestAppContext.
+   */
+  captureScreenshot(path: string): void
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.
