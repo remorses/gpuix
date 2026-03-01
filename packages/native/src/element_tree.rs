@@ -44,7 +44,7 @@ pub struct EventPayload {
     pub pressed_button: Option<u32>,
 
     // ── Keyboard ─────────────────────────────────────────────────────
-    /// Key name, e.g. "a", "enter", "escape", "arrowDown", "f1".
+    /// Key name, e.g. "a", "enter", "escape", "down", "left", "f1".
     /// Populated for: keyDown, keyUp.
     pub key: Option<String>,
 

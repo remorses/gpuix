@@ -38,7 +38,7 @@ export interface EventPayload {
    */
   pressedButton?: number
   /**
-   * Key name, e.g. "a", "enter", "escape", "arrowDown", "f1".
+   * Key name, e.g. "a", "enter", "escape", "down", "left", "f1".
    * Populated for: keyDown, keyUp.
    */
   key?: string
@@ -184,6 +184,18 @@ export declare class TestGpuixRenderer {
   simulateKeystrokes(keystrokes: string): void
   /** Simulate a mouse move to the given coordinates. */
   simulateMouseMove(x: number, y: number): void
+  /**
+   * Focus an element by its numeric ID.
+   * The element must have a FocusHandle (created by sync_focus_handles when
+   * the element has keyDown, keyUp, focus, or blur listeners).
+   * Call flush() before this so the element tree and focus handles exist.
+   */
+  focusElement(id: number): void
+  /**
+   * Simulate a scroll wheel event at the given position.
+   * delta_x and delta_y are in pixels (negative = scroll up/left).
+   */
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.

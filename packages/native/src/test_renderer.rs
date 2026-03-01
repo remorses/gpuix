@@ -281,6 +281,55 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    /// Focus an element by its numeric ID.
+    /// The element must have a FocusHandle (created by sync_focus_handles when
+    /// the element has keyDown, keyUp, focus, or blur listeners).
+    /// Call flush() before this so the element tree and focus handles exist.
+    #[napi]
+    pub fn focus_element(&self, id: f64) -> Result<()> {
+        let id = to_element_id(id)?;
+        let vcx_ptr = get_vcx_ptr()?;
+        let view = get_view()?;
+        let vcx = unsafe { &mut *vcx_ptr };
+
+        vcx.update(|window, cx| {
+            view.update(cx, |view, _cx| {
+                if let Some(handle) = view.focus_handles.get(&id) {
+                    handle.focus(window, _cx);
+                }
+            });
+        });
+
+        vcx.run_until_parked();
+        Ok(())
+    }
+
+    /// Simulate a scroll wheel event at the given position.
+    /// delta_x and delta_y are in pixels (negative = scroll up/left).
+    #[napi]
+    pub fn simulate_scroll_wheel(
+        &self,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+    ) -> Result<()> {
+        let vcx_ptr = get_vcx_ptr()?;
+        let vcx = unsafe { &mut *vcx_ptr };
+
+        vcx.simulate_event(gpui::ScrollWheelEvent {
+            position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(
+                gpui::px(delta_x as f32),
+                gpui::px(delta_y as f32),
+            )),
+            modifiers: gpui::Modifiers::default(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+
+        Ok(())
+    }
+
     /// Return and clear all collected events since the last drain.
     /// Events are collected synchronously — no event loop queuing.
     #[napi]
