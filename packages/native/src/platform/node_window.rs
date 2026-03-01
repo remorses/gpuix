@@ -9,10 +9,10 @@
 
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, Decorations, DevicePixels, DispatchEventResult, GpuSpecs,
-    Modifiers, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler,
-    PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions, ResizeEdge, Scene,
-    Size, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
-    WindowControls, WindowDecorations, WindowParams, px,
+    Modifiers, MouseButton, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
+    PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
+    ResizeEdge, Scene, Size, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
+    WindowControlArea, WindowControls, WindowDecorations, WindowParams, px,
 };
 use gpui_wgpu::{WgpuContext, WgpuRenderer, WgpuSurfaceConfig};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -20,6 +20,46 @@ use crate::platform::node_display::NodeDisplay;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
+
+/// Tracks click position and timing for double/triple click detection.
+/// Port of gpui_web's ClickState — increments count when clicks arrive
+/// within 400ms and 5px of each other.
+pub(crate) struct ClickState {
+    last_position: Point<Pixels>,
+    last_time: Instant,
+    pub current_count: usize,
+}
+
+impl Default for ClickState {
+    fn default() -> Self {
+        Self {
+            last_position: Point::default(),
+            last_time: Instant::now(),
+            current_count: 0,
+        }
+    }
+}
+
+impl ClickState {
+    pub fn register_click(&mut self, position: Point<Pixels>) -> usize {
+        let now = Instant::now();
+        let elapsed_ms = now.duration_since(self.last_time).as_millis() as f64;
+        let distance = ((f32::from(position.x) - f32::from(self.last_position.x)).powi(2)
+            + (f32::from(position.y) - f32::from(self.last_position.y)).powi(2))
+        .sqrt();
+
+        if elapsed_ms < 400.0 && distance < 5.0 {
+            self.current_count += 1;
+        } else {
+            self.current_count = 1;
+        }
+
+        self.last_position = position;
+        self.last_time = now;
+        self.current_count
+    }
+}
 
 #[derive(Default)]
 pub struct NodeWindowCallbacks {
@@ -45,6 +85,8 @@ pub struct NodeWindowState {
     pub mouse_position: Cell<Point<Pixels>>,
     pub modifiers: Cell<Modifiers>,
     pub capslock: Cell<Capslock>,
+    pub pressed_button: Cell<Option<MouseButton>>,
+    pub click_state: RefCell<ClickState>,
     pub input_handler: RefCell<Option<PlatformInputHandler>>,
     pub is_active: Cell<bool>,
     pub is_hovered: Cell<bool>,
@@ -145,6 +187,8 @@ impl NodeWindow {
             mouse_position: Cell::new(Point::default()),
             modifiers: Cell::new(Modifiers::default()),
             capslock: Cell::new(Capslock::default()),
+            pressed_button: Cell::new(None),
+            click_state: RefCell::new(ClickState::default()),
             input_handler: RefCell::new(None),
             is_active: Cell::new(true),
             is_hovered: Cell::new(false),

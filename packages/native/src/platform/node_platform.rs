@@ -93,8 +93,9 @@ impl NodePlatform {
     /// the window isn't marked dirty. Set to true when render() received a new tree.
     pub fn tick(&self, force_render: bool) {
         use gpui::{
-            MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput,
-            RequestFrameOptions, px,
+            KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
+            MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PlatformInput,
+            RequestFrameOptions, ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
         };
         use std::sync::atomic::{AtomicU64, Ordering as AtOrd};
         use std::time::Duration;
@@ -155,7 +156,7 @@ impl NodePlatform {
 
                         let input = PlatformInput::MouseMove(MouseMoveEvent {
                             position: pos,
-                            pressed_button: None,
+                            pressed_button: state.pressed_button.get(),
                             modifiers: state.modifiers.get(),
                         });
                         let mut cbs = state.callbacks.borrow_mut();
@@ -174,23 +175,175 @@ impl NodePlatform {
                         let mods = state.modifiers.get();
 
                         let input = match btn_state {
-                            ElementState::Pressed => PlatformInput::MouseDown(MouseDownEvent {
-                                button: gpui_button,
-                                position: pos,
-                                modifiers: mods,
-                                click_count: 1,
-                                first_mouse: false,
-                            }),
-                            ElementState::Released => PlatformInput::MouseUp(MouseUpEvent {
-                                button: gpui_button,
-                                position: pos,
-                                modifiers: mods,
-                                click_count: 1,
-                            }),
+                            ElementState::Pressed => {
+                                state.pressed_button.set(Some(gpui_button));
+                                let click_count = state
+                                    .click_state
+                                    .borrow_mut()
+                                    .register_click(pos);
+                                PlatformInput::MouseDown(MouseDownEvent {
+                                    button: gpui_button,
+                                    position: pos,
+                                    modifiers: mods,
+                                    click_count,
+                                    first_mouse: false,
+                                })
+                            }
+                            ElementState::Released => {
+                                state.pressed_button.set(None);
+                                let click_count =
+                                    state.click_state.borrow().current_count;
+                                PlatformInput::MouseUp(MouseUpEvent {
+                                    button: gpui_button,
+                                    position: pos,
+                                    modifiers: mods,
+                                    click_count,
+                                })
+                            }
                         };
                         let mut cbs = state.callbacks.borrow_mut();
                         if let Some(ref mut cb) = cbs.input {
                             cb(input);
+                        }
+                    }
+                    WindowEvent::MouseWheel { delta, phase, .. } => {
+                        let pos = state.mouse_position.get();
+                        let mods = state.modifiers.get();
+
+                        let scroll_delta = match delta {
+                            winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                                ScrollDelta::Lines(point(-x, -y))
+                            }
+                            winit::event::MouseScrollDelta::PixelDelta(d) => {
+                                ScrollDelta::Pixels(point(
+                                    px(-(d.x as f32)),
+                                    px(-(d.y as f32)),
+                                ))
+                            }
+                        };
+
+                        let touch_phase = match phase {
+                            winit::event::TouchPhase::Started => TouchPhase::Started,
+                            winit::event::TouchPhase::Moved => TouchPhase::Moved,
+                            winit::event::TouchPhase::Ended => TouchPhase::Ended,
+                            winit::event::TouchPhase::Cancelled => TouchPhase::Ended,
+                        };
+
+                        let input =
+                            PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                position: pos,
+                                delta: scroll_delta,
+                                modifiers: mods,
+                                touch_phase,
+                            });
+                        let mut cbs = state.callbacks.borrow_mut();
+                        if let Some(ref mut cb) = cbs.input {
+                            cb(input);
+                        }
+                    }
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        // Modifiers are tracked via WindowEvent::ModifiersChanged
+                        // which winit sends before KeyboardInput. No need to emit
+                        // ModifiersChanged again here — that would cause duplicates.
+                        let mods = state.modifiers.get();
+
+                        // Toggle capslock state on CapsLock key press.
+                        if matches!(
+                            event.logical_key,
+                            winit::keyboard::Key::Named(
+                                winit::keyboard::NamedKey::CapsLock
+                            )
+                        ) && event.state == ElementState::Pressed
+                        {
+                            let current = state.capslock.get();
+                            state.capslock.set(gpui::Capslock {
+                                on: !current.on,
+                            });
+                        }
+
+                        let key = winit_key_to_gpui_key(&event.logical_key);
+
+                        if is_modifier_only_key(&key) {
+                            continue;
+                        }
+
+                        let key_char =
+                            compute_winit_key_char(&event, &key, &mods);
+
+                        let keystroke = Keystroke {
+                            modifiers: mods,
+                            key,
+                            key_char,
+                        };
+
+                        let input = match event.state {
+                            ElementState::Pressed => {
+                                PlatformInput::KeyDown(KeyDownEvent {
+                                    keystroke,
+                                    is_held: event.repeat,
+                                    prefer_character_input: false,
+                                })
+                            }
+                            ElementState::Released => {
+                                PlatformInput::KeyUp(KeyUpEvent { keystroke })
+                            }
+                        };
+
+                        let mut cbs = state.callbacks.borrow_mut();
+                        if let Some(ref mut cb) = cbs.input {
+                            cb(input);
+                        }
+                    }
+                    WindowEvent::ModifiersChanged(mods_event) => {
+                        let winit_state = mods_event.state();
+                        let modifiers = Modifiers {
+                            control: winit_state
+                                .contains(winit::keyboard::ModifiersState::CONTROL),
+                            alt: winit_state
+                                .contains(winit::keyboard::ModifiersState::ALT),
+                            shift: winit_state
+                                .contains(winit::keyboard::ModifiersState::SHIFT),
+                            platform: winit_state
+                                .contains(winit::keyboard::ModifiersState::SUPER),
+                            function: false,
+                        };
+                        state.modifiers.set(modifiers);
+
+                        let mut cbs = state.callbacks.borrow_mut();
+                        if let Some(ref mut cb) = cbs.input {
+                            cb(PlatformInput::ModifiersChanged(
+                                ModifiersChangedEvent {
+                                    modifiers,
+                                    capslock: state.capslock.get(),
+                                },
+                            ));
+                        }
+                    }
+                    WindowEvent::CursorLeft { .. } => {
+                        let pos = state.mouse_position.get();
+                        let mods = state.modifiers.get();
+
+                        state.is_hovered.set(false);
+
+                        let input =
+                            PlatformInput::MouseExited(MouseExitEvent {
+                                position: pos,
+                                pressed_button: state.pressed_button.get(),
+                                modifiers: mods,
+                            });
+                        let mut cbs = state.callbacks.borrow_mut();
+                        if let Some(ref mut cb) = cbs.input {
+                            cb(input);
+                        }
+                        if let Some(ref mut cb) = cbs.hover_status_change {
+                            cb(false);
+                        }
+                    }
+                    WindowEvent::CursorEntered { .. } => {
+                        state.is_hovered.set(true);
+                        let mut cbs = state.callbacks.borrow_mut();
+                        if let Some(ref mut cb) = cbs.hover_status_change {
+                            cb(true);
                         }
                     }
                     WindowEvent::Resized(new_size) => {
@@ -575,4 +728,102 @@ impl Platform for NodePlatform {
     fn on_keyboard_layout_change(&self, callback: Box<dyn FnMut()>) {
         self.callbacks.borrow_mut().keyboard_layout_change = Some(callback);
     }
+}
+
+/// Convert winit's Key enum to the GPUI key string.
+/// Equivalent of gpui_web's dom_key_to_gpui_key but for winit's types.
+fn winit_key_to_gpui_key(key: &winit::keyboard::Key) -> String {
+    use winit::keyboard::{Key, NamedKey};
+    match key {
+        Key::Named(named) => match named {
+            NamedKey::Enter => "enter".to_string(),
+            NamedKey::Backspace => "backspace".to_string(),
+            NamedKey::Tab => "tab".to_string(),
+            NamedKey::Escape => "escape".to_string(),
+            NamedKey::Delete => "delete".to_string(),
+            NamedKey::Space => "space".to_string(),
+            NamedKey::ArrowLeft => "left".to_string(),
+            NamedKey::ArrowRight => "right".to_string(),
+            NamedKey::ArrowUp => "up".to_string(),
+            NamedKey::ArrowDown => "down".to_string(),
+            NamedKey::Home => "home".to_string(),
+            NamedKey::End => "end".to_string(),
+            NamedKey::PageUp => "pageup".to_string(),
+            NamedKey::PageDown => "pagedown".to_string(),
+            NamedKey::Insert => "insert".to_string(),
+            NamedKey::Control => "control".to_string(),
+            NamedKey::Alt => "alt".to_string(),
+            NamedKey::Shift => "shift".to_string(),
+            NamedKey::Super | NamedKey::Meta => "platform".to_string(),
+            NamedKey::CapsLock => "capslock".to_string(),
+            NamedKey::F1 => "f1".to_string(),
+            NamedKey::F2 => "f2".to_string(),
+            NamedKey::F3 => "f3".to_string(),
+            NamedKey::F4 => "f4".to_string(),
+            NamedKey::F5 => "f5".to_string(),
+            NamedKey::F6 => "f6".to_string(),
+            NamedKey::F7 => "f7".to_string(),
+            NamedKey::F8 => "f8".to_string(),
+            NamedKey::F9 => "f9".to_string(),
+            NamedKey::F10 => "f10".to_string(),
+            NamedKey::F11 => "f11".to_string(),
+            NamedKey::F12 => "f12".to_string(),
+            NamedKey::F13 => "f13".to_string(),
+            NamedKey::F14 => "f14".to_string(),
+            NamedKey::F15 => "f15".to_string(),
+            NamedKey::F16 => "f16".to_string(),
+            NamedKey::F17 => "f17".to_string(),
+            NamedKey::F18 => "f18".to_string(),
+            NamedKey::F19 => "f19".to_string(),
+            NamedKey::F20 => "f20".to_string(),
+            _ => format!("{named:?}").to_lowercase(),
+        },
+        Key::Character(c) => c.to_lowercase(),
+        Key::Unidentified(_) => "unidentified".to_string(),
+        Key::Dead(_) => "dead".to_string(),
+    }
+}
+
+fn is_modifier_only_key(key: &str) -> bool {
+    matches!(key, "control" | "alt" | "shift" | "platform" | "capslock")
+}
+
+/// Compute the key_char for a winit KeyEvent.
+/// When platform/control modifiers are held, key_char is None (the key is
+/// being used as a keybinding, not character input).
+fn compute_winit_key_char(
+    event: &winit::event::KeyEvent,
+    gpui_key: &str,
+    modifiers: &gpui::Modifiers,
+) -> Option<String> {
+    if modifiers.platform || modifiers.control {
+        return None;
+    }
+
+    if is_modifier_only_key(gpui_key) {
+        return None;
+    }
+
+    if gpui_key == "space" {
+        return Some(" ".to_string());
+    }
+
+    // winit provides the text that would be produced by this key event.
+    // Only return printable characters — filter out control chars like
+    // "\r" (Enter), "\t" (Tab), "\x1b" (Escape) which winit includes
+    // in KeyEvent.text but are not text input.
+    if let Some(text) = &event.text {
+        let s = text.as_str();
+        let mut chars = s.chars();
+        if let (Some(ch), None) = (chars.next(), chars.next()) {
+            if !ch.is_control() {
+                return Some(s.to_string());
+            }
+        } else if s.len() > 1 && !s.chars().any(|c| c.is_control()) {
+            // Multi-char text (e.g. composed input) — only if all printable
+            return Some(s.to_string());
+        }
+    }
+
+    None
 }
