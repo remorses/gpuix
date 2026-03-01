@@ -230,6 +230,171 @@ describeNative("events", () => {
     })
   })
 
+  describe("dialog overlay", () => {
+    it("should open a tooltip-like dialog on button click and close on outside click", () => {
+      function DialogDemo() {
+        const [open, setOpen] = useState(false)
+
+        return (
+          <div style={{ width: 420, height: 260, position: "relative" }}>
+            <div
+              style={{
+                width: 120,
+                height: 32,
+                marginTop: 16,
+                marginLeft: 16,
+                borderRadius: 8,
+                backgroundColor: "#2f4ea3",
+              }}
+              onClick={() => setOpen(true)}
+            >
+              <text>Open dialog</text>
+            </div>
+
+            {open && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 140,
+                  left: 220,
+                  width: 170,
+                  height: 90,
+                  padding: 10,
+                  gap: 6,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: "#3d4660",
+                  backgroundColor: "#1c2233",
+                }}
+                onMouseDownOutside={() => setOpen(false)}
+              >
+                <text>Tooltip Dialog</text>
+                <text>Some content inside</text>
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      testRoot.render(<DialogDemo />)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Open dialog",
+        ]
+      `)
+
+      // Open via button click.
+      testRoot.renderer.nativeSimulateClick(20, 20)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Open dialog",
+          "Tooltip Dialog",
+          "Some content inside",
+        ]
+      `)
+
+      // Click inside dialog bounds (relies on absolute top/left placement).
+      testRoot.renderer.nativeSimulateClick(260, 170)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Open dialog",
+          "Tooltip Dialog",
+          "Some content inside",
+        ]
+      `)
+
+      // Click outside to close.
+      testRoot.renderer.nativeSimulateClick(40, 220)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Open dialog",
+        ]
+      `)
+    })
+
+    it("should capture screenshot changes when the dialog opens", () => {
+      function DialogScreenshotProbe() {
+        const [open, setOpen] = useState(false)
+
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              height: "100%",
+              backgroundColor: "#0f1320",
+            }}
+          >
+            <div
+              style={{
+                width: 460,
+                height: 260,
+                position: "relative",
+                borderRadius: 18,
+                backgroundColor: "#1a2238",
+                padding: 20,
+              }}
+              onClick={() => setOpen(true)}
+            >
+              <div
+                style={{
+                  width: 148,
+                  height: 36,
+                  borderRadius: 10,
+                  backgroundColor: "#3a5ecf",
+                }}
+              >
+                <text>Open dialog</text>
+              </div>
+
+              {open && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 84,
+                    left: 188,
+                    width: 236,
+                    height: 130,
+                    padding: 12,
+                    gap: 8,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: "#4a5678",
+                    backgroundColor: "#0d172b",
+                  }}
+                >
+                  <text>Tooltip Dialog</text>
+                  <text>Visual screenshot probe</text>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<DialogScreenshotProbe />)
+
+      const path0 = "/tmp/gpuix-dialog-0.png"
+      const path1 = "/tmp/gpuix-dialog-1.png"
+
+      if (fs.existsSync(path0)) fs.unlinkSync(path0)
+      if (fs.existsSync(path1)) fs.unlinkSync(path1)
+
+      testRoot.renderer.captureScreenshot(path0)
+      // Click centered card area to open dialog.
+      testRoot.renderer.nativeSimulateClick(640, 400)
+      testRoot.renderer.captureScreenshot(path1)
+
+      expect(fs.existsSync(path0)).toBe(true)
+      expect(fs.existsSync(path1)).toBe(true)
+      expect(fs.statSync(path0).size).toBeGreaterThan(0)
+      expect(fs.statSync(path1).size).toBeGreaterThan(0)
+      expect(fs.readFileSync(path0).equals(fs.readFileSync(path1))).toBe(false)
+    })
+  })
+
   describe("keyboard navigation", () => {
     it("should support arrow key navigation in a list", () => {
       function SelectableList() {

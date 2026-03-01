@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-01 18:47 UTC
+
+- Add dialog overlay screenshot regression test that captures before/after PNGs and asserts visual output changes when opening the dialog
+
+## 2026-03-01 18:45 UTC
+
+- Add absolute positioning support in native style mapping (`position`, `top`, `right`, `bottom`, `left`) so React styles place elements out of flow like dialogs/tooltips
+- Add end-to-end dialog overlay test: click button opens tooltip-like dialog content, inside click keeps it open, outside click closes via `onMouseDownOutside`
+
 ## 2026-03-01 18:35 UTC
 
 - Add polymorphic custom element trait infrastructure (`CustomElement`, `CustomElementFactory`, `CustomElementRegistry`)

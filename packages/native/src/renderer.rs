@@ -919,6 +919,23 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(ml) = style.margin_left {
         el = el.ml(gpui::px(ml as f32));
     }
+    match style.position.as_deref() {
+        Some("absolute") => el = el.absolute(),
+        Some("relative") => el = el.relative(),
+        _ => {}
+    }
+    if let Some(top) = style.top {
+        el = el.top(gpui::px(top as f32));
+    }
+    if let Some(right) = style.right {
+        el = el.right(gpui::px(right as f32));
+    }
+    if let Some(bottom) = style.bottom {
+        el = el.bottom(gpui::px(bottom as f32));
+    }
+    if let Some(left) = style.left {
+        el = el.left(gpui::px(left as f32));
+    }
     if let Some(ref bg) = style
         .background_color
         .as_ref()
