@@ -33,6 +33,9 @@ try {
   // Native module not available — tests will run with mock-only mode.
 }
 
+/** Whether the native TestGpuixRenderer is available (for conditional test registration). */
+export const hasNativeTestRenderer = NativeTestRenderer != null
+
 // Access reconciler.flushSync (name varies by version)
 const _r = reconciler as typeof reconciler & {
   flushSyncFromReconciler?: typeof reconciler.flushSync
@@ -259,6 +262,147 @@ export class TestRenderer implements NativeRenderer {
       eventType: "mouseLeave",
       hovered: false,
     })
+  }
+
+  /** Simulate a mouse down event on an element. */
+  simulateMouseDown(
+    elementId: number,
+    options?: Partial<EventPayload>
+  ): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "mouseDown",
+      x: 0,
+      y: 0,
+      button: 0,
+      clickCount: 1,
+      ...options,
+    })
+  }
+
+  /** Simulate a mouse up event on an element. */
+  simulateMouseUp(
+    elementId: number,
+    options?: Partial<EventPayload>
+  ): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "mouseUp",
+      x: 0,
+      y: 0,
+      button: 0,
+      clickCount: 1,
+      ...options,
+    })
+  }
+
+  /** Simulate a mouse move event on an element. */
+  simulateMouseMove(
+    elementId: number,
+    options?: Partial<EventPayload>
+  ): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "mouseMove",
+      x: 0,
+      y: 0,
+      ...options,
+    })
+  }
+
+  /** Simulate a scroll event on an element. */
+  simulateScroll(
+    elementId: number,
+    deltaX: number,
+    deltaY: number,
+    options?: Partial<EventPayload>
+  ): void {
+    this.simulateEvent({
+      elementId,
+      eventType: "scroll",
+      x: 0,
+      y: 0,
+      deltaX,
+      deltaY,
+      precise: false,
+      touchPhase: "moved",
+      ...options,
+    })
+  }
+
+  // ── Native end-to-end simulation ────────────────────────────────
+  // These methods go through the full GPUI pipeline:
+  //   native simulate → GPUI dispatch → hit test → event handler →
+  //   emit_event_full → drainEvents → handleGpuixEvent → React handler
+
+  /** Drain events from the native GPUI pipeline and feed them into the
+   *  React event registry, triggering state updates synchronously.
+   *  Loops until no more events are produced — handles re-entrant events
+   *  that may be generated during React state updates. */
+  dispatchNativeEvents(): void {
+    if (!this.native) return
+    for (;;) {
+      const events = this.native.drainEvents()
+      if (events.length === 0) break
+      for (const event of events) {
+        flushSync(() => {
+          handleGpuixEvent(event)
+        })
+      }
+    }
+  }
+
+  /** End-to-end: focus element → simulate keystrokes through GPUI →
+   *  dispatch resulting events to React. Requires native renderer.
+   *  @param elementId - element to focus (must have onKeyDown/onKeyUp)
+   *  @param keystrokes - space-separated keys, e.g. "a", "enter", "cmd-shift-p"
+   */
+  nativeSimulateKeystrokes(elementId: number, keystrokes: string): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for nativeSimulateKeystrokes")
+    }
+    this.native.flush()
+    this.native.focusElement(elementId)
+    this.native.simulateKeystrokes(keystrokes)
+    this.dispatchNativeEvents()
+  }
+
+  /** End-to-end: simulate a click through GPUI hit testing →
+   *  dispatch resulting events to React. */
+  nativeSimulateClick(x: number, y: number): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for nativeSimulateClick")
+    }
+    this.native.flush()
+    this.native.simulateClick(x, y)
+    this.dispatchNativeEvents()
+  }
+
+  /** End-to-end: simulate scroll wheel through GPUI →
+   *  dispatch resulting events to React. */
+  nativeSimulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number
+  ): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for nativeSimulateScrollWheel")
+    }
+    this.native.flush()
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY)
+    this.dispatchNativeEvents()
+  }
+
+  /** End-to-end: simulate mouse move through GPUI →
+   *  dispatch resulting events to React. */
+  nativeSimulateMouseMove(x: number, y: number): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for nativeSimulateMouseMove")
+    }
+    this.native.flush()
+    this.native.simulateMouseMove(x, y)
+    this.dispatchNativeEvents()
   }
 
   // ── Tree inspection (reads from local element map) ─────────────
