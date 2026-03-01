@@ -313,7 +313,7 @@ describeNative("events", () => {
   })
 
   describe("scroll events", () => {
-    it("should handle onScroll and receive delta values", () => {
+    it("should handle onScroll and receive exact delta values", () => {
       const receivedEvents: EventPayload[] = []
 
       function ScrollBox() {
@@ -335,7 +335,10 @@ describeNative("events", () => {
         (e) => e.eventType === "scroll"
       )
       expect(scrollEvent).toBeDefined()
-      expect(scrollEvent!.deltaY).toBeDefined()
+      expect(scrollEvent!.eventType).toBe("scroll")
+      expect(scrollEvent!.deltaX).toBe(0)
+      expect(scrollEvent!.deltaY).toBe(-50)
+      expect(scrollEvent!.touchPhase).toBe("moved")
     })
 
     it("should update state on scroll", () => {
@@ -367,37 +370,92 @@ describeNative("events", () => {
     })
   })
 
-  describe("keyUp events", () => {
-    it("should support keyDown through native pipeline", () => {
-      const events: string[] = []
-
-      function NativeKeyUpTracker() {
+  describe("keyDown and keyUp events", () => {
+    it("should handle onKeyDown via nativeSimulateKeyDown", () => {
+      function KeyTracker() {
+        const [lastKey, setLastKey] = useState("none")
         return (
           <div
             style={{ width: 200, height: 50 }}
             tabIndex={0}
-            onKeyDown={(e: EventPayload) =>
-              events.push(`down:${e.key}`)
-            }
-            onKeyUp={(e: EventPayload) =>
-              events.push(`up:${e.key}`)
-            }
+            onKeyDown={(e: EventPayload) => setLastKey(e.key ?? "unknown")}
+          >
+            <text>{`Key: ${lastKey}`}</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<KeyTracker />)
+      const div = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.events.has("keyDown"))!
+
+      testRoot.renderer.nativeSimulateKeyDown(div.id, "a")
+
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Key: a",
+        ]
+      `)
+    })
+
+    it("should handle onKeyUp via nativeSimulateKeyUp", () => {
+      const events: string[] = []
+
+      function KeyUpTracker() {
+        return (
+          <div
+            style={{ width: 200, height: 50 }}
+            tabIndex={0}
+            onKeyDown={(e: EventPayload) => events.push(`down:${e.key}`)}
+            onKeyUp={(e: EventPayload) => events.push(`up:${e.key}`)}
           />
         )
       }
 
-      testRoot.render(<NativeKeyUpTracker />)
+      testRoot.render(<KeyUpTracker />)
       const div = testRoot.renderer
         .findByType("div")
-        .find(
-          (d) => d.events.has("keyDown") && d.events.has("keyUp")
-        )!
+        .find((d) => d.events.has("keyDown") && d.events.has("keyUp"))!
 
-      testRoot.renderer.nativeSimulateKeystrokes(div.id, "enter")
+      testRoot.renderer.nativeSimulateKeyDown(div.id, "enter")
+      testRoot.renderer.nativeSimulateKeyUp(div.id, "enter")
 
-      // GPUI's simulate_keystrokes dispatches KeyDown through the
-      // focused element's on_key_down handler. keyDown is guaranteed.
       expect(events).toContain("down:enter")
+      expect(events).toContain("up:enter")
+    })
+
+    it("should handle onKeyUp state update", () => {
+      function KeyUpStateTracker() {
+        const [lastKey, setLastKey] = useState("none")
+        return (
+          <div
+            style={{ width: 200, height: 50 }}
+            tabIndex={0}
+            onKeyUp={(e: EventPayload) => setLastKey(e.key ?? "unknown")}
+          >
+            <text>{`Released: ${lastKey}`}</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<KeyUpStateTracker />)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Released: none",
+        ]
+      `)
+
+      const div = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.events.has("keyUp"))!
+
+      testRoot.renderer.nativeSimulateKeyUp(div.id, "a")
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Released: a",
+        ]
+      `)
     })
   })
 
@@ -437,10 +495,37 @@ describeNative("events", () => {
         ]
       `)
     })
+
+    it("should receive correct mouse button in mouseDown payload", () => {
+      const receivedEvents: EventPayload[] = []
+
+      function ButtonTracker() {
+        return (
+          <div
+            style={{ width: 200, height: 100 }}
+            onMouseDown={(e: EventPayload) => receivedEvents.push(e)}
+          />
+        )
+      }
+
+      testRoot.render(<ButtonTracker />)
+
+      // Left click (button=0)
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      expect(receivedEvents[0].button).toBe(0)
+
+      // Right click (button=2)
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 2)
+      expect(receivedEvents[1].button).toBe(2)
+
+      // Middle click (button=1)
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 1)
+      expect(receivedEvents[2].button).toBe(1)
+    })
   })
 
   describe("mouseMove events", () => {
-    it("should handle onMouseMove and receive position", () => {
+    it("should handle onMouseMove and receive exact position", () => {
       const receivedEvents: EventPayload[] = []
 
       function MoveTracker() {
@@ -453,13 +538,43 @@ describeNative("events", () => {
       }
 
       testRoot.render(<MoveTracker />)
-      testRoot.renderer.nativeSimulateMouseMove(50, 50)
+      testRoot.renderer.nativeSimulateMouseMove(50, 75)
 
       expect(receivedEvents.length).toBeGreaterThanOrEqual(1)
       const moveEvent = receivedEvents.find(
         (e) => e.eventType === "mouseMove"
       )
       expect(moveEvent).toBeDefined()
+      expect(moveEvent!.eventType).toBe("mouseMove")
+      expect(moveEvent!.x).toBe(50)
+      expect(moveEvent!.y).toBe(75)
+    })
+
+    it("should receive pressedButton during drag", () => {
+      const receivedEvents: EventPayload[] = []
+
+      function DragTracker() {
+        return (
+          <div
+            style={{ width: 300, height: 300 }}
+            onMouseMove={(e: EventPayload) => receivedEvents.push(e)}
+          />
+        )
+      }
+
+      testRoot.render(<DragTracker />)
+
+      // Move without button pressed
+      testRoot.renderer.nativeSimulateMouseMove(10, 10)
+      expect(receivedEvents.length).toBeGreaterThanOrEqual(1)
+      const noButtonEvent = receivedEvents.find((e) => e.eventType === "mouseMove")!
+      expect(noButtonEvent.pressedButton).toBeUndefined()
+
+      // Move with left button pressed (simulating drag)
+      receivedEvents.length = 0
+      testRoot.renderer.nativeSimulateMouseMove(50, 50, 0)
+      const dragEvent = receivedEvents.find((e) => e.eventType === "mouseMove")!
+      expect(dragEvent.pressedButton).toBe(0)
     })
 
     it("should update state on mouse move", () => {

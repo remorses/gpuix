@@ -30,7 +30,7 @@ try {
     NativeTestRenderer = native.TestGpuixRenderer
   }
 } catch {
-  // Native module not available — tests will run with mock-only mode.
+  // Native module not available — native simulation methods will throw.
 }
 
 /** Whether the native TestGpuixRenderer is available (for conditional test registration). */
@@ -232,6 +232,38 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
+  /** End-to-end: focus element → simulate a single key down through GPUI →
+   *  dispatch resulting events to React. Unlike nativeSimulateKeystrokes,
+   *  this dispatches ONLY a KeyDownEvent — no automatic KeyUpEvent follows.
+   *  @param elementId - element to focus (must have onKeyDown)
+   *  @param keystroke - modifier-key string, e.g. "a", "enter", "cmd-s"
+   *  @param isHeld - whether this is a key-repeat event (default: false)
+   */
+  nativeSimulateKeyDown(elementId: number, keystroke: string, isHeld?: boolean): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for nativeSimulateKeyDown")
+    }
+    this.native.flush()
+    this.native.focusElement(elementId)
+    this.native.simulateKeyDown(keystroke, isHeld)
+    this.dispatchNativeEvents()
+  }
+
+  /** End-to-end: focus element → simulate a single key up through GPUI →
+   *  dispatch resulting events to React. Pairs with nativeSimulateKeyDown.
+   *  @param elementId - element to focus (must have onKeyUp)
+   *  @param keystroke - modifier-key string, e.g. "a", "enter", "cmd-s"
+   */
+  nativeSimulateKeyUp(elementId: number, keystroke: string): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for nativeSimulateKeyUp")
+    }
+    this.native.flush()
+    this.native.focusElement(elementId)
+    this.native.simulateKeyUp(keystroke)
+    this.dispatchNativeEvents()
+  }
+
   /** End-to-end: simulate a click through GPUI hit testing →
    *  dispatch resulting events to React. */
   nativeSimulateClick(x: number, y: number): void {
@@ -260,13 +292,14 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** End-to-end: simulate mouse move through GPUI →
-   *  dispatch resulting events to React. */
-  nativeSimulateMouseMove(x: number, y: number): void {
+   *  dispatch resulting events to React.
+   *  @param pressedButton - optional button held during move (0=left, 1=middle, 2=right) for drag simulation */
+  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number): void {
     if (!this.native) {
       throw new Error("Native renderer not available for nativeSimulateMouseMove")
     }
     this.native.flush()
-    this.native.simulateMouseMove(x, y)
+    this.native.simulateMouseMove(x, y, pressedButton)
     this.dispatchNativeEvents()
   }
 

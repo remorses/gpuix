@@ -58,6 +58,15 @@ fn get_view() -> Result<gpui::Entity<GpuixView>> {
     })
 }
 
+/// Convert JS button number (0=left, 1=middle, 2=right) to GPUI MouseButton.
+fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
+    match button {
+        1 => gpui::MouseButton::Middle,
+        2 => gpui::MouseButton::Right,
+        _ => gpui::MouseButton::Left,
+    }
+}
+
 // ── TestGpuixRenderer ────────────────────────────────────────────────
 
 /// Headless GPUI test renderer. Uses the same GpuixView and rendering
@@ -266,15 +275,59 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
-    /// Simulate a mouse move to the given coordinates.
+    /// Simulate a single key down event through GPUI's input pipeline.
+    /// Format: modifier-key string, e.g. "a", "enter", "cmd-s".
+    /// Unlike simulate_keystrokes, this dispatches ONLY a KeyDownEvent —
+    /// no automatic KeyUpEvent follows. Use with simulate_key_up for
+    /// fine-grained key event testing.
     #[napi]
-    pub fn simulate_mouse_move(&self, x: f64, y: f64) -> Result<()> {
+    pub fn simulate_key_down(&self, keystroke: String, is_held: Option<bool>) -> Result<()> {
         let vcx_ptr = get_vcx_ptr()?;
         let vcx = unsafe { &mut *vcx_ptr };
 
+        let parsed = gpui::Keystroke::parse(&keystroke)
+            .map_err(|e| Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e)))?;
+
+        vcx.simulate_event(gpui::KeyDownEvent {
+            keystroke: parsed,
+            is_held: is_held.unwrap_or(false),
+            prefer_character_input: false,
+        });
+
+        Ok(())
+    }
+
+    /// Simulate a single key up event through GPUI's input pipeline.
+    /// Format: modifier-key string, e.g. "a", "enter", "cmd-s".
+    /// Pairs with simulate_key_down for fine-grained key event testing.
+    #[napi]
+    pub fn simulate_key_up(&self, keystroke: String) -> Result<()> {
+        let vcx_ptr = get_vcx_ptr()?;
+        let vcx = unsafe { &mut *vcx_ptr };
+
+        let parsed = gpui::Keystroke::parse(&keystroke)
+            .map_err(|e| Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e)))?;
+
+        vcx.simulate_event(gpui::KeyUpEvent {
+            keystroke: parsed,
+        });
+
+        Ok(())
+    }
+
+    /// Simulate a mouse move to the given coordinates.
+    /// pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
+    /// Used to simulate drag events.
+    #[napi]
+    pub fn simulate_mouse_move(&self, x: f64, y: f64, pressed_button: Option<u32>) -> Result<()> {
+        let vcx_ptr = get_vcx_ptr()?;
+        let vcx = unsafe { &mut *vcx_ptr };
+
+        let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
+
         vcx.simulate_mouse_move(
             gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-            None,
+            button,
             gpui::Modifiers::default(),
         );
 
@@ -311,15 +364,9 @@ impl TestGpuixRenderer {
         let vcx_ptr = get_vcx_ptr()?;
         let vcx = unsafe { &mut *vcx_ptr };
 
-        let mouse_button = match button.unwrap_or(0) {
-            1 => gpui::MouseButton::Middle,
-            2 => gpui::MouseButton::Right,
-            _ => gpui::MouseButton::Left,
-        };
-
         vcx.simulate_mouse_down(
             gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-            mouse_button,
+            u32_to_mouse_button(button.unwrap_or(0)),
             gpui::Modifiers::default(),
         );
 
@@ -333,15 +380,9 @@ impl TestGpuixRenderer {
         let vcx_ptr = get_vcx_ptr()?;
         let vcx = unsafe { &mut *vcx_ptr };
 
-        let mouse_button = match button.unwrap_or(0) {
-            1 => gpui::MouseButton::Middle,
-            2 => gpui::MouseButton::Right,
-            _ => gpui::MouseButton::Left,
-        };
-
         vcx.simulate_mouse_up(
             gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-            mouse_button,
+            u32_to_mouse_button(button.unwrap_or(0)),
             gpui::Modifiers::default(),
         );
 

@@ -182,8 +182,26 @@ export declare class TestGpuixRenderer {
    * The focused element receives keyDown/keyUp events.
    */
   simulateKeystrokes(keystrokes: string): void
-  /** Simulate a mouse move to the given coordinates. */
-  simulateMouseMove(x: number, y: number): void
+  /**
+   * Simulate a single key down event through GPUI's input pipeline.
+   * Format: modifier-key string, e.g. "a", "enter", "cmd-s".
+   * Unlike simulate_keystrokes, this dispatches ONLY a KeyDownEvent —
+   * no automatic KeyUpEvent follows. Use with simulate_key_up for
+   * fine-grained key event testing.
+   */
+  simulateKeyDown(keystroke: string, isHeld?: boolean | undefined | null): void
+  /**
+   * Simulate a single key up event through GPUI's input pipeline.
+   * Format: modifier-key string, e.g. "a", "enter", "cmd-s".
+   * Pairs with simulate_key_down for fine-grained key event testing.
+   */
+  simulateKeyUp(keystroke: string): void
+  /**
+   * Simulate a mouse move to the given coordinates.
+   * pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
+   * Used to simulate drag events.
+   */
+  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null): void
   /**
    * Focus an element by its numeric ID.
    * The element must have a FocusHandle (created by sync_focus_handles when
