@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-01 18:52 UTC
+
+- Add new `<anchored>` custom element with GPUI `anchored()` positioning props (`x`/`y`, `position`, `anchor`, `snapToWindow`, `snapMargin`) and optional deferred overlay rendering (`deferred`, `priority`)
+- Extend custom element render context to pass built child elements so custom primitives can wrap and position nested React content
+- Register `anchored` in the default custom element registry and expose it in React intrinsic types/component map
+- Add end-to-end anchored deferred dialog overlay test (open, inside click stays open, outside click closes)
+
 ## 2026-03-01 18:47 UTC
 
 - Add dialog overlay screenshot regression test that captures before/after PNGs and asserts visual output changes when opening the dialog

@@ -462,6 +462,23 @@ pub(crate) fn build_element(
 
         // Polymorphic dispatch for all custom elements.
         custom_type => {
+            let custom_children: Vec<gpui::AnyElement> = element
+                .children
+                .iter()
+                .filter(|child_id| tree.elements.contains_key(child_id))
+                .map(|child_id| {
+                    build_element(
+                        *child_id,
+                        tree,
+                        event_callback,
+                        focus_handles,
+                        custom_registry,
+                        window,
+                        cx,
+                    )
+                })
+                .collect();
+
             if let Some(instance) = custom_registry.get_or_create(id, custom_type) {
                 // Sync known props from RetainedElement to the CustomElement instance.
                 // Missing keys are explicitly reset with null to avoid stale state.
@@ -506,9 +523,10 @@ pub(crate) fn build_element(
                     event_callback,
                     focus_handle: focus_handles.get(&id),
                     style: element.style.as_ref(),
+                    children: custom_children,
                 };
 
-                instance.render(&ctx, window, cx)
+                instance.render(ctx, window, cx)
             } else {
                 log::warn!("Unknown element type: {}", custom_type);
                 gpui::Empty.into_any_element()

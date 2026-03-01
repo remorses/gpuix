@@ -8,6 +8,7 @@ export const gpuixComponents = {
   svg: "svg",
   canvas: "canvas",
   input: "input",
+  anchored: "anchored",
 } as const
 
 export type GpuixComponentType = keyof typeof gpuixComponents

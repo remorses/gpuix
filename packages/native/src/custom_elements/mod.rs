@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use crate::renderer::EventCallback;
 
 pub mod input;
+pub mod anchored;
 
 // ── Render context ───────────────────────────────────────────────────
 
@@ -31,6 +32,8 @@ pub struct CustomRenderContext<'a> {
     pub focus_handle: Option<&'a gpui::FocusHandle>,
     /// Style object from the retained element for layout and appearance.
     pub style: Option<&'a crate::style::StyleDesc>,
+    /// Built child elements from the retained tree for this custom node.
+    pub children: Vec<gpui::AnyElement>,
 }
 
 // ── Traits ───────────────────────────────────────────────────────────
@@ -47,7 +50,7 @@ pub trait CustomElement: 'static {
     /// Called on every GPUI render cycle (immediate mode).
     fn render(
         &mut self,
-        ctx: &CustomRenderContext,
+        ctx: CustomRenderContext,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement;
@@ -99,6 +102,7 @@ impl CustomElementRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(input::InputFactory));
+        registry.register(Box::new(anchored::AnchoredFactory));
         registry
     }
 

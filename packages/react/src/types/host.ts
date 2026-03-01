@@ -69,7 +69,14 @@ export interface StyleDesc {
 }
 
 // Element types supported by GPUIX
-export type ElementType = "div" | "text" | "img" | "svg" | "canvas" | "input"
+export type ElementType =
+  | "div"
+  | "text"
+  | "img"
+  | "svg"
+  | "canvas"
+  | "input"
+  | "anchored"
 
 // Props passed to elements
 export type Props = Record<string, unknown> & {
@@ -109,6 +116,18 @@ export interface InputProps extends Props {
   value?: string
   placeholder?: string
   readOnly?: boolean
+}
+
+// Props for the <anchored> custom element.
+export interface AnchoredProps extends Props {
+  x?: number
+  y?: number
+  position?: { x: number; y: number }
+  anchor?: "topLeft" | "topRight" | "bottomLeft" | "bottomRight"
+  snapToWindow?: boolean
+  snapMargin?: number
+  deferred?: boolean
+  priority?: number
 }
 
 /// Interface for the renderer that receives mutations from the reconciler.

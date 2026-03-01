@@ -40,7 +40,7 @@ pub struct InputElement {
 impl CustomElement for InputElement {
     fn render(
         &mut self,
-        ctx: &CustomRenderContext,
+        ctx: CustomRenderContext,
         _window: &mut gpui::Window,
         _cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {

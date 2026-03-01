@@ -393,6 +393,93 @@ describeNative("events", () => {
       expect(fs.statSync(path1).size).toBeGreaterThan(0)
       expect(fs.readFileSync(path0).equals(fs.readFileSync(path1))).toBe(false)
     })
+
+    it("should support anchored deferred dialog overlays", () => {
+      function AnchoredDialogDemo() {
+        const [open, setOpen] = useState(false)
+
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              height: "100%",
+              backgroundColor: "#0c1020",
+            }}
+          >
+            <div
+              style={{
+                width: 320,
+                height: 180,
+                borderRadius: 14,
+                backgroundColor: "#1e2b4f",
+                padding: 16,
+              }}
+              onClick={() => setOpen(true)}
+            >
+              <text>Open anchored</text>
+              {open && (
+                <anchored x={700} y={360} anchor="topLeft" deferred priority={1}>
+                  <div
+                    style={{
+                      width: 190,
+                      height: 96,
+                      padding: 10,
+                      gap: 6,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: "#4f5b82",
+                      backgroundColor: "#131c34",
+                    }}
+                    onMouseDownOutside={() => setOpen(false)}
+                  >
+                    <text>Anchored Dialog</text>
+                    <text>Deferred popover layer</text>
+                  </div>
+                </anchored>
+              )}
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<AnchoredDialogDemo />)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Open anchored",
+        ]
+      `)
+
+      // Click centered card to open anchored dialog.
+      testRoot.renderer.nativeSimulateClick(640, 400)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Open anchored",
+          "Anchored Dialog",
+          "Deferred popover layer",
+        ]
+      `)
+
+      // Click inside anchored dialog area (x/y from anchored props).
+      testRoot.renderer.nativeSimulateClick(730, 390)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Open anchored",
+          "Anchored Dialog",
+          "Deferred popover layer",
+        ]
+      `)
+
+      // Click outside should close via mouseDownOutside.
+      testRoot.renderer.nativeSimulateClick(80, 80)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Open anchored",
+        ]
+      `)
+    })
   })
 
   describe("keyboard navigation", () => {

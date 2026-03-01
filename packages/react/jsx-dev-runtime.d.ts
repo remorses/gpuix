@@ -1,6 +1,6 @@
 /// GPUIX JSX dev-runtime types — mirrors jsx-runtime.d.ts for development builds.
 
-import type { Props, InputProps } from "./src/types/host"
+import type { AnchoredProps, Props, InputProps } from "./src/types/host"
 
 export { jsx, jsxs, Fragment } from "react/jsx-dev-runtime"
 
@@ -19,5 +19,6 @@ export namespace JSX {
     svg: Props
     canvas: Props
     input: InputProps
+    anchored: AnchoredProps
   }
 }
