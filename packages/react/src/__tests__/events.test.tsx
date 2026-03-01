@@ -8,8 +8,7 @@
 /// All components use explicit sizes so GPUI can lay them out and hit-test
 /// against known coordinates.
 ///
-/// @ts-nocheck — JSX types resolve to DOM's HTMLDivElement, not GPUIX's Props.
-// @ts-nocheck
+/// JSX types now resolve to GPUIX's Props via jsxImportSource in tsconfig.
 
 import fs from "fs"
 import { describe, it, expect, beforeEach } from "vitest"

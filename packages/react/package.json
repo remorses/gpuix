@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.3.3",
     "@types/react": "^18.2.0",
     "@types/react-reconciler": "^0.28.0",
     "typescript": "^5.3.0",
