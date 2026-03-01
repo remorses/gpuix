@@ -7,7 +7,6 @@
 import { createContext } from "react"
 import type { ReactContext } from "react-reconciler"
 import { DefaultEventPriority } from "react-reconciler/constants"
-import type { GpuixRenderer } from "@gpuix/native"
 
 const NoEventPriority = 0
 import type {
@@ -15,6 +14,7 @@ import type {
   ElementType,
   HostContext,
   Instance,
+  NativeRenderer,
   Props,
   PublicInstance,
   TextInstance,
@@ -29,17 +29,21 @@ let elementIdCounter = 0
 let currentUpdatePriority = NoEventPriority
 
 // Renderer reference — set by createRoot before any reconciler work.
-let nativeRenderer: GpuixRenderer | null = null
+let nativeRenderer: NativeRenderer | null = null
 
-export function setNativeRenderer(renderer: GpuixRenderer): void {
+export function setNativeRenderer(renderer: NativeRenderer): void {
   nativeRenderer = renderer
+}
+
+export function resetIdCounter(): void {
+  elementIdCounter = 0
 }
 
 function nextId(): number {
   return ++elementIdCounter
 }
 
-function getRenderer(): GpuixRenderer {
+function getRenderer(): NativeRenderer {
   if (!nativeRenderer) throw new Error("GPUIX renderer not set. Call createRoot first.")
   return nativeRenderer
 }
@@ -47,16 +51,21 @@ function getRenderer(): GpuixRenderer {
 // ── Event wiring helpers ─────────────────────────────────────────────
 
 const EVENT_PROPS: Record<string, string> = {
+  // Mouse events
   onClick: "click",
   onMouseDown: "mouseDown",
   onMouseUp: "mouseUp",
   onMouseEnter: "mouseEnter",
   onMouseLeave: "mouseLeave",
   onMouseMove: "mouseMove",
+  onMouseDownOutside: "mouseDownOutside",
+  // Keyboard events (require focus — tabIndex or autoFocus)
   onKeyDown: "keyDown",
   onKeyUp: "keyUp",
+  // Focus events
   onFocus: "focus",
   onBlur: "blur",
+  // Scroll events
   onScroll: "scroll",
 }
 

@@ -1,4 +1,4 @@
-import type { EventPayload, GpuixRenderer } from "@gpuix/native"
+import type { EventPayload } from "@gpuix/native"
 
 export type DimensionValue = number | string
 
@@ -76,28 +76,53 @@ export type Props = Record<string, unknown> & {
   id?: string
   style?: StyleDesc
   children?: React.ReactNode
-  // Events
+
+  // ── Mouse events ───────────────────────────────────────────────
   onClick?: (event: EventPayload) => void
   onMouseDown?: (event: EventPayload) => void
   onMouseUp?: (event: EventPayload) => void
   onMouseEnter?: (event: EventPayload) => void
   onMouseLeave?: (event: EventPayload) => void
   onMouseMove?: (event: EventPayload) => void
+  /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
+  onMouseDownOutside?: (event: EventPayload) => void
+
+  // ── Keyboard events (require tabIndex or autoFocus for focus) ──
   onKeyDown?: (event: EventPayload) => void
   onKeyUp?: (event: EventPayload) => void
+
+  // ── Focus events ───────────────────────────────────────────────
   onFocus?: (event: EventPayload) => void
   onBlur?: (event: EventPayload) => void
+
+  // ── Scroll events ──────────────────────────────────────────────
   onScroll?: (event: EventPayload) => void
-  // Focus
+
+  // ── Focus props ────────────────────────────────────────────────
   tabIndex?: number
   tabStop?: boolean
   autoFocus?: boolean
 }
 
-// Container holds the native renderer reference.
-// Mutations go directly via napi calls, no JSON serialization.
+/// Interface for the renderer that receives mutations from the reconciler.
+/// Implemented by the real napi GpuixRenderer and by TestRenderer for tests.
+export interface NativeRenderer {
+  createElement(id: number, elementType: string): void
+  destroyElement(id: number): Array<number>
+  appendChild(parentId: number, childId: number): void
+  removeChild(parentId: number, childId: number): void
+  insertBefore(parentId: number, childId: number, beforeId: number): void
+  setStyle(id: number, styleJson: string): void
+  setText(id: number, content: string): void
+  setEventListener(id: number, eventType: string, hasHandler: boolean): void
+  setRoot(id: number): void
+  commitMutations(): void
+}
+
+// Container holds the renderer reference.
+// Mutations go directly via napi calls (or TestRenderer for tests).
 export interface Container {
-  renderer: GpuixRenderer
+  renderer: NativeRenderer
 }
 
 // Instance — minimal handle for React's reconciler.

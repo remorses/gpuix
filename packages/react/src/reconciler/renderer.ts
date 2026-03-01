@@ -4,7 +4,7 @@ import type { OpaqueRoot } from "react-reconciler"
 import { ConcurrentRoot } from "react-reconciler/constants"
 import { GpuixRenderer } from "@gpuix/native"
 import { reconciler } from "./reconciler"
-import type { Container } from "../types/host"
+import type { Container, NativeRenderer } from "../types/host"
 import { clearEventHandlers, handleGpuixEvent } from "./event-registry"
 import { setNativeRenderer } from "./host-config"
 
@@ -31,10 +31,10 @@ export interface Root {
 }
 
 /**
- * Create a root for rendering React to GPUI.
- * Mutations go directly to the native renderer via napi — no JSON tree.
+ * Create a root for rendering React to GPUI (or a TestRenderer for tests).
+ * Mutations go directly to the renderer — no JSON tree serialization.
  */
-export function createRoot(renderer: GpuixRenderer): Root {
+export function createRoot(renderer: NativeRenderer): Root {
   let container: OpaqueRoot | null = null
 
   // Wire up the renderer for host-config to use
