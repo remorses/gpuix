@@ -8,7 +8,6 @@
 /// This is a controlled component: React owns the text state via the `value`
 /// prop. The element renders whatever `value` is set to. Key events flow
 /// back to React which updates `value` — completing the round-trip.
-
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::renderer::emit_event_full;
 
@@ -74,6 +73,11 @@ impl CustomElement for InputElement {
             })
             .child(display_text);
 
+        // Apply React style prop on top of defaults for custom element parity.
+        if let Some(style) = ctx.style {
+            el = crate::renderer::apply_styles(el, style);
+        }
+
         // Attach focus handle if one exists (created by sync_focus_handles
         // when the element has keyDown/keyUp/focus/blur listeners).
         if let Some(handle) = ctx.focus_handle {
@@ -85,7 +89,7 @@ impl CustomElement for InputElement {
             let id = ctx.id;
             let callback = ctx.event_callback.clone();
             match event_type.as_str() {
-                "keyDown" => {
+                "keyDown" if !self.read_only => {
                     el = el.on_key_down(move |key_event, _window, _cx| {
                         emit_event_full(&callback, id, "keyDown", |p| {
                             p.key = Some(key_event.keystroke.key.clone());
@@ -95,7 +99,7 @@ impl CustomElement for InputElement {
                         });
                     });
                 }
-                "keyUp" => {
+                "keyUp" if !self.read_only => {
                     let callback = callback.clone();
                     el = el.on_key_up(move |key_event, _window, _cx| {
                         emit_event_full(&callback, id, "keyUp", |p| {
@@ -109,8 +113,7 @@ impl CustomElement for InputElement {
                     let callback = callback.clone();
                     el = el.on_click(move |click_event, _window, _cx| {
                         emit_event_full(&callback, id, "click", |p| {
-                            let (x, y) =
-                                crate::renderer::point_to_xy(click_event.position());
+                            let (x, y) = crate::renderer::point_to_xy(click_event.position());
                             p.x = Some(x);
                             p.y = Some(y);
                             p.modifiers = Some(click_event.modifiers().into());
@@ -133,6 +136,10 @@ impl CustomElement for InputElement {
             "readOnly" => self.read_only = value.as_bool().unwrap_or(false),
             _ => {}
         }
+    }
+
+    fn supported_props(&self) -> &[&str] {
+        &["value", "placeholder", "readOnly"]
     }
 
     fn get_prop(&self, key: &str) -> Option<serde_json::Value> {

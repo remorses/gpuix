@@ -10,7 +10,6 @@
 ///     "div"  → build_div()             (built-in)
 ///     "text" → build_text()            (built-in)
 ///     _      → registry.render(ctx)    (trait dispatch)
-
 use std::collections::{HashMap, HashSet};
 
 use crate::renderer::EventCallback;
@@ -30,6 +29,8 @@ pub struct CustomRenderContext<'a> {
     pub event_callback: &'a Option<EventCallback>,
     /// Pre-created FocusHandle for this element (if it has keyboard/focus listeners).
     pub focus_handle: Option<&'a gpui::FocusHandle>,
+    /// Style object from the retained element for layout and appearance.
+    pub style: Option<&'a crate::style::StyleDesc>,
 }
 
 // ── Traits ───────────────────────────────────────────────────────────
@@ -54,6 +55,9 @@ pub trait CustomElement: 'static {
     /// Set a named prop from JS. Values are JSON-encoded.
     /// Called when React updates props on this element.
     fn set_prop(&mut self, key: &str, value: serde_json::Value);
+
+    /// Return known prop keys. Missing keys are reset to null/default each frame.
+    fn supported_props(&self) -> &[&str];
 
     /// Read a prop value back to JS. Returns None if prop doesn't exist.
     fn get_prop(&self, key: &str) -> Option<serde_json::Value>;
@@ -122,6 +126,23 @@ impl CustomElementRegistry {
     pub fn destroy(&mut self, id: u64) {
         if let Some(mut el) = self.instances.remove(&id) {
             el.destroy();
+        }
+    }
+
+    /// Remove and destroy instances whose IDs no longer exist in the tree.
+    pub fn prune_missing<F>(&mut self, mut is_live: F)
+    where
+        F: FnMut(u64) -> bool,
+    {
+        let stale_ids: Vec<u64> = self
+            .instances
+            .keys()
+            .copied()
+            .filter(|id| !is_live(*id))
+            .collect();
+
+        for id in stale_ids {
+            self.destroy(id);
         }
     }
 

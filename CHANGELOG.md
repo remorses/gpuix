@@ -12,6 +12,15 @@
 - Fix jsx-dev-runtime.js to export `jsxDEV` for React 19 compatibility with vitest (was breaking all tests)
 - All 27 tests pass (6 new input + 21 existing events)
 
+## 2026-03-01 17:42 UTC
+
+- Fix custom element lifecycle cleanup by pruning/destroying stale trait instances when IDs disappear from the retained tree
+- Fix stale custom prop state by resetting missing known props to `null` each frame via `supported_props()` synchronization
+- Apply retained `style` to custom elements through `CustomRenderContext` so `<input style={...}>` affects native layout/hit-testing
+- Filter custom element event wiring to declared `supported_events()` only
+- Harden React custom prop forwarding with safe JSON serialization fallback (`null` on unsupported/circular values)
+- Expand input end-to-end coverage with `readOnly` removal regression test and style-based click hit-test assertion
+
 ## 2026-03-01 17:15 UTC
 
 - Rewrite README to reflect current mutation-based architecture (was describing old JSON tree approach)

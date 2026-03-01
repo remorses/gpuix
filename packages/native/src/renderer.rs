@@ -14,13 +14,12 @@
 ///     renderer.tick()
 ///     setImmediate(loop)
 ///   })
-
 use gpui::AppContext as _;
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -114,23 +113,24 @@ impl GpuixRenderer {
                 cx,
             );
 
-            let window_handle = cx.open_window(
-                gpui::WindowOptions {
-                    window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
-                    ..Default::default()
-                },
-                |_window, cx| {
-                    cx.new(|_| GpuixView {
-                        tree: tree.clone(),
-                        event_callback: callback.clone(),
-                        window_title: title,
-                        focus_handles: HashMap::new(),
-                        _focus_subscriptions: Vec::new(),
-                        custom_registry: CustomElementRegistry::with_defaults(),
-                    })
-                },
-            )
-            .unwrap();
+            let window_handle = cx
+                .open_window(
+                    gpui::WindowOptions {
+                        window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+                        ..Default::default()
+                    },
+                    |_window, cx| {
+                        cx.new(|_| GpuixView {
+                            tree: tree.clone(),
+                            event_callback: callback.clone(),
+                            window_title: title,
+                            focus_handles: HashMap::new(),
+                            _focus_subscriptions: Vec::new(),
+                            custom_registry: CustomElementRegistry::with_defaults(),
+                        })
+                    },
+                )
+                .unwrap();
 
             GPUI_WINDOW.with(|w| {
                 *w.borrow_mut() = Some(window_handle.into());
@@ -196,9 +196,8 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
         let id = to_element_id(id)?;
-        let style: StyleDesc = serde_json::from_str(&style_json).map_err(|e| {
-            Error::from_reason(format!("Failed to parse style: {}", e))
-        })?;
+        let style: StyleDesc = serde_json::from_str(&style_json)
+            .map_err(|e| Error::from_reason(format!("Failed to parse style: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
         tree.set_style(id, style);
         Ok(())
@@ -234,9 +233,8 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
         let id = to_element_id(id)?;
-        let value: serde_json::Value = serde_json::from_str(&value_json).map_err(|e| {
-            Error::from_reason(format!("Failed to parse custom prop value: {}", e))
-        })?;
+        let value: serde_json::Value = serde_json::from_str(&value_json)
+            .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
         tree.set_custom_prop(id, key, value);
         Ok(())
@@ -265,7 +263,9 @@ impl GpuixRenderer {
     pub fn tick(&self) -> Result<()> {
         let initialized = *self.initialized.lock().unwrap();
         if !initialized {
-            return Err(Error::from_reason("Renderer not initialized. Call init() first."));
+            return Err(Error::from_reason(
+                "Renderer not initialized. Call init() first.",
+            ));
         }
 
         let force_render = self.needs_redraw.swap(false, Ordering::SeqCst);
@@ -286,7 +286,10 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
-        Ok(WindowSize { width: 800.0, height: 600.0 })
+        Ok(WindowSize {
+            width: 800.0,
+            height: 600.0,
+        })
     }
 
     #[napi]
@@ -393,6 +396,10 @@ impl gpui::Render for GpuixView {
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
 
+        // Ensure custom element instances are destroyed when their IDs disappear.
+        self.custom_registry
+            .prune_missing(|id| tree.elements.contains_key(&id));
+
         // Build the element tree. custom_registry and focus_handles are different
         // fields of self, so Rust allows borrowing both simultaneously.
         match tree.root_id {
@@ -428,22 +435,77 @@ pub(crate) fn build_element(
     };
 
     match element.element_type.as_str() {
-        "div" => build_div(element, tree, event_callback, focus_handles, custom_registry, window, cx),
-        "text" => build_text(element, tree, event_callback, focus_handles, custom_registry, window, cx),
+        "div" => {
+            custom_registry.destroy(id);
+            build_div(
+                element,
+                tree,
+                event_callback,
+                focus_handles,
+                custom_registry,
+                window,
+                cx,
+            )
+        }
+        "text" => {
+            custom_registry.destroy(id);
+            build_text(
+                element,
+                tree,
+                event_callback,
+                focus_handles,
+                custom_registry,
+                window,
+                cx,
+            )
+        }
 
         // Polymorphic dispatch for all custom elements.
         custom_type => {
             if let Some(instance) = custom_registry.get_or_create(id, custom_type) {
-                // Sync props from RetainedElement to the CustomElement instance.
-                for (key, value) in &element.custom_props {
-                    instance.set_prop(key, value.clone());
+                // Sync known props from RetainedElement to the CustomElement instance.
+                // Missing keys are explicitly reset with null to avoid stale state.
+                let supported_props: Vec<String> = instance
+                    .supported_props()
+                    .iter()
+                    .map(|key| (*key).to_string())
+                    .collect();
+
+                for key in &supported_props {
+                    let value = element
+                        .custom_props
+                        .get(key)
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    instance.set_prop(key, value);
                 }
+
+                // Also pass through unknown props for forward compatibility.
+                for (key, value) in &element.custom_props {
+                    if !supported_props.iter().any(|known| known == key) {
+                        instance.set_prop(key, value.clone());
+                    }
+                }
+
+                // Only pass events the custom element declares support for.
+                let supported_events: Vec<String> = instance
+                    .supported_events()
+                    .iter()
+                    .map(|event| (*event).to_string())
+                    .collect();
+                let filtered_events: HashSet<String> = element
+                    .events
+                    .iter()
+                    .filter(|event| supported_events.iter().any(|supported| supported == *event))
+                    .cloned()
+                    .collect();
 
                 let ctx = CustomRenderContext {
                     id,
-                    events: &element.events,
+                    events: &filtered_events,
                     event_callback,
                     focus_handle: focus_handles.get(&id),
+                    style: element.style.as_ref(),
                 };
 
                 instance.render(&ctx, window, cx)
@@ -506,7 +568,11 @@ pub(crate) fn build_div(
             // ── Mouse down (all buttons) ─────────────────────────
             "mouseDown" => {
                 // Wire all three buttons so JS gets right-click, middle-click, etc.
-                for &button in &[gpui::MouseButton::Left, gpui::MouseButton::Middle, gpui::MouseButton::Right] {
+                for &button in &[
+                    gpui::MouseButton::Left,
+                    gpui::MouseButton::Middle,
+                    gpui::MouseButton::Right,
+                ] {
                     let callback = callback.clone();
                     el = el.on_mouse_down(button, move |mouse_event, _window, _cx| {
                         emit_event_full(&callback, id, "mouseDown", |p| {
@@ -523,7 +589,11 @@ pub(crate) fn build_div(
 
             // ── Mouse up (all buttons) ───────────────────────────
             "mouseUp" => {
-                for &button in &[gpui::MouseButton::Left, gpui::MouseButton::Middle, gpui::MouseButton::Right] {
+                for &button in &[
+                    gpui::MouseButton::Left,
+                    gpui::MouseButton::Middle,
+                    gpui::MouseButton::Right,
+                ] {
                     let callback = callback.clone();
                     el = el.on_mouse_up(button, move |mouse_event, _window, _cx| {
                         emit_event_full(&callback, id, "mouseUp", |p| {
@@ -561,8 +631,16 @@ pub(crate) fn build_div(
                 let has_leave = element.events.contains("mouseLeave");
                 // Wire on first encounter (mouseEnter sorts before mouseLeave).
                 if event_type.as_str() == "mouseEnter" || !has_enter {
-                    let callback_enter = if has_enter { event_callback.clone() } else { None };
-                    let callback_leave = if has_leave { event_callback.clone() } else { None };
+                    let callback_enter = if has_enter {
+                        event_callback.clone()
+                    } else {
+                        None
+                    };
+                    let callback_leave = if has_leave {
+                        event_callback.clone()
+                    } else {
+                        None
+                    };
                     el = el.on_hover(move |&is_hovered, _window, _cx| {
                         if is_hovered {
                             emit_event_full(&callback_enter, id, "mouseEnter", |p| {
@@ -841,7 +919,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(ml) = style.margin_left {
         el = el.ml(gpui::px(ml as f32));
     }
-    if let Some(ref bg) = style.background_color.as_ref().or(style.background.as_ref()) {
+    if let Some(ref bg) = style
+        .background_color
+        .as_ref()
+        .or(style.background.as_ref())
+    {
         if let Some(hex) = parse_color_hex(bg) {
             el = el.bg(gpui::rgba(hex));
         }
@@ -917,8 +999,6 @@ pub(crate) fn emit_event_full(
         cb(payload);
     }
 }
-
-
 
 // ── Types ────────────────────────────────────────────────────────────
 

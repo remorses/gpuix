@@ -153,6 +153,82 @@ describeNative("custom element: input", () => {
         ]
       `)
     })
+
+    it("should reset readOnly when prop is removed", () => {
+      function TextInput({ readOnly }: { readOnly?: boolean }) {
+        const [text, setText] = useState("")
+        return (
+          <div style={{ width: 400, height: 100 }}>
+            <input
+              value={text}
+              readOnly={readOnly}
+              style={{ width: 300, height: 40 }}
+              onKeyDown={(e: EventPayload) => {
+                if (e.keyChar) {
+                  setText((t) => t + e.keyChar)
+                }
+              }}
+            />
+            <text>{`Value: ${text}`}</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<TextInput readOnly />)
+
+      let input = testRoot.renderer
+        .findByType("input")
+        .find((el) => el.events.has("keyDown"))!
+
+      testRoot.renderer.nativeSimulateKeystrokes(input.id, "a")
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Value: ",
+        ]
+      `)
+
+      // Remove readOnly prop; stale state should not persist in native instance.
+      testRoot.render(<TextInput />)
+
+      input = testRoot.renderer
+        .findByType("input")
+        .find((el) => el.events.has("keyDown"))!
+
+      testRoot.renderer.nativeSimulateKeystrokes(input.id, "b")
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Value: b",
+        ]
+      `)
+    })
+
+    it("should apply width style for native hit testing", () => {
+      function ClickProbe() {
+        const [clicks, setClicks] = useState(0)
+        return (
+          <div style={{ width: 400, height: 120 }}>
+            <input
+              value=""
+              style={{ width: 300, height: 40 }}
+              onClick={() => setClicks((c) => c + 1)}
+            />
+            <text>{`Clicks: ${clicks}`}</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<ClickProbe />)
+
+      // Click well inside the styled width (x=250). Without style passthrough,
+      // custom input defaults to content width and this hit would miss.
+      testRoot.renderer.nativeSimulateClick(250, 20)
+
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Clicks: 1",
+        ]
+      `)
+    })
   })
 
   describe("screenshots", () => {

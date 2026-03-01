@@ -129,13 +129,33 @@ function isReservedProp(name: string): boolean {
   return RESERVED_PROPS.has(name) || name in EVENT_PROPS
 }
 
+function serializeCustomProp(
+  type: string,
+  key: string,
+  value: unknown
+): string {
+  if (value === undefined) return "null"
+
+  try {
+    const json = JSON.stringify(value)
+    if (json === undefined) return "null"
+    return json
+  } catch (error) {
+    console.warn(
+      `[gpuix] Failed to serialize custom prop ${type}.${key}; sending null`,
+      error
+    )
+    return "null"
+  }
+}
+
 /** Send all custom props to Rust for non-built-in element types. */
 function syncCustomProps(id: number, type: string, props: Props): void {
   if (BUILT_IN_TYPES.has(type)) return
   const r = getRenderer()
   for (const [key, value] of Object.entries(props)) {
     if (isReservedProp(key)) continue
-    r.setCustomProp(id, key, JSON.stringify(value ?? null))
+    r.setCustomProp(id, key, serializeCustomProp(type, key, value))
   }
 }
 
@@ -152,7 +172,7 @@ function diffCustomProps(
   for (const [key, value] of Object.entries(newProps)) {
     if (isReservedProp(key)) continue
     if (oldProps[key] !== value) {
-      r.setCustomProp(id, key, JSON.stringify(value ?? null))
+      r.setCustomProp(id, key, serializeCustomProp(type, key, value))
     }
   }
   // Removed props
