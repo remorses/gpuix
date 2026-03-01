@@ -4,8 +4,8 @@
 //! Run with: cargo run -p gpuix --example hello
 
 use gpui::{
-    App, Application, Bounds, Context, Window, WindowBounds, WindowOptions,
-    div, prelude::*, px, rgb, rgba, size, Hsla,
+    div, prelude::*, px, rgb, rgba, size, App, Application, Bounds, Context, Hsla, Window,
+    WindowBounds, WindowOptions,
 };
 
 struct HelloWorld {
@@ -78,20 +78,20 @@ impl Render for HelloWorld {
                     .id("title")
                     .text_color(rgb(0xcdd6f4))
                     .text_3xl()
-                    .child("Hello from GPUIX!")
+                    .child("Hello from GPUIX!"),
             )
             .child(
                 div()
                     .id("subtitle")
                     .text_color(rgb(0xa6adc8))
-                    .child("React → GPUI via napi-rs")
+                    .child("React → GPUI via napi-rs"),
             )
             .child(
                 div()
                     .id("counter")
                     .text_color(rgb(0xf9e2af))
                     .text_xl()
-                    .child(format!("Clicks: {}", self.click_count))
+                    .child(format!("Clicks: {}", self.click_count)),
             )
             .child(
                 div()
@@ -105,12 +105,12 @@ impl Render for HelloWorld {
                         div()
                             .text_color(rgb(0x1e1e2e))
                             .font_weight(gpui::FontWeight::BOLD)
-                            .child("Click me!")
+                            .child("Click me!"),
                     )
                     .on_click(cx.listener(|this, _event, _window, cx| {
                         this.cycle_button_color();
                         cx.notify();
-                    }))
+                    })),
             )
             .child(
                 div()
@@ -128,7 +128,7 @@ impl Render for HelloWorld {
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.cycle_box_color(0);
                                 cx.notify();
-                            }))
+                            })),
                     )
                     .child(
                         div()
@@ -140,7 +140,7 @@ impl Render for HelloWorld {
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.cycle_box_color(1);
                                 cx.notify();
-                            }))
+                            })),
                     )
                     .child(
                         div()
@@ -152,15 +152,15 @@ impl Render for HelloWorld {
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.cycle_box_color(2);
                                 cx.notify();
-                            }))
-                    )
+                            })),
+                    ),
             )
             .child(
                 div()
                     .mt_4()
                     .text_color(rgb(0x6c7086))
                     .text_sm()
-                    .child("Click the button or boxes to change colors!")
+                    .child("Click the button or boxes to change colors!"),
             )
     }
 }
@@ -168,18 +168,16 @@ impl Render for HelloWorld {
 fn main() {
     Application::new().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(600.), px(450.)), cx);
-        
+
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_window, cx| {
-                cx.new(|_| HelloWorld::new())
-            },
+            |_window, cx| cx.new(|_| HelloWorld::new()),
         )
         .unwrap();
-        
+
         cx.activate(true);
     });
 }

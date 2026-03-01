@@ -4,7 +4,6 @@
 /// JS drives the frame loop by calling tick() via setImmediate.
 ///
 /// Reference: gpui_web/src/platform.rs (341 lines)
-
 use crate::platform::node_dispatcher::NodeDispatcher;
 use crate::platform::node_display::NodeDisplay;
 use anyhow::Result;
@@ -93,9 +92,9 @@ impl NodePlatform {
     /// the window isn't marked dirty. Set to true when render() received a new tree.
     pub fn tick(&self, force_render: bool) {
         use gpui::{
-            KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
-            MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PlatformInput,
-            RequestFrameOptions, ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
+            point, px, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent,
+            MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent,
+            PlatformInput, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, TouchPhase,
         };
         use std::sync::atomic::{AtomicU64, Ordering as AtOrd};
         use std::time::Duration;
@@ -132,9 +131,7 @@ impl NodePlatform {
             }
         }
 
-        let mut handler = TickHandler {
-            events: Vec::new(),
-        };
+        let mut handler = TickHandler { events: Vec::new() };
 
         if let Some(ref mut event_loop) = *self.event_loop.borrow_mut() {
             let _ = event_loop.pump_app_events(Some(Duration::ZERO), &mut handler);
@@ -164,7 +161,11 @@ impl NodePlatform {
                             cb(input);
                         }
                     }
-                    WindowEvent::MouseInput { state: btn_state, button, .. } => {
+                    WindowEvent::MouseInput {
+                        state: btn_state,
+                        button,
+                        ..
+                    } => {
                         let gpui_button = match button {
                             winit::event::MouseButton::Left => MouseButton::Left,
                             winit::event::MouseButton::Right => MouseButton::Right,
@@ -177,10 +178,8 @@ impl NodePlatform {
                         let input = match btn_state {
                             ElementState::Pressed => {
                                 state.pressed_button.set(Some(gpui_button));
-                                let click_count = state
-                                    .click_state
-                                    .borrow_mut()
-                                    .register_click(pos);
+                                let click_count =
+                                    state.click_state.borrow_mut().register_click(pos);
                                 PlatformInput::MouseDown(MouseDownEvent {
                                     button: gpui_button,
                                     position: pos,
@@ -191,8 +190,7 @@ impl NodePlatform {
                             }
                             ElementState::Released => {
                                 state.pressed_button.set(None);
-                                let click_count =
-                                    state.click_state.borrow().current_count;
+                                let click_count = state.click_state.borrow().current_count;
                                 PlatformInput::MouseUp(MouseUpEvent {
                                     button: gpui_button,
                                     position: pos,
@@ -215,10 +213,7 @@ impl NodePlatform {
                                 ScrollDelta::Lines(point(-x, -y))
                             }
                             winit::event::MouseScrollDelta::PixelDelta(d) => {
-                                ScrollDelta::Pixels(point(
-                                    px(-(d.x as f32)),
-                                    px(-(d.y as f32)),
-                                ))
+                                ScrollDelta::Pixels(point(px(-(d.x as f32)), px(-(d.y as f32))))
                             }
                         };
 
@@ -229,13 +224,12 @@ impl NodePlatform {
                             winit::event::TouchPhase::Cancelled => TouchPhase::Ended,
                         };
 
-                        let input =
-                            PlatformInput::ScrollWheel(ScrollWheelEvent {
-                                position: pos,
-                                delta: scroll_delta,
-                                modifiers: mods,
-                                touch_phase,
-                            });
+                        let input = PlatformInput::ScrollWheel(ScrollWheelEvent {
+                            position: pos,
+                            delta: scroll_delta,
+                            modifiers: mods,
+                            touch_phase,
+                        });
                         let mut cbs = state.callbacks.borrow_mut();
                         if let Some(ref mut cb) = cbs.input {
                             cb(input);
@@ -250,15 +244,11 @@ impl NodePlatform {
                         // Toggle capslock state on CapsLock key press.
                         if matches!(
                             event.logical_key,
-                            winit::keyboard::Key::Named(
-                                winit::keyboard::NamedKey::CapsLock
-                            )
+                            winit::keyboard::Key::Named(winit::keyboard::NamedKey::CapsLock)
                         ) && event.state == ElementState::Pressed
                         {
                             let current = state.capslock.get();
-                            state.capslock.set(gpui::Capslock {
-                                on: !current.on,
-                            });
+                            state.capslock.set(gpui::Capslock { on: !current.on });
                         }
 
                         let key = winit_key_to_gpui_key(&event.logical_key);
@@ -267,8 +257,7 @@ impl NodePlatform {
                             continue;
                         }
 
-                        let key_char =
-                            compute_winit_key_char(&event, &key, &mods);
+                        let key_char = compute_winit_key_char(&event, &key, &mods);
 
                         let keystroke = Keystroke {
                             modifiers: mods,
@@ -277,13 +266,11 @@ impl NodePlatform {
                         };
 
                         let input = match event.state {
-                            ElementState::Pressed => {
-                                PlatformInput::KeyDown(KeyDownEvent {
-                                    keystroke,
-                                    is_held: event.repeat,
-                                    prefer_character_input: false,
-                                })
-                            }
+                            ElementState::Pressed => PlatformInput::KeyDown(KeyDownEvent {
+                                keystroke,
+                                is_held: event.repeat,
+                                prefer_character_input: false,
+                            }),
                             ElementState::Released => {
                                 PlatformInput::KeyUp(KeyUpEvent { keystroke })
                             }
@@ -297,26 +284,20 @@ impl NodePlatform {
                     WindowEvent::ModifiersChanged(mods_event) => {
                         let winit_state = mods_event.state();
                         let modifiers = Modifiers {
-                            control: winit_state
-                                .contains(winit::keyboard::ModifiersState::CONTROL),
-                            alt: winit_state
-                                .contains(winit::keyboard::ModifiersState::ALT),
-                            shift: winit_state
-                                .contains(winit::keyboard::ModifiersState::SHIFT),
-                            platform: winit_state
-                                .contains(winit::keyboard::ModifiersState::SUPER),
+                            control: winit_state.contains(winit::keyboard::ModifiersState::CONTROL),
+                            alt: winit_state.contains(winit::keyboard::ModifiersState::ALT),
+                            shift: winit_state.contains(winit::keyboard::ModifiersState::SHIFT),
+                            platform: winit_state.contains(winit::keyboard::ModifiersState::SUPER),
                             function: false,
                         };
                         state.modifiers.set(modifiers);
 
                         let mut cbs = state.callbacks.borrow_mut();
                         if let Some(ref mut cb) = cbs.input {
-                            cb(PlatformInput::ModifiersChanged(
-                                ModifiersChangedEvent {
-                                    modifiers,
-                                    capslock: state.capslock.get(),
-                                },
-                            ));
+                            cb(PlatformInput::ModifiersChanged(ModifiersChangedEvent {
+                                modifiers,
+                                capslock: state.capslock.get(),
+                            }));
                         }
                     }
                     WindowEvent::CursorLeft { .. } => {
@@ -325,12 +306,11 @@ impl NodePlatform {
 
                         state.is_hovered.set(false);
 
-                        let input =
-                            PlatformInput::MouseExited(MouseExitEvent {
-                                position: pos,
-                                pressed_button: state.pressed_button.get(),
-                                modifiers: mods,
-                            });
+                        let input = PlatformInput::MouseExited(MouseExitEvent {
+                            position: pos,
+                            pressed_button: state.pressed_button.get(),
+                            modifiers: mods,
+                        });
                         let mut cbs = state.callbacks.borrow_mut();
                         if let Some(ref mut cb) = cbs.input {
                             cb(input);
@@ -353,17 +333,29 @@ impl NodePlatform {
 
                         *state.bounds.borrow_mut() = gpui::Bounds {
                             origin: gpui::Point::default(),
-                            size: gpui::Size { width: px(lw), height: px(lh) },
+                            size: gpui::Size {
+                                width: px(lw),
+                                height: px(lh),
+                            },
                         };
 
-                        state.renderer.borrow_mut().update_drawable_size(gpui::Size {
-                            width: gpui::DevicePixels(new_size.width as i32),
-                            height: gpui::DevicePixels(new_size.height as i32),
-                        });
+                        state
+                            .renderer
+                            .borrow_mut()
+                            .update_drawable_size(gpui::Size {
+                                width: gpui::DevicePixels(new_size.width as i32),
+                                height: gpui::DevicePixels(new_size.height as i32),
+                            });
 
                         let mut cbs = state.callbacks.borrow_mut();
                         if let Some(ref mut cb) = cbs.resize {
-                            cb(gpui::Size { width: px(lw), height: px(lh) }, scale);
+                            cb(
+                                gpui::Size {
+                                    width: px(lw),
+                                    height: px(lh),
+                                },
+                                scale,
+                            );
                         }
                     }
                     WindowEvent::Focused(focused) => {
@@ -485,9 +477,7 @@ impl Platform for NodePlatform {
 
             if let Some(mtm) = MainThreadMarker::new() {
                 let app = NSApplication::sharedApplication(mtm);
-                app.setActivationPolicy(
-                    objc2_app_kit::NSApplicationActivationPolicy::Regular,
-                );
+                app.setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
             }
         }
 

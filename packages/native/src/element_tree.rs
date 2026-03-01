@@ -5,7 +5,6 @@
 /// event types. Fields are optional — each event type populates only the
 /// fields it needs. This avoids N different napi structs while keeping the
 /// FFI surface small.
-
 use napi_derive::napi;
 
 /// Event payload sent back to JS when a user interacts with an element.

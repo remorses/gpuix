@@ -7,7 +7,6 @@
 /// (those are gated to windows/linux/wasm), so we use crossbeam or std channels.
 ///
 /// Reference: gpui_web/src/dispatcher.rs (333 lines)
-
 use gpui::{PlatformDispatcher, Priority, RunnableVariant, ThreadTaskTimings};
 use parking_lot::Mutex;
 use std::collections::BinaryHeap;
@@ -54,7 +53,8 @@ pub struct NodeDispatcher {
 
 impl NodeDispatcher {
     pub fn new() -> Self {
-        let (background_sender, background_receiver) = std::sync::mpsc::channel::<RunnableVariant>();
+        let (background_sender, background_receiver) =
+            std::sync::mpsc::channel::<RunnableVariant>();
         let background_receiver = Arc::new(Mutex::new(background_receiver));
 
         let background_threads: Vec<_> = (0..BACKGROUND_THREAD_COUNT)
@@ -76,7 +76,9 @@ impl NodeDispatcher {
                                     }
                                 }
                                 Err(_) => {
-                                    log::info!("gpuix-bg-worker-{i}: channel disconnected, exiting");
+                                    log::info!(
+                                        "gpuix-bg-worker-{i}: channel disconnected, exiting"
+                                    );
                                     break;
                                 }
                             }
@@ -161,10 +163,9 @@ impl PlatformDispatcher for NodeDispatcher {
 
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant) {
         let deadline = Instant::now() + duration;
-        self.delayed_queue.lock().push(DelayedRunnable {
-            deadline,
-            runnable,
-        });
+        self.delayed_queue
+            .lock()
+            .push(DelayedRunnable { deadline, runnable });
     }
 
     fn spawn_realtime(&self, function: Box<dyn FnOnce() + Send>) {

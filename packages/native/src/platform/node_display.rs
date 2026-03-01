@@ -4,8 +4,7 @@
 /// display info from the OS, but for now a sensible default (1920x1080) is fine.
 ///
 /// Reference: gpui_web/src/display.rs (98 lines)
-
-use gpui::{Bounds, DisplayId, Pixels, PlatformDisplay, Point, Size, px};
+use gpui::{px, Bounds, DisplayId, Pixels, PlatformDisplay, Point, Size};
 
 #[derive(Debug)]
 pub struct NodeDisplay {

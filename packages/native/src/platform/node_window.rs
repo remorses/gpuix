@@ -1,3 +1,4 @@
+use crate::platform::node_display::NodeDisplay;
 /// NodeWindow — implements gpui::PlatformWindow for the Node.js environment.
 ///
 /// Creates a wgpu rendering surface from a winit::Window handle.
@@ -6,17 +7,15 @@
 /// and is pumped during tick().
 ///
 /// Reference: gpui_web/src/window.rs (689 lines)
-
 use gpui::{
-    AnyWindowHandle, Bounds, Capslock, Decorations, DevicePixels, DispatchEventResult, GpuSpecs,
-    Modifiers, MouseButton, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
+    px, AnyWindowHandle, Bounds, Capslock, Decorations, DevicePixels, DispatchEventResult,
+    GpuSpecs, Modifiers, MouseButton, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
     PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
     ResizeEdge, Scene, Size, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
-    WindowControlArea, WindowControls, WindowDecorations, WindowParams, px,
+    WindowControlArea, WindowControls, WindowDecorations, WindowParams,
 };
 use gpui_wgpu::{WgpuContext, WgpuRenderer, WgpuSurfaceConfig};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use crate::platform::node_display::NodeDisplay;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -331,7 +330,9 @@ impl PlatformWindow for NodeWindow {
     fn zoom(&self) {}
 
     fn toggle_fullscreen(&self) {
-        self.state.is_fullscreen.set(!self.state.is_fullscreen.get());
+        self.state
+            .is_fullscreen
+            .set(!self.state.is_fullscreen.get());
     }
 
     fn is_fullscreen(&self) -> bool {

@@ -11,7 +11,6 @@
 /// VisualTestAppContext is !Send — stored in thread_local.
 /// All napi calls happen on the JS main thread (same safety pattern as
 /// NodePlatform in renderer.rs).
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -206,12 +205,7 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
-    pub fn set_event_listener(
-        &self,
-        id: f64,
-        event_type: String,
-        has_handler: bool,
-    ) -> Result<()> {
+    pub fn set_event_listener(&self, id: f64, event_type: String, has_handler: bool) -> Result<()> {
         let id = to_element_id(id)?;
         self.tree
             .lock()
@@ -232,9 +226,8 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
         let id = to_element_id(id)?;
-        let value: serde_json::Value = serde_json::from_str(&value_json).map_err(|e| {
-            Error::from_reason(format!("Failed to parse custom prop value: {}", e))
-        })?;
+        let value: serde_json::Value = serde_json::from_str(&value_json)
+            .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
         self.tree.lock().unwrap().set_custom_prop(id, key, value);
         Ok(())
     }
@@ -423,13 +416,7 @@ impl TestGpuixRenderer {
     /// Simulate a scroll wheel event at the given position.
     /// delta_x and delta_y are in pixels (negative = scroll up/left).
     #[napi]
-    pub fn simulate_scroll_wheel(
-        &self,
-        x: f64,
-        y: f64,
-        delta_x: f64,
-        delta_y: f64,
-    ) -> Result<()> {
+    pub fn simulate_scroll_wheel(&self, x: f64, y: f64, delta_x: f64, delta_y: f64) -> Result<()> {
         with_test_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
@@ -591,10 +578,7 @@ impl TestGpuixRenderer {
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect();
                     if !filtered.is_empty() {
-                        obj.insert(
-                            "style".to_string(),
-                            serde_json::Value::Object(filtered),
-                        );
+                        obj.insert("style".to_string(), serde_json::Value::Object(filtered));
                     }
                 }
             }

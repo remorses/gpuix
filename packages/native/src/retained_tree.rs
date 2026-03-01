@@ -6,7 +6,6 @@
 ///
 /// All IDs are u64 — JS generates them with an incrementing counter,
 /// passes them as numbers across napi (no string allocation).
-
 use std::collections::{HashMap, HashSet};
 
 use crate::style::StyleDesc;
@@ -54,7 +53,8 @@ impl RetainedTree {
     }
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
-        self.elements.insert(id, RetainedElement::new(id, element_type));
+        self.elements
+            .insert(id, RetainedElement::new(id, element_type));
     }
 
     /// Recursively destroy an element and all its children.
@@ -116,7 +116,11 @@ impl RetainedTree {
         }
         // Insert before the target
         if let Some(parent) = self.elements.get_mut(&parent_id) {
-            let pos = parent.children.iter().position(|c| *c == before_id).unwrap_or(parent.children.len());
+            let pos = parent
+                .children
+                .iter()
+                .position(|c| *c == before_id)
+                .unwrap_or(parent.children.len());
             parent.children.insert(pos, child_id);
         }
     }
