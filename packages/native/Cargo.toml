@@ -42,6 +42,8 @@ core-graphics = "=0.24.0"
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSThread"] }
 objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSRunningApplication", "NSWindow", "NSResponder"] }
+# gpui_macos for real Metal rendering in visual test renderer (VisualTestAppContext)
+gpui_macos = { git = "https://github.com/zed-industries/zed", rev = "14f37ed5024bbccff2200797d1d9bf69aee01d66" }
 
 [features]
 default = ["test-support"]

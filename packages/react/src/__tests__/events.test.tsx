@@ -11,6 +11,7 @@
 /// @ts-nocheck — JSX types resolve to DOM's HTMLDivElement, not GPUIX's Props.
 // @ts-nocheck
 
+import fs from "fs"
 import { describe, it, expect, beforeEach } from "vitest"
 import React, { useState } from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
@@ -667,6 +668,50 @@ describeNative("events", () => {
           "Action: cancel",
         ]
       `)
+    })
+  })
+
+  describe("screenshot", () => {
+    it("should capture screenshot after interaction", () => {
+      function Counter() {
+        const [count, setCount] = useState(0)
+        return (
+          <div
+            style={{
+              width: 200,
+              height: 50,
+              backgroundColor: "#1e1e2e",
+            }}
+            onClick={() => setCount((c) => c + 1)}
+          >
+            <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+              {`Count: ${count}`}
+            </text>
+          </div>
+        )
+      }
+
+      testRoot.render(<Counter />)
+
+      // Capture initial state
+      const path0 = "/tmp/gpuix-counter-0.png"
+      const path1 = "/tmp/gpuix-counter-1.png"
+
+      // Clean up from previous runs
+      if (fs.existsSync(path0)) fs.unlinkSync(path0)
+      if (fs.existsSync(path1)) fs.unlinkSync(path1)
+
+      testRoot.renderer.captureScreenshot(path0)
+
+      // Click and capture again
+      testRoot.renderer.nativeSimulateClick(10, 10)
+      testRoot.renderer.captureScreenshot(path1)
+
+      // Verify files exist and have non-zero size
+      expect(fs.existsSync(path0)).toBe(true)
+      expect(fs.existsSync(path1)).toBe(true)
+      expect(fs.statSync(path0).size).toBeGreaterThan(0)
+      expect(fs.statSync(path1).size).toBeGreaterThan(0)
     })
   })
 

@@ -6,7 +6,7 @@ mod renderer;
 mod retained_tree;
 mod style;
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "macos"))]
 mod test_renderer;
 
 pub use element_tree::*;

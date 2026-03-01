@@ -1,25 +1,26 @@
-/// TestGpuixRenderer — headless GPUI test renderer exposed to Node.js via napi.
+/// TestGpuixRenderer — GPU-backed GPUI test renderer exposed to Node.js via napi.
 ///
-/// Uses gpui::TestAppContext (no GPU, no window) to run the **same** GpuixView,
-/// build_element(), apply_styles(), and event handlers as the production renderer.
-/// Events are collected synchronously into a Vec instead of being queued on the
-/// Node.js event loop.
+/// Uses gpui::VisualTestAppContext (real Metal rendering on macOS) with
+/// TestDispatcher for deterministic scheduling. Runs the SAME GpuixView,
+/// build_element(), apply_styles(), and event handlers as production.
 ///
-/// Key design: GpuixView, build_element(), build_div(), apply_styles(),
-/// emit_event_full() are the EXACT SAME code for both production and test.
-/// The only difference is the event callback: production wraps ThreadsafeFunction,
-/// tests wrap a Vec<EventPayload> collector.
+/// Windows are positioned offscreen at (-10000, -10000) — invisible but
+/// fully rendered by Metal. This enables capture_screenshot() for visual
+/// test validation.
 ///
-/// TestAppContext and VisualTestContext are !Send — stored in thread_local.
-/// All napi calls happen on the JS main thread, so this is safe (same pattern
-/// as NodePlatform in renderer.rs).
+/// VisualTestAppContext is !Send — stored in thread_local.
+/// All napi calls happen on the JS main thread (same safety pattern as
+/// NodePlatform in renderer.rs).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+
+use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{to_element_id, EventCallback, GpuixView};
@@ -28,33 +29,34 @@ use crate::style::StyleDesc;
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
+/// Bundles VisualTestAppContext + window handle + view entity.
+/// Stored in thread_local because VisualTestAppContext is !Send (Rc<AppCell>).
+struct VisualTestState {
+    cx: gpui::VisualTestAppContext,
+    window: gpui::AnyWindowHandle,
+    view: gpui::Entity<GpuixView>,
+}
+
 thread_local! {
-    /// Leaked VisualTestContext from TestAppContext::add_window_view().
-    /// Stored as raw pointer to work around !Send constraint.
-    static TEST_VCX: RefCell<Option<*mut gpui::VisualTestContext>> = const { RefCell::new(None) };
-
-    /// Entity handle for the GpuixView — needed for cx.notify() to trigger re-renders.
-    static TEST_VIEW: RefCell<Option<gpui::Entity<GpuixView>>> = const { RefCell::new(None) };
-
-    /// Keep the original TestAppContext alive (its Rc<AppCell> holds the app).
-    static TEST_APP_CX: RefCell<Option<gpui::TestAppContext>> = const { RefCell::new(None) };
+    static TEST_STATE: RefCell<Option<VisualTestState>> = const { RefCell::new(None) };
 }
 
-/// Read the VisualTestContext pointer from thread_local.
+/// Access VisualTestAppContext + window + view mutably within thread_local.
+/// The closure receives (&mut cx, window_handle, &view_entity).
 /// Returns Err if no TestGpuixRenderer has been created on this thread.
-fn get_vcx_ptr() -> Result<*mut gpui::VisualTestContext> {
-    TEST_VCX
-        .with(|v| *v.borrow())
-        .ok_or_else(|| Error::from_reason("TestGpuixRenderer not initialized"))
-}
-
-/// Clone the Entity<GpuixView> from thread_local.
-fn get_view() -> Result<gpui::Entity<GpuixView>> {
-    TEST_VIEW.with(|v| {
-        let guard = v.borrow();
-        let opt: &Option<gpui::Entity<GpuixView>> = &*guard;
-        opt.clone()
-            .ok_or_else(|| Error::from_reason("TestGpuixRenderer not initialized"))
+fn with_test_state<R>(
+    f: impl FnOnce(
+        &mut gpui::VisualTestAppContext,
+        gpui::AnyWindowHandle,
+        &gpui::Entity<GpuixView>,
+    ) -> Result<R>,
+) -> Result<R> {
+    TEST_STATE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let state = borrow
+            .as_mut()
+            .ok_or_else(|| Error::from_reason("TestGpuixRenderer not initialized"))?;
+        f(&mut state.cx, state.window, &state.view)
     })
 }
 
@@ -69,17 +71,19 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
 
 // ── TestGpuixRenderer ────────────────────────────────────────────────
 
-/// Headless GPUI test renderer. Uses the same GpuixView and rendering
-/// pipeline as production, but backed by gpui::TestPlatform (no GPU, no window).
+/// GPU-backed GPUI test renderer. Uses VisualTestAppContext (real Metal
+/// rendering on macOS) with TestDispatcher for deterministic scheduling.
+/// Same GpuixView and rendering pipeline as production.
 ///
 /// Usage from JS:
 ///   const r = new TestGpuixRenderer()
 ///   r.createElement(1, "div")
 ///   r.setRoot(1)
 ///   r.commitMutations()
-///   r.flush()                  // triggers GpuixView::render()
+///   r.flush()                  // triggers GpuixView::render() via Metal
 ///   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
 ///   const events = r.drainEvents()
+///   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
 #[napi]
 pub struct TestGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
@@ -102,24 +106,37 @@ impl TestGpuixRenderer {
         let tree_clone = tree.clone();
         let callback_clone = event_callback.clone();
 
-        // Create headless GPUI app with TestPlatform (no GPU, no window).
-        let mut cx = gpui::TestAppContext::single();
+        // Create VisualTestAppContext with real macOS Metal rendering +
+        // TestDispatcher for deterministic scheduling.
+        let mac_platform = gpui_macos::MacPlatform::new(false);
+        let mut cx = gpui::VisualTestAppContext::new(Rc::new(mac_platform));
 
-        // Open a test window with the same GpuixView used in production.
-        // add_window_view returns (Entity<GpuixView>, &'static mut VisualTestContext).
-        // The VisualTestContext is leaked (Rc::into_raw) — valid for the test lifetime.
-        let (view, vcx) = cx.add_window_view(|_window, _cx| GpuixView {
-            tree: tree_clone,
-            event_callback: callback_clone,
-            window_title: "GPUIX Test".to_string(),
-            focus_handles: HashMap::new(),
-            _focus_subscriptions: Vec::new(),
-        });
+        // Open an offscreen window at (-10000, -10000) — invisible but fully
+        // rendered by Metal. Uses the same GpuixView as production.
+        let window_handle = cx
+            .open_offscreen_window_default(|_window, app| {
+                app.new(|_cx| GpuixView {
+                    tree: tree_clone,
+                    event_callback: callback_clone,
+                    window_title: "GPUIX Test".to_string(),
+                    focus_handles: HashMap::new(),
+                    _focus_subscriptions: Vec::new(),
+                })
+            })
+            .map_err(|e| Error::from_reason(format!("Failed to open test window: {}", e)))?;
+
+        // Get the root entity (Entity<GpuixView>) from the window.
+        let view = window_handle
+            .entity(&cx)
+            .map_err(|e| Error::from_reason(format!("Failed to get root view: {}", e)))?;
+
+        // Convert typed WindowHandle<GpuixView> to AnyWindowHandle for simulation methods.
+        let window: gpui::AnyWindowHandle = window_handle.into();
 
         // Store !Send types in thread_local (same pattern as NodePlatform).
-        TEST_VCX.with(|v| *v.borrow_mut() = Some(vcx as *mut _));
-        TEST_VIEW.with(|v| *v.borrow_mut() = Some(view));
-        TEST_APP_CX.with(|v| *v.borrow_mut() = Some(cx));
+        TEST_STATE.with(|cell| {
+            *cell.borrow_mut() = Some(VisualTestState { cx, window, view });
+        });
 
         Ok(Self { tree, events })
     }
@@ -224,25 +241,18 @@ impl TestGpuixRenderer {
     /// hit testing requires elements to be laid out).
     #[napi]
     pub fn flush(&self) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let view = get_view()?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |_, cx| {
+                    cx.notify();
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
 
-        // SAFETY: vcx_ptr was obtained from VisualTestContext::into_mut() which
-        // leaked an Rc. The pointer is valid for the lifetime of the test.
-        // All access happens on the JS main thread (thread_local guarantees this).
-        let vcx = unsafe { &mut *vcx_ptr };
-
-        // Notify the view entity that it needs to re-render.
-        vcx.update(|_window, cx| {
-            view.update(cx, |_, cx| {
-                cx.notify();
-            });
-        });
-
-        // Drive GPUI to process the render (layout, hit-test registration).
-        vcx.run_until_parked();
-
-        Ok(())
+            cx.run_until_parked();
+            Ok(())
+        })
     }
 
     /// Simulate a click at the given window coordinates.
@@ -251,15 +261,14 @@ impl TestGpuixRenderer {
     /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
     #[napi]
     pub fn simulate_click(&self, x: f64, y: f64) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let vcx = unsafe { &mut *vcx_ptr };
-
-        vcx.simulate_click(
-            gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-            gpui::Modifiers::default(),
-        );
-
-        Ok(())
+        with_test_state(|cx, window, _view| {
+            cx.simulate_click(
+                window,
+                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                gpui::Modifiers::default(),
+            );
+            Ok(())
+        })
     }
 
     /// Simulate key strokes through GPUI's input pipeline.
@@ -267,12 +276,10 @@ impl TestGpuixRenderer {
     /// The focused element receives keyDown/keyUp events.
     #[napi]
     pub fn simulate_keystrokes(&self, keystrokes: String) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let vcx = unsafe { &mut *vcx_ptr };
-
-        vcx.simulate_keystrokes(&keystrokes);
-
-        Ok(())
+        with_test_state(|cx, window, _view| {
+            cx.simulate_keystrokes(window, &keystrokes);
+            Ok(())
+        })
     }
 
     /// Simulate a single key down event through GPUI's input pipeline.
@@ -282,19 +289,22 @@ impl TestGpuixRenderer {
     /// fine-grained key event testing.
     #[napi]
     pub fn simulate_key_down(&self, keystroke: String, is_held: Option<bool>) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let vcx = unsafe { &mut *vcx_ptr };
+        with_test_state(|cx, window, _view| {
+            let parsed = gpui::Keystroke::parse(&keystroke).map_err(|e| {
+                Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e))
+            })?;
 
-        let parsed = gpui::Keystroke::parse(&keystroke)
-            .map_err(|e| Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e)))?;
+            cx.simulate_event(
+                window,
+                gpui::KeyDownEvent {
+                    keystroke: parsed,
+                    is_held: is_held.unwrap_or(false),
+                    prefer_character_input: false,
+                },
+            );
 
-        vcx.simulate_event(gpui::KeyDownEvent {
-            keystroke: parsed,
-            is_held: is_held.unwrap_or(false),
-            prefer_character_input: false,
-        });
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Simulate a single key up event through GPUI's input pipeline.
@@ -302,17 +312,15 @@ impl TestGpuixRenderer {
     /// Pairs with simulate_key_down for fine-grained key event testing.
     #[napi]
     pub fn simulate_key_up(&self, keystroke: String) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let vcx = unsafe { &mut *vcx_ptr };
+        with_test_state(|cx, window, _view| {
+            let parsed = gpui::Keystroke::parse(&keystroke).map_err(|e| {
+                Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e))
+            })?;
 
-        let parsed = gpui::Keystroke::parse(&keystroke)
-            .map_err(|e| Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e)))?;
+            cx.simulate_event(window, gpui::KeyUpEvent { keystroke: parsed });
 
-        vcx.simulate_event(gpui::KeyUpEvent {
-            keystroke: parsed,
-        });
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Simulate a mouse move to the given coordinates.
@@ -320,18 +328,18 @@ impl TestGpuixRenderer {
     /// Used to simulate drag events.
     #[napi]
     pub fn simulate_mouse_move(&self, x: f64, y: f64, pressed_button: Option<u32>) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let vcx = unsafe { &mut *vcx_ptr };
+        with_test_state(|cx, window, _view| {
+            let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
-        let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
+            cx.simulate_mouse_move(
+                window,
+                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                button,
+                gpui::Modifiers::default(),
+            );
 
-        vcx.simulate_mouse_move(
-            gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-            button,
-            gpui::Modifiers::default(),
-        );
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Focus an element by its numeric ID.
@@ -341,52 +349,52 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn focus_element(&self, id: f64) -> Result<()> {
         let id = to_element_id(id)?;
-        let vcx_ptr = get_vcx_ptr()?;
-        let view = get_view()?;
-        let vcx = unsafe { &mut *vcx_ptr };
 
-        vcx.update(|window, cx| {
-            view.update(cx, |view, _cx| {
-                if let Some(handle) = view.focus_handles.get(&id) {
-                    handle.focus(window, _cx);
-                }
-            });
-        });
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
 
-        vcx.run_until_parked();
-        Ok(())
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    if let Some(handle) = view.focus_handles.get(&id) {
+                        handle.focus(window, cx);
+                    }
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+            cx.run_until_parked();
+            Ok(())
+        })
     }
 
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
     pub fn simulate_mouse_down(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let vcx = unsafe { &mut *vcx_ptr };
-
-        vcx.simulate_mouse_down(
-            gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-            u32_to_mouse_button(button.unwrap_or(0)),
-            gpui::Modifiers::default(),
-        );
-
-        Ok(())
+        with_test_state(|cx, window, _view| {
+            cx.simulate_mouse_down(
+                window,
+                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                u32_to_mouse_button(button.unwrap_or(0)),
+                gpui::Modifiers::default(),
+            );
+            Ok(())
+        })
     }
 
     /// Simulate a mouse up event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
     pub fn simulate_mouse_up(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let vcx = unsafe { &mut *vcx_ptr };
-
-        vcx.simulate_mouse_up(
-            gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-            u32_to_mouse_button(button.unwrap_or(0)),
-            gpui::Modifiers::default(),
-        );
-
-        Ok(())
+        with_test_state(|cx, window, _view| {
+            cx.simulate_mouse_up(
+                window,
+                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                u32_to_mouse_button(button.unwrap_or(0)),
+                gpui::Modifiers::default(),
+            );
+            Ok(())
+        })
     }
 
     /// Simulate a scroll wheel event at the given position.
@@ -399,20 +407,51 @@ impl TestGpuixRenderer {
         delta_x: f64,
         delta_y: f64,
     ) -> Result<()> {
-        let vcx_ptr = get_vcx_ptr()?;
-        let vcx = unsafe { &mut *vcx_ptr };
+        with_test_state(|cx, window, _view| {
+            cx.simulate_event(
+                window,
+                gpui::ScrollWheelEvent {
+                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                    delta: gpui::ScrollDelta::Pixels(gpui::point(
+                        gpui::px(delta_x as f32),
+                        gpui::px(delta_y as f32),
+                    )),
+                    modifiers: gpui::Modifiers::default(),
+                    touch_phase: gpui::TouchPhase::Moved,
+                },
+            );
+            Ok(())
+        })
+    }
 
-        vcx.simulate_event(gpui::ScrollWheelEvent {
-            position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-            delta: gpui::ScrollDelta::Pixels(gpui::point(
-                gpui::px(delta_x as f32),
-                gpui::px(delta_y as f32),
-            )),
-            modifiers: gpui::Modifiers::default(),
-            touch_phase: gpui::TouchPhase::Moved,
-        });
+    /// Capture a screenshot of the current rendered state and save as PNG.
+    /// macOS only — requires Metal GPU rendering via VisualTestAppContext.
+    #[napi]
+    pub fn capture_screenshot(&self, path: String) -> Result<()> {
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
 
-        Ok(())
+            // Flush: notify view and run until parked so layout/rendering are current.
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |_, cx| {
+                    cx.notify();
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.run_until_parked();
+
+            // Capture via GPUI's render_to_image (Metal texture → RgbaImage).
+            let image = cx
+                .capture_screenshot(window)
+                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;
+
+            // Save as PNG (format inferred from file extension).
+            image
+                .save(&path)
+                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
+
+            Ok(())
+        })
     }
 
     /// Return and clear all collected events since the last drain.

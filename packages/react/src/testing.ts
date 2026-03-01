@@ -387,6 +387,16 @@ export class TestRenderer implements NativeRenderer {
     return this.rootId != null ? serialize(this.rootId) : null
   }
 
+  /** Capture a screenshot of the current rendered UI and save as PNG.
+   *  macOS only — requires Metal GPU rendering via VisualTestAppContext. */
+  captureScreenshot(path: string): void {
+    if (!this.native) {
+      throw new Error("Native renderer not available for captureScreenshot")
+    }
+    this.native.flush()
+    this.native.captureScreenshot(path)
+  }
+
   /** Whether the native GPUI test renderer is available. */
   get hasNative(): boolean {
     return this.native != null
