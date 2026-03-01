@@ -285,4 +285,6 @@ export declare class TestGpuixRenderer {
   getText(id: number): string | null
   /** Get the full tree as JSON for snapshot testing. */
   getTreeJson(): string
+  /** Get the root element ID, or null if no root is set. */
+  getRootId(): number | null
 }

@@ -547,6 +547,12 @@ impl TestGpuixRenderer {
             .map_err(|e| Error::from_reason(format!("JSON serialization failed: {}", e)))
     }
 
+    /// Get the root element ID, or null if no root is set.
+    #[napi]
+    pub fn get_root_id(&self) -> Option<f64> {
+        self.tree.lock().unwrap().root_id.map(|id| id as f64)
+    }
+
     // ── Private helpers ──────────────────────────────────────────────
 
     fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
@@ -599,6 +605,18 @@ impl TestGpuixRenderer {
             let mut events: Vec<String> = element.events.iter().cloned().collect();
             events.sort();
             obj.insert("events".to_string(), serde_json::json!(events));
+        }
+
+        if !element.custom_props.is_empty() {
+            let custom: serde_json::Map<String, serde_json::Value> = element
+                .custom_props
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            obj.insert(
+                "customProps".to_string(),
+                serde_json::Value::Object(custom),
+            );
         }
 
         if !element.children.is_empty() {

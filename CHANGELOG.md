@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-01 20:45 UTC
+
+- Remove JS shadow tree from TestRenderer — all element state now lives exclusively in Rust's RetainedTree, queried via napi
+- TestRenderer inspection methods (findByType, getAllText, toJSON, getRoot, getElement, findByText) now query the native TestGpuixRenderer instead of maintaining a parallel JS element map
+- Add `getRootId()` napi method to TestGpuixRenderer for root element queries
+- Add `customProps` to `getTreeJson()` output so test inspection can see custom element props (used by img/input tests)
+- TestRenderer constructor now requires native renderer (throws if not available); tests already skip via `hasNativeTestRenderer`
+- Net ~220 lines of redundant JS state management code removed
+- All 68 tests pass — zero test file changes needed
+
 ## 2026-03-01 20:30 UTC
 
 - Add FFI mutation batching — all React reconciler mutations per commit are now buffered JS-side and sent to Rust in a single `applyBatch()` napi call instead of N individual FFI calls

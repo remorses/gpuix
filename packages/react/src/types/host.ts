@@ -138,7 +138,8 @@ export interface AnchoredProps extends Props {
 }
 
 /// Interface for the renderer that receives mutations from the reconciler.
-/// Implemented by the real napi GpuixRenderer and by TestRenderer for tests.
+/// Implemented by the real napi GpuixRenderer and by TestRenderer (which
+/// delegates to native TestGpuixRenderer for tests).
 export interface NativeRenderer {
   createElement(id: number, elementType: string): void
   destroyElement(id: number): Array<number>
@@ -156,7 +157,7 @@ export interface NativeRenderer {
 }
 
 // Container holds the renderer reference.
-// Mutations go directly via napi calls (or TestRenderer for tests).
+// Mutations go directly via napi calls.
 export interface Container {
   renderer: NativeRenderer
 }
