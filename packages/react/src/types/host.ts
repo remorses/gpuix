@@ -151,6 +151,8 @@ export interface NativeRenderer {
   setRoot(id: number): void
   commitMutations(): void
   setCustomProp(id: number, key: string, valueJson: string): void
+  /** Apply a batch of mutations in a single FFI call. Returns destroyed IDs. */
+  applyBatch?(json: string): Array<number>
 }
 
 // Container holds the renderer reference.

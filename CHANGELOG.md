@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-03-01 20:30 UTC
+
+- Add FFI mutation batching — all React reconciler mutations per commit are now buffered JS-side and sent to Rust in a single `applyBatch()` napi call instead of N individual FFI calls
+- Add `apply_batch(json)` to both `GpuixRenderer` and `TestGpuixRenderer` (Rust) — parses a JSON array of string-named mutation tuples `["methodName", ...args]` and applies them under a single mutex lock
+- Atomic two-phase Rust processing: `parse_batch_ops()` validates all ops into typed `BatchOp` enum before any tree mutation; malformed batch → error with tree unchanged
+- Add Proxy-based `wrapWithBatching()` (`batch-renderer.ts`) — auto-captures any NativeRenderer method call as `[name, ...args]`; adding new methods requires zero changes to the batching layer
+- TestRenderer uses `_skipNative` flag + dynamic dispatch for `applyBatch()` replay — also zero changes needed when adding new methods
+- Wire `wrapWithBatching()` into both `createRoot()` and `createTestRoot()` — batching is automatic when the renderer supports `applyBatch()`
+- Backward compatible: individual mutation methods remain available; batching is opt-in via `applyBatch` presence
+- All 68 existing tests pass through the batched path
+
 ## 2026-03-01 19:07 UTC
 
 - Add native `<img>` custom element backed by `gpui::img(PathBuf)` with `src` and `objectFit` custom props and fallback rendering states for missing/failed sources

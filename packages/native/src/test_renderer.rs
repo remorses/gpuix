@@ -23,7 +23,7 @@ use gpui::AppContext as _;
 
 use crate::custom_elements::CustomElementRegistry;
 use crate::element_tree::EventPayload;
-use crate::renderer::{to_element_id, EventCallback, GpuixView};
+use crate::renderer::{apply_batch_to_tree, to_element_id, EventCallback, GpuixView};
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
 
@@ -247,6 +247,17 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn commit_mutations(&self) -> Result<()> {
         Ok(())
+    }
+
+    /// Apply a batch of mutations in a single FFI call.
+    /// Same format as GpuixRenderer::apply_batch (string op names).
+    /// Returns accumulated destroyed IDs from all destroyElement ops.
+    #[napi]
+    pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
+        let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
+            .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
+        let mut tree = self.tree.lock().unwrap();
+        apply_batch_to_tree(&mut tree, &ops)
     }
 
     // ── Test-specific methods ────────────────────────────────────────

@@ -7,6 +7,7 @@ import { reconciler } from "./reconciler"
 import type { Container, NativeRenderer } from "../types/host"
 import { clearEventHandlers, handleGpuixEvent } from "./event-registry"
 import { setNativeRenderer } from "./host-config"
+import { wrapWithBatching } from "./batch-renderer"
 
 export function createRenderer(
   onEvent?: (event: import("@gpuix/native").EventPayload) => void
@@ -33,15 +34,22 @@ export interface Root {
 /**
  * Create a root for rendering React to GPUI (or a TestRenderer for tests).
  * Mutations go directly to the renderer — no JSON tree serialization.
+ *
+ * If the renderer supports applyBatch(), mutations are automatically batched
+ * into a single FFI call per commit (N individual calls → 1 applyBatch call).
  */
 export function createRoot(renderer: NativeRenderer): Root {
   let container: OpaqueRoot | null = null
 
-  // Wire up the renderer for host-config to use
-  setNativeRenderer(renderer)
+  // Wrap with batching if the renderer supports applyBatch().
+  // This reduces N FFI boundary crossings to 1 per React commit.
+  const batchedRenderer = wrapWithBatching(renderer)
+
+  // Wire up the batched renderer for host-config to use
+  setNativeRenderer(batchedRenderer)
 
   const gpuixContainer: Container = {
-    renderer,
+    renderer: batchedRenderer,
   }
 
   const cleanup = (): void => {

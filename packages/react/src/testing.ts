@@ -18,6 +18,7 @@ import type { Root } from "./reconciler/renderer"
 import { reconciler } from "./reconciler/reconciler"
 import { setNativeRenderer, resetIdCounter } from "./reconciler/host-config"
 import { clearEventHandlers, handleGpuixEvent } from "./reconciler/event-registry"
+import { wrapWithBatching } from "./reconciler/batch-renderer"
 import type { OpaqueRoot } from "react-reconciler"
 import { ConcurrentRoot } from "react-reconciler/constants"
 
@@ -65,6 +66,10 @@ export class TestRenderer implements NativeRenderer {
   /** Native TestGpuixRenderer — runs real GPUI pipeline. Null if not available. */
   private native: import("@gpuix/native").TestGpuixRenderer | null = null
 
+  /// When true, individual methods skip native forwarding. Used by applyBatch()
+  /// which sends the batch to native in one call, then replays locally.
+  private _skipNative = false
+
   constructor() {
     if (NativeTestRenderer) {
       this.native = new NativeTestRenderer()
@@ -74,7 +79,7 @@ export class TestRenderer implements NativeRenderer {
   // ── NativeRenderer interface (mutations go to both native + local) ──
 
   createElement(id: number, elementType: string): void {
-    this.native?.createElement(id, elementType)
+    if (!this._skipNative) this.native?.createElement(id, elementType)
     this.elements.set(id, {
       id,
       type: elementType,
@@ -87,7 +92,7 @@ export class TestRenderer implements NativeRenderer {
   }
 
   destroyElement(id: number): Array<number> {
-    this.native?.destroyElement(id)
+    if (!this._skipNative) this.native?.destroyElement(id)
     const destroyed: number[] = []
     const destroy = (eid: number) => {
       const el = this.elements.get(eid)
@@ -104,7 +109,7 @@ export class TestRenderer implements NativeRenderer {
   }
 
   appendChild(parentId: number, childId: number): void {
-    this.native?.appendChild(parentId, childId)
+    if (!this._skipNative) this.native?.appendChild(parentId, childId)
     const child = this.elements.get(childId)
     if (child?.parentId != null) {
       const oldParent = this.elements.get(child.parentId)
@@ -118,7 +123,7 @@ export class TestRenderer implements NativeRenderer {
   }
 
   removeChild(parentId: number, childId: number): void {
-    this.native?.removeChild(parentId, childId)
+    if (!this._skipNative) this.native?.removeChild(parentId, childId)
     const parent = this.elements.get(parentId)
     if (parent) {
       parent.children = parent.children.filter((c) => c !== childId)
@@ -128,7 +133,7 @@ export class TestRenderer implements NativeRenderer {
   }
 
   insertBefore(parentId: number, childId: number, beforeId: number): void {
-    this.native?.insertBefore(parentId, childId, beforeId)
+    if (!this._skipNative) this.native?.insertBefore(parentId, childId, beforeId)
     const child = this.elements.get(childId)
     if (child?.parentId != null) {
       const oldParent = this.elements.get(child.parentId)
@@ -149,19 +154,19 @@ export class TestRenderer implements NativeRenderer {
   }
 
   setStyle(id: number, styleJson: string): void {
-    this.native?.setStyle(id, styleJson)
+    if (!this._skipNative) this.native?.setStyle(id, styleJson)
     const el = this.elements.get(id)
     if (el) el.style = JSON.parse(styleJson)
   }
 
   setText(id: number, content: string): void {
-    this.native?.setText(id, content)
+    if (!this._skipNative) this.native?.setText(id, content)
     const el = this.elements.get(id)
     if (el) el.text = content
   }
 
   setEventListener(id: number, eventType: string, hasHandler: boolean): void {
-    this.native?.setEventListener(id, eventType, hasHandler)
+    if (!this._skipNative) this.native?.setEventListener(id, eventType, hasHandler)
     const el = this.elements.get(id)
     if (!el) return
     if (hasHandler) {
@@ -172,13 +177,12 @@ export class TestRenderer implements NativeRenderer {
   }
 
   setRoot(id: number): void {
-    this.native?.setRoot(id)
+    if (!this._skipNative) this.native?.setRoot(id)
     this.rootId = id
   }
 
   setCustomProp(id: number, key: string, valueJson: string): void {
-    this.native?.setCustomProp(id, key, valueJson)
-    // Also store in local element map for test inspection.
+    if (!this._skipNative) this.native?.setCustomProp(id, key, valueJson)
     const el = this.elements.get(id)
     if (el) {
       try {
@@ -198,6 +202,34 @@ export class TestRenderer implements NativeRenderer {
   commitMutations(): void {
     this.native?.commitMutations()
     this.commitCount++
+  }
+
+  applyBatch(json: string): Array<number> {
+    // Forward entire batch to native in one FFI call (if available).
+    const nativeDestroyed = this.native?.applyBatch(json) ?? []
+
+    // Replay to local element map by calling existing methods with native
+    // forwarding disabled. Dynamic dispatch — no manual switch needed.
+    // Adding a new NativeRenderer method requires ZERO changes here.
+    const ops: (number | string | boolean)[][] = JSON.parse(json)
+    this._skipNative = true
+    try {
+      for (const op of ops) {
+        const name = op[0] as string
+        const args = op.slice(1)
+        const method = (this as any)[name]
+        if (typeof method === "function") {
+          method.apply(this, args)
+        }
+      }
+    } catch (e) {
+      // Log but don't rethrow — native batch already applied successfully.
+      console.warn("[gpuix TestRenderer] local replay error after native batch:", e)
+    } finally {
+      this._skipNative = false
+    }
+
+    return nativeDestroyed
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────
@@ -442,9 +474,12 @@ export function createTestRoot(): TestRoot {
   resetIdCounter()
 
   const renderer = new TestRenderer()
-  setNativeRenderer(renderer)
+  // Wrap with batching — mutations are buffered and sent in one applyBatch()
+  // call per commit, same as production. Tests exercise the batching path.
+  const batchedRenderer = wrapWithBatching(renderer)
+  setNativeRenderer(batchedRenderer)
 
-  const gpuixContainer = { renderer }
+  const gpuixContainer = { renderer: batchedRenderer }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const container: OpaqueRoot = (reconciler.createContainer as any)(

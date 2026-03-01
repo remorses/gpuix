@@ -128,6 +128,28 @@ export declare class GpuixRenderer {
   getCustomProp(id: number, key: string): string | null
   /** Signal that a batch of mutations is complete. Triggers re-render. */
   commitMutations(): void
+  /**
+   * Apply a batch of mutations in a single FFI call.
+   *
+   * Accepts a JSON array of mutation tuples. Each tuple is an array where
+   * the first element is the operation name (string) and remaining elements
+   * are the arguments:
+   *
+   *   ["createElement",    id, "type"]
+   *   ["destroyElement",   id]
+   *   ["appendChild",      parentId, childId]
+   *   ["removeChild",      parentId, childId]
+   *   ["insertBefore",     parentId, childId, beforeId]
+   *   ["setStyle",         id, "{styleJson}"]
+   *   ["setText",          id, "content"]
+   *   ["setEventListener", id, "eventType", true|false]
+   *   ["setRoot",          id]
+   *   ["setCustomProp",    id, "key", "{valueJson}"]
+   *
+   * Returns accumulated destroyed IDs from all destroyElement ops.
+   * Acquires the tree mutex ONCE for the entire batch.
+   */
+  applyBatch(json: string): Array<number>
   tick(): void
   isInitialized(): boolean
   getWindowSize(): WindowSize
@@ -175,6 +197,12 @@ export declare class TestGpuixRenderer {
    * In tests, this is a no-op — flush() handles the actual re-render.
    */
   commitMutations(): void
+  /**
+   * Apply a batch of mutations in a single FFI call.
+   * Same format as GpuixRenderer::apply_batch (string op names).
+   * Returns accumulated destroyed IDs from all destroyElement ops.
+   */
+  applyBatch(json: string): Array<number>
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
