@@ -689,13 +689,35 @@ describeNative("events", () => {
         return (
           <div
             style={{
-              width: 200,
-              height: 50,
-              backgroundColor: active ? "#ffffff" : "#000000",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              height: "100%",
+              backgroundColor: "#0f111a",
             }}
-            onClick={() => setActive((v) => !v)}
           >
-            <text>{active ? "active" : "idle"}</text>
+            <div
+              style={{
+                width: 280,
+                height: 120,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                borderRadius: 16,
+                backgroundColor: active ? "#f5f7ff" : "#1f2333",
+              }}
+              onClick={() => setActive((v) => !v)}
+            >
+              <text style={{ color: active ? "#1f2333" : "#cbd5ff", fontSize: 18 }}>
+                {active ? "active" : "idle"}
+              </text>
+              <text style={{ color: active ? "#525b76" : "#7f8bb3", fontSize: 12 }}>
+                click to toggle theme
+              </text>
+            </div>
           </div>
         )
       }
@@ -713,7 +735,7 @@ describeNative("events", () => {
       testRoot.renderer.captureScreenshot(path0)
 
       // Click and capture again
-      testRoot.renderer.nativeSimulateClick(10, 10)
+      testRoot.renderer.nativeSimulateClick(640, 400)
       testRoot.renderer.captureScreenshot(path1)
 
       expectScreenshotsDiffer(path0, path1)
@@ -725,16 +747,34 @@ describeNative("events", () => {
         return (
           <div
             style={{
-              width: 220,
-              height: 60,
-              backgroundColor: state === "idle" ? "#2f2f3f" : "#20513f",
-            }}
-            tabIndex={0}
-            onKeyDown={(e: EventPayload) => {
-              if (e.key === "enter") setState("enter")
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              height: "100%",
+              backgroundColor: "#10131d",
             }}
           >
-            <text>{`State: ${state}`}</text>
+            <div
+              style={{
+                width: 320,
+                height: 120,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                borderRadius: 16,
+                backgroundColor: state === "idle" ? "#2b324d" : "#1f5a45",
+              }}
+              tabIndex={0}
+              onKeyDown={(e: EventPayload) => {
+                if (e.key === "enter") setState("enter")
+              }}
+            >
+              <text style={{ color: "#e8edff", fontSize: 18 }}>{`State: ${state}`}</text>
+              <text style={{ color: "#a8b2d8", fontSize: 12 }}>press Enter to switch</text>
+            </div>
           </div>
         )
       }
@@ -764,14 +804,36 @@ describeNative("events", () => {
         return (
           <div
             style={{
-              width: 220,
-              height: 60,
-              backgroundColor: hovered ? "#f9e2af" : "#313244",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              height: "100%",
+              backgroundColor: "#0f1319",
             }}
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
           >
-            <text>{hovered ? "hovered" : "not-hovered"}</text>
+            <div
+              style={{
+                width: 300,
+                height: 130,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                borderRadius: 20,
+                backgroundColor: hovered ? "#f6d48b" : "#2f3347",
+              }}
+              onMouseEnter={() => setHovered(true)}
+              onMouseLeave={() => setHovered(false)}
+            >
+              <text style={{ color: hovered ? "#46361e" : "#d5daf2", fontSize: 18 }}>
+                {hovered ? "hovered" : "not-hovered"}
+              </text>
+              <text style={{ color: hovered ? "#7a5e2c" : "#9da6c8", fontSize: 12 }}>
+                move cursor over card
+              </text>
+            </div>
           </div>
         )
       }
@@ -785,7 +847,7 @@ describeNative("events", () => {
       if (fs.existsSync(path1)) fs.unlinkSync(path1)
 
       testRoot.renderer.captureScreenshot(path0)
-      testRoot.renderer.nativeSimulateMouseMove(15, 15)
+      testRoot.renderer.nativeSimulateMouseMove(640, 400)
       testRoot.renderer.captureScreenshot(path1)
 
       expectScreenshotsDiffer(path0, path1)

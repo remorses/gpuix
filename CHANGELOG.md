@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-01 16:48 UTC
+
+- Center screenshot probe cards in the visual renderer tests so captured frames represent realistic composition instead of top-left anchored blocks
+- Improve screenshot test visuals with richer card styling (rounded surfaces, palette contrast, readable text hierarchy)
+- Keep visual assertions unchanged (before/after PNG difference) while moving click/hover simulation coordinates to centered card hit zones
+
 ## 2026-03-01 16:35 UTC
 
 - Expand visual screenshot coverage with additional end-to-end tests for `click`, `keyDown`, and `mouseEnter`-driven hover state changes
