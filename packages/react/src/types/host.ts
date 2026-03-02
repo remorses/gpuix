@@ -58,7 +58,7 @@ export interface StyleDesc {
 
   fontSize?: number
   fontFamily?: string
-  fontWeight?: string
+  fontWeight?: string | number
   textAlign?: string
   lineHeight?: number
   whiteSpace?: "normal" | "nowrap"

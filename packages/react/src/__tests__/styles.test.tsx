@@ -406,6 +406,57 @@ describeNative("style properties", () => {
       expect(fs.existsSync(path)).toBe(true)
       expect(fs.statSync(path).size).toBeGreaterThan(0)
     })
+
+    it("should accept numeric fontWeight values (700, 300, etc.)", () => {
+      function NumericWeightTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 400,
+                height: 180,
+                backgroundColor: "#1e1e2e",
+                padding: 16,
+                gap: 8,
+                borderRadius: 8,
+              }}
+            >
+              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 400 }}>
+                fontWeight: 400 (normal)
+              </text>
+              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 700 }}>
+                fontWeight: 700 (bold)
+              </text>
+              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 300 }}>
+                fontWeight: 300 (light)
+              </text>
+              <text style={{ color: "#cdd6f4", fontSize: 16, fontWeight: 900 }}>
+                fontWeight: 900 (black)
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<NumericWeightTest />)
+
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "fontWeight: 400 (normal)",
+          "fontWeight: 700 (bold)",
+          "fontWeight: 300 (light)",
+          "fontWeight: 900 (black)",
+        ]
+      `)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-font-weight-numeric.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
   })
 
   describe("text backgroundColor", () => {

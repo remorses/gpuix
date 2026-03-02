@@ -30,25 +30,32 @@ use crate::platform::NodePlatform;
 use crate::retained_tree::RetainedTree;
 use crate::style::{parse_color_hex, StyleDesc};
 
-/// Parse a CSS font-weight string into a GPUI FontWeight.
-/// Handles named keywords (case-insensitive, with hyphenated variants)
-/// and numeric strings. Falls back to 400 (normal) for unrecognized values.
-fn parse_font_weight(value: &str) -> gpui::FontWeight {
-    let s = value.trim().to_ascii_lowercase();
-    match s.as_str() {
-        "100" | "thin" => gpui::FontWeight(100.0),
-        "200" | "extralight" | "extra-light" => gpui::FontWeight(200.0),
-        "300" | "light" => gpui::FontWeight(300.0),
-        "400" | "normal" => gpui::FontWeight(400.0),
-        "500" | "medium" => gpui::FontWeight(500.0),
-        "600" | "semibold" | "semi-bold" => gpui::FontWeight(600.0),
-        "700" | "bold" => gpui::FontWeight(700.0),
-        "800" | "extrabold" | "extra-bold" => gpui::FontWeight(800.0),
-        "900" | "black" => gpui::FontWeight(900.0),
-        _ => s
-            .parse::<f32>()
-            .map(gpui::FontWeight)
-            .unwrap_or(gpui::FontWeight(400.0)),
+/// Parse a CSS font-weight value (string or number) into a GPUI FontWeight.
+/// Accepts named keywords ("bold", "semibold"), numeric strings ("700"),
+/// and raw numbers (700). Falls back to 400 (normal) for unrecognized values.
+fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::FontWeight {
+    match value {
+        crate::style::FontWeightValue::Num(n) => {
+            gpui::FontWeight((*n as f32).clamp(1.0, 1000.0))
+        }
+        crate::style::FontWeightValue::Str(s) => {
+            let lower = s.trim().to_ascii_lowercase();
+            match lower.as_str() {
+                "100" | "thin" => gpui::FontWeight(100.0),
+                "200" | "extralight" | "extra-light" => gpui::FontWeight(200.0),
+                "300" | "light" => gpui::FontWeight(300.0),
+                "400" | "normal" => gpui::FontWeight(400.0),
+                "500" | "medium" => gpui::FontWeight(500.0),
+                "600" | "semibold" | "semi-bold" => gpui::FontWeight(600.0),
+                "700" | "bold" => gpui::FontWeight(700.0),
+                "800" | "extrabold" | "extra-bold" => gpui::FontWeight(800.0),
+                "900" | "black" => gpui::FontWeight(900.0),
+                _ => lower
+                    .parse::<f32>()
+                    .map(|n| gpui::FontWeight(n.clamp(1.0, 1000.0)))
+                    .unwrap_or(gpui::FontWeight(400.0)),
+            }
+        }
     }
 }
 

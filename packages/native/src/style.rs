@@ -1,5 +1,14 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
+/// Font weight value — accepts both CSS strings ("bold", "700") and numbers (700).
+/// JS style objects commonly use both `fontWeight: "bold"` and `fontWeight: 700`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FontWeightValue {
+    Num(f64),
+    Str(String),
+}
+
 /// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -148,7 +157,7 @@ pub struct StyleDesc {
     // Text
     pub font_size: Option<f64>,
     pub font_family: Option<String>,
-    pub font_weight: Option<String>,
+    pub font_weight: Option<FontWeightValue>,
     pub text_align: Option<String>,
     pub line_height: Option<f64>,
     pub white_space: Option<String>,
