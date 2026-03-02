@@ -703,12 +703,6 @@ impl Platform for NodePlatform {
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     fn write_to_primary(&self, _item: ClipboardItem) {}
 
-    // Windows requires a raw HWND handle.
-    #[cfg(target_os = "windows")]
-    fn get_raw_handle(&self) -> windows::Win32::Foundation::HWND {
-        windows::Win32::Foundation::HWND::default()
-    }
-
     fn write_credentials(&self, _url: &str, _username: &str, _password: &[u8]) -> Task<Result<()>> {
         Task::ready(Err(anyhow::anyhow!(
             "credential storage is not available in Node.js"

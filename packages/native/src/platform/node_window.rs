@@ -425,4 +425,10 @@ impl PlatformWindow for NodeWindow {
     }
 
     fn set_client_inset(&self, _inset: Pixels) {}
+
+    // Windows PlatformWindow requires a raw HWND handle.
+    #[cfg(target_os = "windows")]
+    fn get_raw_handle(&self) -> windows::Win32::Foundation::HWND {
+        windows::Win32::Foundation::HWND::default()
+    }
 }
