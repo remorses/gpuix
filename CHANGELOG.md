@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-03-02 17:05 UTC
+
+- Fix `fontWeight` to accept both string and number values — previously `fontWeight: 700` (number) would reject the entire mutation batch because the Rust deserializer only accepted strings. Now uses a `FontWeightValue` enum with `#[serde(untagged)]` that deserializes both `"bold"` (string) and `700` (number). Numeric values are clamped to 1–1000.
+- All 105 tests pass.
+
 ## 2026-03-02 16:55 UTC
 
 - Add `whiteSpace` support — `"nowrap"` prevents text wrapping (single line), `"normal"` enables wrapping (default). Applied in both `apply_styles()` and `build_text()` via GPUI's `.whitespace_nowrap()` / `.whitespace_normal()`.

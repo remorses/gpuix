@@ -299,6 +299,8 @@ CSS-like styling via the `style` prop:
 > </div>
 > ```
 
+> **Note: GPUI defaults text color to black, not white.** Unlike CSS, GPUI does not inherit `color` from parent elements. Every `<text>` element that doesn't set an explicit `color` style will render as black — invisible on dark backgrounds. Always set `color` on your text elements or on a parent `<div>` (which applies `text_color` to all children in that subtree via GPUI's `Styled` trait).
+
 ## Testing
 
 GPUIX includes a **GPU-backed test renderer** (`TestGpuixRenderer`) that runs the full GPUI rendering pipeline — same `GpuixView`, `build_element()`, `apply_styles()`, and event handlers as production. Windows are positioned offscreen but fully rendered by Metal.

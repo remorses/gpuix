@@ -12,7 +12,7 @@ export { resetIdCounter } from "./reconciler/host-config"
 export { handleGpuixEvent } from "./reconciler/event-registry"
 
 // Testing utilities
-export { TestRenderer, createTestRoot } from "./testing"
+export { TestRenderer, createTestRoot, hasNativeTestRenderer } from "./testing"
 export type { TestRoot, TestElement } from "./testing"
 export type {
   EventPayload,
