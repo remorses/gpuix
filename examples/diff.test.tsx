@@ -22,6 +22,10 @@ const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 const SCREENSHOT_DIR = "/tmp"
 
+// Background for the scroll container — matches the diff viewer's unchanged line bg
+// so the area below content doesn't look different.
+const DIFF_BG = "rgba(15, 15, 15, 1)"
+
 // ── Test fixtures ────────────────────────────────────────────────────
 
 const simpleHunks: Hunk[] = [
@@ -136,9 +140,9 @@ describeNative("diff viewer", () => {
         return (
           <div
             style={{
-              width: 800,
-              height: 400,
-              backgroundColor: "#11111b",
+              width: "100%",
+              height: "100%",
+              backgroundColor: DIFF_BG,
               overflow: "scroll",
             }}
           >
@@ -170,9 +174,9 @@ describeNative("diff viewer", () => {
         return (
           <div
             style={{
-              width: 900,
-              height: 600,
-              backgroundColor: "#11111b",
+              width: "100%",
+              height: "100%",
+              backgroundColor: DIFF_BG,
               overflow: "scroll",
             }}
           >
@@ -208,9 +212,9 @@ describeNative("diff viewer", () => {
         return (
           <div
             style={{
-              width: 1000,
-              height: 400,
-              backgroundColor: "#11111b",
+              width: "100%",
+              height: "100%",
+              backgroundColor: DIFF_BG,
               overflow: "scroll",
             }}
           >
@@ -240,9 +244,9 @@ describeNative("diff viewer", () => {
         return (
           <div
             style={{
-              width: 1200,
-              height: 600,
-              backgroundColor: "#11111b",
+              width: "100%",
+              height: "100%",
+              backgroundColor: DIFF_BG,
               overflow: "scroll",
             }}
           >
@@ -268,12 +272,14 @@ describeNative("diff viewer", () => {
   describe("scrolling", () => {
     it("scrolls through a long diff and produces different screenshots", () => {
       function LongDiff() {
+        // Constrained height so content overflows and scrolling is needed.
+        // Full width fills the canvas, but short height forces scroll.
         return (
           <div
             style={{
-              width: 900,
+              width: "100%",
               height: 300,
-              backgroundColor: "#11111b",
+              backgroundColor: DIFF_BG,
               overflow: "scroll",
             }}
           >
@@ -321,9 +327,9 @@ describeNative("diff viewer", () => {
         return (
           <div
             style={{
-              width: 400,
-              height: 200,
-              backgroundColor: "#11111b",
+              width: "100%",
+              height: "100%",
+              backgroundColor: DIFF_BG,
             }}
           >
             <DiffViewer hunks={[]} filePath="empty.ts" />

@@ -864,11 +864,14 @@ function App() {
         </text>
       </div>
 
-      {/* Scrollable diff */}
+      {/* Scrollable diff — bg matches unchanged code so empty area below
+           content doesn't look different (minHeight: 100% doesn't work
+           inside scroll containers in GPUI) */}
       <div
         style={{
           flexGrow: 1,
           overflow: "scroll",
+          backgroundColor: UNCHANGED_CODE_BG,
         }}
       >
         <DiffViewer
