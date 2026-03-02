@@ -995,6 +995,21 @@ pub(crate) fn build_text(
         if let Some(ref weight) = style.font_weight {
             el = el.font_weight(parse_font_weight(weight));
         }
+        match style.white_space.as_deref() {
+            Some("nowrap") => el = el.whitespace_nowrap(),
+            Some("normal") => el = el.whitespace_normal(),
+            _ => {}
+        }
+        match style.text_overflow.as_deref() {
+            Some("ellipsis") => el = el.text_ellipsis(),
+            Some("ellipsis-start") => el = el.text_ellipsis_start(),
+            _ => {}
+        }
+        if let Some(clamp) = style.line_clamp {
+            if clamp >= 1.0 {
+                el = el.line_clamp(clamp as usize);
+            }
+        }
     }
 
     if let Some(ref content) = element.content {
@@ -1184,6 +1199,21 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     if let Some(ref weight) = style.font_weight {
         el = el.font_weight(parse_font_weight(weight));
+    }
+    match style.white_space.as_deref() {
+        Some("nowrap") => el = el.whitespace_nowrap(),
+        Some("normal") => el = el.whitespace_normal(),
+        _ => {}
+    }
+    match style.text_overflow.as_deref() {
+        Some("ellipsis") => el = el.text_ellipsis(),
+        Some("ellipsis-start") => el = el.text_ellipsis_start(),
+        _ => {}
+    }
+    if let Some(clamp) = style.line_clamp {
+        if clamp >= 1.0 {
+            el = el.line_clamp(clamp as usize);
+        }
     }
     if let Some(radius) = style.border_radius {
         el = el.rounded(gpui::px(radius as f32));

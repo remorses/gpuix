@@ -707,4 +707,585 @@ describeNative("style properties", () => {
       expect(fs.statSync(path).size).toBeGreaterThan(0)
     })
   })
+
+  // ── whiteSpace ──────────────────────────────────────────────────
+
+  describe("whiteSpace", () => {
+    it("nowrap: long text stays on one line and overflows container", () => {
+      function NowrapTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 300,
+                height: 80,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+                overflow: "hidden",
+              }}
+            >
+              <text
+                style={{
+                  color: "#cdd6f4",
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                This is a very long line of text that should never wrap to a second line regardless of container width
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<NowrapTest />)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "This is a very long line of text that should never wrap to a second line regardless of container width",
+        ]
+      `)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-whitespace-nowrap.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+
+    it("normal: text wraps within container width", () => {
+      function WrapTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 200,
+                height: 120,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+              }}
+            >
+              <text
+                style={{
+                  color: "#cdd6f4",
+                  fontSize: 13,
+                  whiteSpace: "normal",
+                }}
+              >
+                This text should wrap naturally within the narrow container width producing multiple lines
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<WrapTest />)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-whitespace-normal.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+
+    it("nowrap vs normal: screenshots should differ for same text", () => {
+      function NowrapBox() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 150,
+                height: 80,
+                backgroundColor: "#1e1e2e",
+                padding: 8,
+              }}
+            >
+              <text style={{ color: "#cdd6f4", fontSize: 13, whiteSpace: "nowrap" }}>
+                The quick brown fox jumps over
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      function NormalBox() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 150,
+                height: 80,
+                backgroundColor: "#1e1e2e",
+                padding: 8,
+              }}
+            >
+              <text style={{ color: "#cdd6f4", fontSize: 13, whiteSpace: "normal" }}>
+                The quick brown fox jumps over
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<NowrapBox />)
+      const pathNowrap = `${SCREENSHOT_DIR}/gpuix-ws-nowrap-cmp.png`
+      if (fs.existsSync(pathNowrap)) fs.unlinkSync(pathNowrap)
+      testRoot.renderer.captureScreenshot(pathNowrap)
+
+      const testRoot2 = createTestRoot()
+      testRoot2.render(<NormalBox />)
+      const pathNormal = `${SCREENSHOT_DIR}/gpuix-ws-normal-cmp.png`
+      if (fs.existsSync(pathNormal)) fs.unlinkSync(pathNormal)
+      testRoot2.renderer.captureScreenshot(pathNormal)
+
+      const nowrapBytes = fs.readFileSync(pathNowrap)
+      const normalBytes = fs.readFileSync(pathNormal)
+      expect(nowrapBytes.equals(normalBytes)).toBe(false)
+    })
+
+    it("nowrap on div: applies to child text elements via inheritance", () => {
+      function DivNowrapTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 200,
+                height: 80,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+              }}
+            >
+              <text style={{ color: "#89b4fa", fontSize: 13 }}>
+                const longVariableName = calculateSomethingImportant()
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<DivNowrapTest />)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-whitespace-div-nowrap.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+  })
+
+  // ── textOverflow ────────────────────────────────────────────────
+
+  describe("textOverflow", () => {
+    it("ellipsis: truncates long text with ... at end", () => {
+      function EllipsisTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 300,
+                height: 100,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+                gap: 8,
+              }}
+            >
+              <text
+                style={{
+                  color: "#cdd6f4",
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                packages/native/src/renderer.rs — a very long file path that should be truncated
+              </text>
+              <text style={{ color: "#6c7086", fontSize: 11 }}>
+                textOverflow: ellipsis
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<EllipsisTest />)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-text-overflow-ellipsis.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+
+    it("ellipsis-start: truncates long text with ... at start", () => {
+      function EllipsisStartTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 300,
+                height: 100,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+                gap: 8,
+              }}
+            >
+              <text
+                style={{
+                  color: "#cdd6f4",
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis-start",
+                }}
+              >
+                packages/native/src/renderer.rs — a very long file path that should be truncated from start
+              </text>
+              <text style={{ color: "#6c7086", fontSize: 11 }}>
+                textOverflow: ellipsis-start
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<EllipsisStartTest />)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-text-overflow-start.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+
+    it("ellipsis vs ellipsis-start: produce different screenshots", () => {
+      const longText = "src/packages/native/custom_elements/input.rs — handle keyboard events and focus state"
+
+      function EndEllipsis() {
+        return (
+          <Center>
+            <div style={{ width: 250, height: 50, backgroundColor: "#1e1e2e", padding: 8 }}>
+              <text style={{
+                color: "#cdd6f4", fontSize: 13,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>
+                {longText}
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      function StartEllipsis() {
+        return (
+          <Center>
+            <div style={{ width: 250, height: 50, backgroundColor: "#1e1e2e", padding: 8 }}>
+              <text style={{
+                color: "#cdd6f4", fontSize: 13,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis-start",
+              }}>
+                {longText}
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<EndEllipsis />)
+      const pathEnd = `${SCREENSHOT_DIR}/gpuix-ellipsis-end-cmp.png`
+      if (fs.existsSync(pathEnd)) fs.unlinkSync(pathEnd)
+      testRoot.renderer.captureScreenshot(pathEnd)
+
+      const testRoot2 = createTestRoot()
+      testRoot2.render(<StartEllipsis />)
+      const pathStart = `${SCREENSHOT_DIR}/gpuix-ellipsis-start-cmp.png`
+      if (fs.existsSync(pathStart)) fs.unlinkSync(pathStart)
+      testRoot2.renderer.captureScreenshot(pathStart)
+
+      const endBytes = fs.readFileSync(pathEnd)
+      const startBytes = fs.readFileSync(pathStart)
+      expect(endBytes.equals(startBytes)).toBe(false)
+    })
+
+    it("short text: no truncation when text fits", () => {
+      function ShortTextTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 400,
+                height: 60,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+              }}
+            >
+              <text
+                style={{
+                  color: "#a6e3a1",
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                short.ts
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<ShortTextTest />)
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "short.ts",
+        ]
+      `)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-text-overflow-short.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+    })
+  })
+
+  // ── lineClamp ───────────────────────────────────────────────────
+
+  describe("lineClamp", () => {
+    it("clamps multi-line text to specified number of lines", () => {
+      function LineClampTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 300,
+                height: 200,
+                backgroundColor: "#1e1e2e",
+                padding: 16,
+                borderRadius: 8,
+                gap: 12,
+              }}
+            >
+              <text style={{ color: "#6c7086", fontSize: 11 }}>
+                lineClamp: 2
+              </text>
+              <div
+                style={{
+                  width: 260,
+                  backgroundColor: "#313244",
+                  padding: 8,
+                  borderRadius: 4,
+                }}
+              >
+                <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 2 }}>
+                  This is a paragraph of text that should be clamped to exactly two lines. Any content beyond the second line will be hidden and not visible in the rendered output. It keeps going and going.
+                </text>
+              </div>
+              <text style={{ color: "#6c7086", fontSize: 11 }}>
+                lineClamp: 1
+              </text>
+              <div
+                style={{
+                  width: 260,
+                  backgroundColor: "#313244",
+                  padding: 8,
+                  borderRadius: 4,
+                }}
+              >
+                <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 1 }}>
+                  Single line clamp — this text should be limited to one visible line only, truncating the rest.
+                </text>
+              </div>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<LineClampTest />)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-line-clamp.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+
+    it("lineClamp on div: applies to child text elements", () => {
+      function DivClampTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 250,
+                height: 100,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+                lineClamp: 3,
+              }}
+            >
+              <text style={{ color: "#cdd6f4", fontSize: 13 }}>
+                Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<DivClampTest />)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-line-clamp-div.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+
+    it("lineClamp 1 vs 3: produce different screenshots", () => {
+      const longText = "A long paragraph that will need multiple lines to display fully when rendered at a reasonable font size inside a narrow container element."
+
+      function Clamp1() {
+        return (
+          <Center>
+            <div style={{ width: 200, height: 80, backgroundColor: "#1e1e2e", padding: 8 }}>
+              <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 1 }}>
+                {longText}
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      function Clamp3() {
+        return (
+          <Center>
+            <div style={{ width: 200, height: 80, backgroundColor: "#1e1e2e", padding: 8 }}>
+              <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 3 }}>
+                {longText}
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<Clamp1 />)
+      const path1 = `${SCREENSHOT_DIR}/gpuix-clamp1-cmp.png`
+      if (fs.existsSync(path1)) fs.unlinkSync(path1)
+      testRoot.renderer.captureScreenshot(path1)
+
+      const testRoot2 = createTestRoot()
+      testRoot2.render(<Clamp3 />)
+      const path3 = `${SCREENSHOT_DIR}/gpuix-clamp3-cmp.png`
+      if (fs.existsSync(path3)) fs.unlinkSync(path3)
+      testRoot2.renderer.captureScreenshot(path3)
+
+      const bytes1 = fs.readFileSync(path1)
+      const bytes3 = fs.readFileSync(path3)
+      expect(bytes1.equals(bytes3)).toBe(false)
+    })
+
+    it("edge case: lineClamp 0 is ignored (no clamping)", () => {
+      function Clamp0Test() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 200,
+                height: 120,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+              }}
+            >
+              <text style={{ color: "#cdd6f4", fontSize: 13, lineClamp: 0 }}>
+                lineClamp zero should not clamp. This text should wrap and show fully without any line limit applied.
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<Clamp0Test />)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-line-clamp-zero.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+  })
+
+  // ── pre-like behavior composite ─────────────────────────────────
+
+  describe("pre-like behavior", () => {
+    it("simulates white-space: pre by splitting lines with nowrap", () => {
+      const code = [
+        "fn main() {",
+        "    let x = 42;",
+        "    println!(\"{}\", x);",
+        "}",
+      ]
+      function PreTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 400,
+                height: 160,
+                backgroundColor: "#1e1e2e",
+                padding: 12,
+                borderRadius: 8,
+                fontFamily: "Menlo",
+              }}
+            >
+              {code.map((line, i) => (
+                <text
+                  key={i}
+                  style={{
+                    color: "#cdd6f4",
+                    fontSize: 13,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {line}
+                </text>
+              ))}
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<PreTest />)
+
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "fn main() {",
+          "    let x = 42;",
+          "    println!("{}", x);",
+          "}",
+        ]
+      `)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-pre-like.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+  })
 })

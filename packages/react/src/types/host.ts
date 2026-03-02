@@ -61,6 +61,9 @@ export interface StyleDesc {
   fontWeight?: string
   textAlign?: string
   lineHeight?: number
+  whiteSpace?: "normal" | "nowrap"
+  textOverflow?: "ellipsis" | "ellipsis-start"
+  lineClamp?: number
 
   overflow?: string
   overflowX?: string

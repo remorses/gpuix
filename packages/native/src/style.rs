@@ -151,6 +151,9 @@ pub struct StyleDesc {
     pub font_weight: Option<String>,
     pub text_align: Option<String>,
     pub line_height: Option<f64>,
+    pub white_space: Option<String>,
+    pub text_overflow: Option<String>,
+    pub line_clamp: Option<f64>,
 
     // Overflow
     pub overflow: Option<String>,

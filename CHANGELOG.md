@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-02 16:55 UTC
+
+- Add `whiteSpace` support — `"nowrap"` prevents text wrapping (single line), `"normal"` enables wrapping (default). Applied in both `apply_styles()` and `build_text()` via GPUI's `.whitespace_nowrap()` / `.whitespace_normal()`.
+- Add `textOverflow` support — `"ellipsis"` truncates long text with "..." at end, `"ellipsis-start"` truncates from the start. Applied in both `apply_styles()` and `build_text()` via GPUI's `.text_ellipsis()` / `.text_ellipsis_start()`.
+- Add `lineClamp` support — limits text to N visible lines. Applied in both `apply_styles()` and `build_text()` via GPUI's `.line_clamp(n)`. Values < 1 are ignored.
+- Update README: document all text style properties, add note about `white-space: pre` not being supported in GPUI with a workaround pattern (split `\n` + flex column + nowrap per line).
+- Add 13 new tests in styles.test.tsx: whiteSpace nowrap/normal with visual comparison, textOverflow ellipsis/ellipsis-start with comparison, lineClamp at 1/2/3 lines with comparison, edge case lineClamp: 0, div-level inheritance for nowrap and lineClamp, pre-like behavior composite test, and short text no-truncation edge case.
+- All 104 tests pass (82 existing + 22 in styles.test.tsx).
+
 ## 2026-03-02 16:30 UTC
 
 - Wire up `alignSelf` in `apply_styles()` — field existed in StyleDesc but was never applied. Uses direct `el.style().align_self` field access since GPUI has no convenience methods. Supports center, start, end, stretch, baseline.

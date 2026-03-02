@@ -287,7 +287,17 @@ CSS-like styling via the `style` prop:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
-**Text:** `fontSize`, `fontWeight`
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `whiteSpace`, `textOverflow`, `lineClamp`
+
+> **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in React and render each line as a separate `<text>` element in a flex column:
+>
+> ```tsx
+> <div style={{ display: 'flex', flexDirection: 'column', fontFamily: 'Menlo' }}>
+>   {code.split('\n').map((line, i) => (
+>     <text key={i} style={{ whiteSpace: 'nowrap' }}>{line}</text>
+>   ))}
+> </div>
+> ```
 
 ## Testing
 
