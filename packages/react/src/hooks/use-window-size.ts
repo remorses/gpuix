@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { useGpuix } from "./use-gpuix"
+import { useGpuix } from "./use-gpuix.js"
 
 export interface WindowSize {
   width: number

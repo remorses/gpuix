@@ -32,8 +32,8 @@
 /// it worse. The proper fix is moving element creation to commit-phase
 /// callbacks, but that requires a larger reconciler refactor.
 
-import type { NativeRenderer } from "../types/host"
-import { unregisterEventHandlers } from "./event-registry"
+import type { NativeRenderer } from "../types/host.js"
+import { unregisterEventHandlers } from "./event-registry.js"
 
 export type MutationTuple = (number | string | boolean)[]
 

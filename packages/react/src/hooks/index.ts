@@ -1,2 +1,2 @@
-export * from "./use-gpuix"
-export * from "./use-window-size"
+export * from "./use-gpuix.js"
+export * from "./use-window-size.js"

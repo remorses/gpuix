@@ -45,6 +45,10 @@ objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSRunningApplic
 # gpui_macos for real Metal rendering in visual test renderer (VisualTestAppContext)
 gpui_macos = { git = "https://github.com/zed-industries/zed", rev = "14f37ed5024bbccff2200797d1d9bf69aee01d66" }
 
+# Windows: windows crate for HWND type required by Platform::get_raw_handle()
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation"] }
+
 [features]
 # test-support is default so published binaries include TestGpuixRenderer,
 # letting users write GPU-backed tests for their apps.

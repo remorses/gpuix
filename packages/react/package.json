@@ -1,35 +1,44 @@
 {
   "name": "@gpuix/react",
   "version": "0.1.0",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "bun": "./src/index.ts",
-      "import": "./src/index.ts",
-      "require": "./dist/index.js",
-      "default": "./dist/index.js",
-      "types": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./jsx-runtime": {
-      "bun": "./jsx-runtime.js",
+      "types": "./jsx-runtime.d.ts",
       "import": "./jsx-runtime.js",
-      "require": "./jsx-runtime.js",
-      "types": "./jsx-runtime.d.ts"
+      "default": "./jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
-      "bun": "./jsx-dev-runtime.js",
+      "types": "./jsx-dev-runtime.d.ts",
       "import": "./jsx-dev-runtime.js",
-      "require": "./jsx-dev-runtime.js",
-      "types": "./jsx-dev-runtime.d.ts"
+      "default": "./jsx-dev-runtime.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
     }
   },
+  "files": [
+    "dist",
+    "jsx-runtime.js",
+    "jsx-runtime.d.ts",
+    "jsx-dev-runtime.js",
+    "jsx-dev-runtime.d.ts"
+  ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist *.tsbuildinfo && tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest"

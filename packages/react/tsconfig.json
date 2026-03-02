@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -14,9 +14,10 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
     "jsxImportSource": "@gpuix/react",
-    "lib": ["ES2020", "DOM"],
-    "types": ["vitest/globals", "node"]
+    "lib": ["ES2022"],
+    "types": ["vitest/globals", "node"],
+    "verbatimModuleSyntax": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "src/__tests__"]
 }

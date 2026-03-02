@@ -12,14 +12,14 @@
 import React from "react"
 import type { ReactNode } from "react"
 import type { EventPayload } from "@gpuix/native"
-import type { NativeRenderer } from "./types/host"
-import type { Root } from "./reconciler/renderer"
-import { reconciler } from "./reconciler/reconciler"
-import { setNativeRenderer, resetIdCounter } from "./reconciler/host-config"
-import { clearEventHandlers, handleGpuixEvent } from "./reconciler/event-registry"
-import { wrapWithBatching } from "./reconciler/batch-renderer"
+import type { NativeRenderer } from "./types/host.js"
+import type { Root } from "./reconciler/renderer.js"
+import { reconciler } from "./reconciler/reconciler.js"
+import { setNativeRenderer, resetIdCounter } from "./reconciler/host-config.js"
+import { clearEventHandlers, handleGpuixEvent } from "./reconciler/event-registry.js"
+import { wrapWithBatching } from "./reconciler/batch-renderer.js"
 import type { OpaqueRoot } from "react-reconciler"
-import { ConcurrentRoot } from "react-reconciler/constants"
+import { ConcurrentRoot } from "react-reconciler/constants.js"
 
 // Try to load the native TestGpuixRenderer (only available when built with test-support).
 let NativeTestRenderer: (new () => import("@gpuix/native").TestGpuixRenderer) | null = null

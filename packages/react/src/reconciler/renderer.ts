@@ -1,13 +1,13 @@
 import React from "react"
 import type { ReactNode } from "react"
 import type { OpaqueRoot } from "react-reconciler"
-import { ConcurrentRoot } from "react-reconciler/constants"
+import { ConcurrentRoot } from "react-reconciler/constants.js"
 import { GpuixRenderer } from "@gpuix/native"
-import { reconciler } from "./reconciler"
-import type { Container, NativeRenderer } from "../types/host"
-import { clearEventHandlers, handleGpuixEvent } from "./event-registry"
-import { setNativeRenderer } from "./host-config"
-import { wrapWithBatching } from "./batch-renderer"
+import { reconciler } from "./reconciler.js"
+import type { Container, NativeRenderer } from "../types/host.js"
+import { clearEventHandlers, handleGpuixEvent } from "./event-registry.js"
+import { setNativeRenderer } from "./host-config.js"
+import { wrapWithBatching } from "./batch-renderer.js"
 
 export function createRenderer(
   onEvent?: (event: import("@gpuix/native").EventPayload) => void

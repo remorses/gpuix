@@ -694,14 +694,20 @@ impl Platform for NodePlatform {
     #[cfg(target_os = "macos")]
     fn write_to_find_pasteboard(&self, _item: ClipboardItem) {}
 
-    // Linux has a "primary selection" (middle-click paste).
-    #[cfg(not(target_os = "macos"))]
+    // Linux/FreeBSD has a "primary selection" (middle-click paste).
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     fn read_from_primary(&self) -> Option<ClipboardItem> {
         None
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     fn write_to_primary(&self, _item: ClipboardItem) {}
+
+    // Windows requires a raw HWND handle.
+    #[cfg(target_os = "windows")]
+    fn get_raw_handle(&self) -> windows::Win32::Foundation::HWND {
+        windows::Win32::Foundation::HWND::default()
+    }
 
     fn write_credentials(&self, _url: &str, _username: &str, _password: &[u8]) -> Task<Result<()>> {
         Task::ready(Err(anyhow::anyhow!(

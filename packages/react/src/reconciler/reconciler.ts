@@ -1,5 +1,5 @@
 import ReactReconciler from "react-reconciler"
-import { hostConfig } from "./host-config"
+import { hostConfig } from "./host-config.js"
 
 // Cast to any because @types/react-reconciler is out of date with react-reconciler 0.31.0
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

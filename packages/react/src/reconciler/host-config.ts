@@ -6,7 +6,7 @@
 
 import { createContext } from "react"
 import type { ReactContext } from "react-reconciler"
-import { DefaultEventPriority } from "react-reconciler/constants"
+import { DefaultEventPriority } from "react-reconciler/constants.js"
 
 const NoEventPriority = 0
 import type {
@@ -18,12 +18,12 @@ import type {
   Props,
   PublicInstance,
   TextInstance,
-} from "../types/host"
+} from "../types/host.js"
 import {
   registerEventHandler,
   unregisterEventHandler,
   unregisterEventHandlers,
-} from "./event-registry"
+} from "./event-registry.js"
 
 let elementIdCounter = 0
 let currentUpdatePriority = NoEventPriority

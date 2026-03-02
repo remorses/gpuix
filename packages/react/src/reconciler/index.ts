@@ -1,2 +1,2 @@
-export * from "./reconciler"
-export * from "./renderer"
+export * from "./reconciler.js"
+export * from "./renderer.js"
