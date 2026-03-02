@@ -33,6 +33,10 @@
     "jsx-dev-runtime.js",
     "jsx-dev-runtime.d.ts"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/remorses/gpuix"
+  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"

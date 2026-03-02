@@ -14,6 +14,10 @@
       "aarch64-pc-windows-msvc"
     ]
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/remorses/gpuix"
+  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
