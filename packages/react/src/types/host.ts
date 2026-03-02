@@ -70,6 +70,11 @@ export interface StyleDesc {
   overflowY?: string
 
   cursor?: string
+
+  // Pseudo-selector styles — applied by GPUI natively (no JS round-trip).
+  // Nesting is one level deep: hover/active cannot contain hover/active.
+  hover?: Omit<StyleDesc, "hover" | "active">
+  active?: Omit<StyleDesc, "hover" | "active">
 }
 
 // Element types supported by GPUIX

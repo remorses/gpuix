@@ -1279,6 +1279,375 @@ describeNative("style properties", () => {
     })
   })
 
+  // ── hover / active pseudo-selector styles ────────────────────────
+
+  describe("hover style", () => {
+    it("should render with hover sub-style without crashing", () => {
+      function HoverTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 300,
+                height: 150,
+                backgroundColor: "#1e1e2e",
+                padding: 16,
+                gap: 12,
+                borderRadius: 8,
+              }}
+            >
+              <div
+                style={{
+                  padding: 12,
+                  backgroundColor: "#313244",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  hover: {
+                    backgroundColor: "#45475a",
+                    opacity: 0.9,
+                  },
+                }}
+              >
+                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                  Hover me
+                </text>
+              </div>
+              <text style={{ color: "#6c7086", fontSize: 11 }}>
+                hover: backgroundColor changes on hover
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<HoverTest />)
+
+      const texts = testRoot.renderer.getAllText()
+      expect(texts).toMatchInlineSnapshot(`
+        [
+          "Hover me",
+          "hover: backgroundColor changes on hover",
+        ]
+      `)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-hover-style.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+
+    it("should handle hover with only color change", () => {
+      function HoverColorTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                padding: 12,
+                width: 200,
+                height: 60,
+                backgroundColor: "#1e1e2e",
+                borderRadius: 6,
+                hover: {
+                  backgroundColor: "#f38ba8",
+                },
+              }}
+            >
+              <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                Color on hover
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<HoverColorTest />)
+
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Color on hover",
+        ]
+      `)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-hover-color.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+    })
+
+    it("should visually change when cursor hovers over element", () => {
+      // Renders a box with a bright hover color, captures before/after screenshots,
+      // and asserts they differ — proving GPUI's native hover refinement is active.
+      //
+      // Layout: Center wrapper fills 1280x800 test window.
+      // Inner box is 400x200 → centered at ~(640, 400).
+      // The hoverable child is near the top of the box.
+      function HoverVisualTest() {
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              height: "100%",
+              backgroundColor: "#11111b",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 400,
+                height: 200,
+                backgroundColor: "#1e1e2e",
+                padding: 16,
+                gap: 12,
+                borderRadius: 8,
+              }}
+            >
+              <div
+                style={{
+                  width: 368,
+                  height: 60,
+                  padding: 12,
+                  backgroundColor: "#313244",
+                  borderRadius: 6,
+                  hover: {
+                    backgroundColor: "#f38ba8",
+                  },
+                }}
+              >
+                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                  Hover target
+                </text>
+              </div>
+              <text style={{ color: "#6c7086", fontSize: 11 }}>
+                Should turn pink on hover
+              </text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<HoverVisualTest />)
+
+      // 1) Baseline screenshot — cursor far away from the element
+      testRoot.renderer.nativeSimulateMouseMove(10, 10)
+      const pathBefore = `${SCREENSHOT_DIR}/gpuix-hover-before.png`
+      if (fs.existsSync(pathBefore)) fs.unlinkSync(pathBefore)
+      testRoot.renderer.captureScreenshot(pathBefore)
+      expect(fs.existsSync(pathBefore)).toBe(true)
+
+      // 2) Move cursor over the hoverable child (center of test window)
+      //    The 400x200 box is centered in 1280x800 → box origin at (440, 300)
+      //    The hover target starts at (440+16, 300+16) = (456, 316), size 368x60
+      //    Center of hover target: ~(640, 346)
+      testRoot.renderer.nativeSimulateMouseMove(640, 346)
+      // Flush to let GPUI re-render with hover state
+      testRoot.renderer.flush()
+      const pathAfter = `${SCREENSHOT_DIR}/gpuix-hover-after.png`
+      if (fs.existsSync(pathAfter)) fs.unlinkSync(pathAfter)
+      testRoot.renderer.captureScreenshot(pathAfter)
+      expect(fs.existsSync(pathAfter)).toBe(true)
+
+      // 3) Assert screenshots differ — hover changed the background color
+      const beforeBytes = fs.readFileSync(pathBefore)
+      const afterBytes = fs.readFileSync(pathAfter)
+      expect(beforeBytes.equals(afterBytes)).toBe(false)
+    })
+
+    it("should handle empty hover object gracefully", () => {
+      function EmptyHoverTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 200,
+                height: 60,
+                backgroundColor: "#1e1e2e",
+                hover: {},
+              }}
+            >
+              <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                Empty hover
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<EmptyHoverTest />)
+
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Empty hover",
+        ]
+      `)
+    })
+  })
+
+  describe("active style", () => {
+    it("should render with active sub-style without crashing", () => {
+      function ActiveTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 300,
+                height: 150,
+                backgroundColor: "#1e1e2e",
+                padding: 16,
+                gap: 12,
+                borderRadius: 8,
+              }}
+            >
+              <div
+                style={{
+                  padding: 12,
+                  backgroundColor: "#313244",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  active: {
+                    backgroundColor: "#585b70",
+                    opacity: 0.8,
+                  },
+                }}
+              >
+                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                  Press me
+                </text>
+              </div>
+              <text style={{ color: "#6c7086", fontSize: 11 }}>
+                active: backgroundColor changes on press
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<ActiveTest />)
+
+      const texts = testRoot.renderer.getAllText()
+      expect(texts).toMatchInlineSnapshot(`
+        [
+          "Press me",
+          "active: backgroundColor changes on press",
+        ]
+      `)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-active-style.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+  })
+
+  describe("hover + active combined", () => {
+    it("should handle both hover and active on same element", () => {
+      function HoverActiveTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 300,
+                height: 120,
+                backgroundColor: "#1e1e2e",
+                padding: 16,
+                gap: 8,
+                borderRadius: 8,
+              }}
+            >
+              <div
+                style={{
+                  padding: 12,
+                  backgroundColor: "#313244",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  hover: {
+                    backgroundColor: "#45475a",
+                    borderColor: "#89b4fa",
+                    borderWidth: 1,
+                  },
+                  active: {
+                    backgroundColor: "#585b70",
+                    borderColor: "#f38ba8",
+                    borderWidth: 2,
+                  },
+                }}
+              >
+                <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                  Interactive button
+                </text>
+              </div>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<HoverActiveTest />)
+
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Interactive button",
+        ]
+      `)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-hover-active.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+    })
+
+    it("should render alongside event handlers without conflict", () => {
+      function HoverClickTest() {
+        return (
+          <Center>
+            <div
+              style={{
+                width: 200,
+                height: 60,
+                backgroundColor: "#313244",
+                padding: 12,
+                borderRadius: 6,
+                cursor: "pointer",
+                hover: { backgroundColor: "#45475a" },
+                active: { backgroundColor: "#585b70" },
+              }}
+              onClick={() => {}}
+            >
+              <text style={{ color: "#cdd6f4", fontSize: 14 }}>
+                Hover + Click
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      testRoot.render(<HoverClickTest />)
+
+      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
+        [
+          "Hover + Click",
+        ]
+      `)
+
+      // Verify it renders and screenshots without crash
+      const path = `${SCREENSHOT_DIR}/gpuix-hover-click.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      testRoot.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+    })
+  })
+
   // ── pre-like behavior composite ─────────────────────────────────
 
   describe("pre-like behavior", () => {

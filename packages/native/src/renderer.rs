@@ -700,6 +700,17 @@ pub(crate) fn build_div(
 
     if let Some(ref style) = element.style {
         el = apply_styles(el, style);
+
+        // ── Pseudo-selector styles (hover / active) ──────────────────
+        // GPUI's .hover() and .active() take a closure that receives a
+        // StyleRefinement and returns it with modifications. Since
+        // StyleRefinement implements Styled, we can reuse apply_styles().
+        if let Some(ref hover_style) = style.hover {
+            el = el.hover(|refinement| apply_styles(refinement, hover_style));
+        }
+        if let Some(ref active_style) = style.active {
+            el = el.active(|refinement| apply_styles(refinement, active_style));
+        }
     }
 
     // ── Overflow: scroll ─────────────────────────────────────────────

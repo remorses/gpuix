@@ -171,6 +171,11 @@ pub struct StyleDesc {
 
     // Cursor
     pub cursor: Option<String>,
+
+    // Pseudo-selector styles — applied by GPUI natively (no JS round-trip).
+    // Uses Box to avoid infinite-size struct (StyleDesc contains StyleDesc).
+    pub hover: Option<Box<StyleDesc>>,
+    pub active: Option<Box<StyleDesc>>,
 }
 
 /// Parse a color string (hex, rgb, etc.) to GPUI Hsla

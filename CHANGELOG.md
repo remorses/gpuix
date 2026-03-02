@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-02 23:30 UTC
+
+- **Add hover/active pseudo-selector style support** — styles applied natively by GPUI with zero JS round-trips.
+  - New `hover` and `active` keys in `StyleDesc` accept nested style objects: `style={{ backgroundColor: '#313244', hover: { backgroundColor: '#45475a' }, active: { backgroundColor: '#585b70' } }}`.
+  - Rust `StyleDesc` (style.rs): added `hover: Option<Box<StyleDesc>>` and `active: Option<Box<StyleDesc>>` fields with serde support.
+  - Renderer (renderer.rs): `build_div()` calls GPUI's native `.hover()` and `.active()` methods, passing the sub-styles through `apply_styles()` which works on `StyleRefinement` via the `Styled` trait.
+  - TypeScript types (host.ts): `hover?` and `active?` typed as `Omit<StyleDesc, 'hover' | 'active'>` to prevent infinite nesting.
+  - Added 7 tests validating hover-only, active-only, combined hover+active, empty hover, color-only hover, and hover alongside event handlers.
+
 ## 2026-03-02 16:50 UTC
 
 - **Add GitHub Actions CI/CD pipeline** (`.github/workflows/ci.yml`) — builds native binaries for 4 targets (macOS arm64/x64, Linux x64/arm64), runs tests on macOS, and publishes to npm.
