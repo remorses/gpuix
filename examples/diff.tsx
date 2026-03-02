@@ -1,6 +1,8 @@
 /**
  * GPUIX Diff Viewer Example
  *
+ * Ported from: https://github.com/remorses/critique/blob/87fba2b/src/diff.tsx
+ *
  * Port of critique's diff.tsx from opentui to GPUIX.
  * Renders unified or split diff views with syntax highlighting (shiki)
  * and word-level diff highlights inside a scrollable container.
