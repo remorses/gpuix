@@ -30,6 +30,28 @@ use crate::platform::NodePlatform;
 use crate::retained_tree::RetainedTree;
 use crate::style::{parse_color_hex, StyleDesc};
 
+/// Parse a CSS font-weight string into a GPUI FontWeight.
+/// Handles named keywords (case-insensitive, with hyphenated variants)
+/// and numeric strings. Falls back to 400 (normal) for unrecognized values.
+fn parse_font_weight(value: &str) -> gpui::FontWeight {
+    let s = value.trim().to_ascii_lowercase();
+    match s.as_str() {
+        "100" | "thin" => gpui::FontWeight(100.0),
+        "200" | "extralight" | "extra-light" => gpui::FontWeight(200.0),
+        "300" | "light" => gpui::FontWeight(300.0),
+        "400" | "normal" => gpui::FontWeight(400.0),
+        "500" | "medium" => gpui::FontWeight(500.0),
+        "600" | "semibold" | "semi-bold" => gpui::FontWeight(600.0),
+        "700" | "bold" => gpui::FontWeight(700.0),
+        "800" | "extrabold" | "extra-bold" => gpui::FontWeight(800.0),
+        "900" | "black" => gpui::FontWeight(900.0),
+        _ => s
+            .parse::<f32>()
+            .map(gpui::FontWeight)
+            .unwrap_or(gpui::FontWeight(400.0)),
+    }
+}
+
 /// Abstracted event callback — both production and test renderers use this.
 /// Production: wraps ThreadsafeFunction (async, queued on Node.js event loop).
 /// Tests: wraps Arc<Mutex<Vec<EventPayload>>> (synchronous collection).
@@ -962,6 +984,17 @@ pub(crate) fn build_text(
         if let Some(size) = style.font_size {
             el = el.text_size(gpui::px(size as f32));
         }
+        if let Some(ref bg) = style.background_color.as_ref().or(style.background.as_ref()) {
+            if let Some(hex) = parse_color_hex(bg) {
+                el = el.bg(gpui::rgba(hex));
+            }
+        }
+        if let Some(ref family) = style.font_family {
+            el = el.font_family(family.clone());
+        }
+        if let Some(ref weight) = style.font_weight {
+            el = el.font_weight(parse_font_weight(weight));
+        }
     }
 
     if let Some(ref content) = element.content {
@@ -1014,11 +1047,17 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if style.flex_direction.as_deref() == Some("row") {
         el = el.flex_row();
     }
-    if style.flex_grow.is_some() {
-        el = el.flex_grow();
+    match style.flex_wrap.as_deref() {
+        Some("wrap") => el = el.flex_wrap(),
+        Some("wrap-reverse") => el = el.flex_wrap_reverse(),
+        Some("nowrap") => el = el.flex_nowrap(),
+        _ => {}
     }
-    if style.flex_shrink.is_some() {
-        el = el.flex_shrink();
+    if let Some(grow) = style.flex_grow {
+        el.style().flex_grow = Some(grow as f32);
+    }
+    if let Some(shrink) = style.flex_shrink {
+        el.style().flex_shrink = Some(shrink as f32);
     }
     match style.align_items.as_deref() {
         Some("center") => el = el.items_center(),
@@ -1032,6 +1071,14 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("end") | Some("flex-end") => el = el.justify_end(),
         Some("between") | Some("space-between") => el = el.justify_between(),
         Some("around") | Some("space-around") => el = el.justify_around(),
+        _ => {}
+    }
+    match style.align_self.as_deref() {
+        Some("center") => { el.style().align_self = Some(gpui::AlignItems::Center); }
+        Some("start") | Some("flex-start") => { el.style().align_self = Some(gpui::AlignItems::FlexStart); }
+        Some("end") | Some("flex-end") => { el.style().align_self = Some(gpui::AlignItems::FlexEnd); }
+        Some("stretch") => { el.style().align_self = Some(gpui::AlignItems::Stretch); }
+        Some("baseline") => { el.style().align_self = Some(gpui::AlignItems::Baseline); }
         _ => {}
     }
     if let Some(gap) = style.gap {
@@ -1131,6 +1178,12 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         if let Some(hex) = parse_color_hex(color) {
             el = el.text_color(gpui::rgba(hex));
         }
+    }
+    if let Some(ref family) = style.font_family {
+        el = el.font_family(family.clone());
+    }
+    if let Some(ref weight) = style.font_weight {
+        el = el.font_weight(parse_font_weight(weight));
     }
     if let Some(radius) = style.border_radius {
         el = el.rounded(gpui::px(radius as f32));

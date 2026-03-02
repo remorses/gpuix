@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-02 16:30 UTC
+
+- Wire up `alignSelf` in `apply_styles()` — field existed in StyleDesc but was never applied. Uses direct `el.style().align_self` field access since GPUI has no convenience methods. Supports center, start, end, stretch, baseline.
+- Fix `flexGrow` and `flexShrink` to respect actual numeric values — previously `flexGrow: 0` and `flexGrow: 1` both produced the same result (hardcoded 1.0). Now sets `el.style().flex_grow = Some(value)` directly.
+- Add `fontFamily` support — new field in `StyleDesc` (Rust + TS), applied in both `apply_styles()` and `build_text()` via GPUI's `.font_family()` method. Enables monospace fonts for code rendering.
+- Wire up `fontWeight` in `apply_styles()` and `build_text()` — field existed in StyleDesc but was never applied. Parses CSS weight strings (named keywords like "bold"/"semibold" and numeric like "700") to `gpui::FontWeight`. Case-insensitive with hyphenated variants (extra-bold, semi-bold).
+- Add `backgroundColor` support to `build_text()` — text elements can now have background colors via `.bg()` on the wrapping div. Enables word-level diff highlighting.
+- Wire up `flexWrap` in `apply_styles()` — field existed in StyleDesc but was never applied. Maps "wrap" → `flex_wrap()`, "wrap-reverse" → `flex_wrap_reverse()`, "nowrap" → `flex_nowrap()`.
+- Extract `parse_font_weight()` helper function to deduplicate font-weight parsing between `apply_styles()` and `build_text()`.
+- Add `styles.test.tsx` with 9 end-to-end tests covering all new features with Metal GPU screenshots: alignSelf stretch, flexShrink 0, flexGrow values, fontFamily (Menlo/Courier vs default), fontWeight (bold/light/normal), text backgroundColor, flexWrap, and a composite diff-viewer row test.
+- All 91 tests pass.
+
 ## 2026-03-02 14:54 UTC
 
 - Add test proving React refs expose the element's numeric ID (`ref.current.id`) for use with programmatic scroll API

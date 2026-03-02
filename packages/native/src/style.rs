@@ -147,6 +147,7 @@ pub struct StyleDesc {
 
     // Text
     pub font_size: Option<f64>,
+    pub font_family: Option<String>,
     pub font_weight: Option<String>,
     pub text_align: Option<String>,
     pub line_height: Option<f64>,

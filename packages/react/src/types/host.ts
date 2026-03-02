@@ -57,6 +57,7 @@ export interface StyleDesc {
   borderBottomRightRadius?: number
 
   fontSize?: number
+  fontFamily?: string
   fontWeight?: string
   textAlign?: string
   lineHeight?: number
