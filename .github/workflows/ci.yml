@@ -29,7 +29,7 @@ jobs:
           - host: macos-latest
             target: aarch64-apple-darwin
             build: bun run build --target aarch64-apple-darwin
-          - host: macos-13
+          - host: macos-latest
             target: x86_64-apple-darwin
             build: bun run build --target x86_64-apple-darwin
           # ── Linux (Vulkan/wgpu) ────────────────────────────────────

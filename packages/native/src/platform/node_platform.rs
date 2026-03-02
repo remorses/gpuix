@@ -685,11 +685,23 @@ impl Platform for NodePlatform {
 
     fn write_to_clipboard(&self, _item: ClipboardItem) {}
 
+    // macOS has a "Find Pasteboard" (shared across apps for Cmd+E/Cmd+G).
+    #[cfg(target_os = "macos")]
     fn read_from_find_pasteboard(&self) -> Option<ClipboardItem> {
         None
     }
 
+    #[cfg(target_os = "macos")]
     fn write_to_find_pasteboard(&self, _item: ClipboardItem) {}
+
+    // Linux has a "primary selection" (middle-click paste).
+    #[cfg(not(target_os = "macos"))]
+    fn read_from_primary(&self) -> Option<ClipboardItem> {
+        None
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn write_to_primary(&self, _item: ClipboardItem) {}
 
     fn write_credentials(&self, _url: &str, _username: &str, _password: &[u8]) -> Task<Result<()>> {
         Task::ready(Err(anyhow::anyhow!(
