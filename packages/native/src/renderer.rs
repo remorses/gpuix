@@ -55,6 +55,10 @@ thread_local! {
     /// napi methods read from here for programmatic scroll control.
     /// ScrollHandle is Rc<RefCell<...>> so its methods (set_offset, offset,
     /// scroll_to_item) work without an App context.
+    ///
+    /// NOTE: This is a singleton — if multiple renderers/windows coexist,
+    /// the last one to render wins. Acceptable for now (single-window only).
+    /// TODO: Scope by renderer/window ID when multi-window support is added.
     static SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
 }
 
@@ -488,7 +492,9 @@ impl gpui::Render for GpuixView {
         self.custom_registry
             .prune_missing(|id| tree.elements.contains_key(&id));
 
-        // Clean up scroll handles for elements that no longer exist.
+        // Clean up scroll handles for destroyed elements (IDs removed from tree).
+        // Scrollability-based cleanup (element still exists but style changed
+        // from scroll to non-scroll) is handled inside build_div().
         self.scroll_handles
             .retain(|id, _| tree.elements.contains_key(id));
 
@@ -666,13 +672,22 @@ pub(crate) fn build_div(
     // ── Overflow: scroll ─────────────────────────────────────────────
     // overflow_scroll() requires StatefulInteractiveElement (only on Stateful<Div>),
     // so we handle it here rather than in apply_styles (which takes E: Styled).
-    // When scroll is enabled, we also attach a persistent ScrollHandle so the
-    // scroll offset survives across GPUI frames and can be queried/set from JS.
+    //
+    // CSS precedence: axis-specific props (overflowX/Y) override the shorthand
+    // (overflow). E.g. { overflow: "scroll", overflowY: "hidden" } → scroll X only.
     if let Some(ref style) = element.style {
-        let needs_scroll_x = style.overflow.as_deref() == Some("scroll")
-            || style.overflow_x.as_deref() == Some("scroll");
-        let needs_scroll_y = style.overflow.as_deref() == Some("scroll")
-            || style.overflow_y.as_deref() == Some("scroll");
+        // Resolve each axis: axis-specific overrides shorthand.
+        let resolved_x = style
+            .overflow_x
+            .as_deref()
+            .or(style.overflow.as_deref());
+        let resolved_y = style
+            .overflow_y
+            .as_deref()
+            .or(style.overflow.as_deref());
+
+        let needs_scroll_x = resolved_x == Some("scroll");
+        let needs_scroll_y = resolved_y == Some("scroll");
 
         if needs_scroll_x && needs_scroll_y {
             el = el.overflow_scroll();
@@ -690,7 +705,13 @@ pub(crate) fn build_div(
                 .entry(element.id)
                 .or_insert_with(gpui::ScrollHandle::new);
             el = el.track_scroll(handle);
+        } else {
+            // Element is no longer scrollable — remove stale handle.
+            scroll_handles.remove(&element.id);
         }
+    } else {
+        // No style at all — remove stale handle if it existed.
+        scroll_handles.remove(&element.id);
     }
 
     // If a FocusHandle was pre-created for this element (by sync_focus_handles),
@@ -1132,19 +1153,20 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("default") => el = el.cursor_default(),
         _ => {}
     }
-    // Overflow: hidden is on the Styled trait, so we can handle it here.
+    // Overflow: hidden is on the Styled trait, so we handle it here.
     // overflow: "scroll" requires StatefulInteractiveElement — handled in build_div().
-    match style.overflow.as_deref() {
-        Some("hidden") => el = el.overflow_hidden(),
-        _ => {}
-    }
-    match style.overflow_x.as_deref() {
-        Some("hidden") => el = el.overflow_x_hidden(),
-        _ => {}
-    }
-    match style.overflow_y.as_deref() {
-        Some("hidden") => el = el.overflow_y_hidden(),
-        _ => {}
+    // CSS precedence: axis-specific (overflowX/Y) overrides the shorthand (overflow).
+    {
+        let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
+        let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
+        // Only apply hidden here — scroll is handled in build_div.
+        if resolved_x == Some("hidden") && resolved_y == Some("hidden") {
+            el = el.overflow_hidden();
+        } else if resolved_x == Some("hidden") {
+            el = el.overflow_x_hidden();
+        } else if resolved_y == Some("hidden") {
+            el = el.overflow_y_hidden();
+        }
     }
 
     el
