@@ -201,6 +201,9 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.simulateClick(x, y)
     this.dispatchNativeEvents()
+    // Flush again after React state updates so the Rust RetainedTree
+    // is fully rebuilt and GPUI has re-laid-out before any screenshot.
+    this.native.flush()
   }
 
   /** End-to-end: simulate scroll wheel through GPUI →
@@ -223,6 +226,9 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.simulateMouseMove(x, y, pressedButton)
     this.dispatchNativeEvents()
+    // Flush again after React state updates so hover styles are applied
+    // and the Rust tree is current before any screenshot.
+    this.native.flush()
   }
 
   /** End-to-end: simulate mouse down through GPUI hit testing →
@@ -232,6 +238,7 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.simulateMouseDown(x, y, button ?? 0)
     this.dispatchNativeEvents()
+    this.native.flush()
   }
 
   /** End-to-end: simulate mouse up through GPUI hit testing →
@@ -241,6 +248,7 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.simulateMouseUp(x, y, button ?? 0)
     this.dispatchNativeEvents()
+    this.native.flush()
   }
 
   // ── Tree inspection (queries Rust RetainedTree via napi) ────────

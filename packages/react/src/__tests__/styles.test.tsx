@@ -10,6 +10,7 @@ import fs from "fs"
 import { describe, it, expect, beforeEach } from "vitest"
 import React from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
+import { bufferSimilarity } from "./test-utils"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -1456,7 +1457,7 @@ describeNative("style properties", () => {
       // 3) Assert screenshots differ — hover changed the background color
       const beforeBytes = fs.readFileSync(pathBefore)
       const afterBytes = fs.readFileSync(pathAfter)
-      expect(beforeBytes.equals(afterBytes)).toBe(false)
+      expect(bufferSimilarity(beforeBytes, afterBytes)).toBeLessThan(0.98)
     })
 
     it("should handle empty hover object gracefully", () => {

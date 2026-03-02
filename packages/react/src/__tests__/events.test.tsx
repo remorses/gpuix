@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import React, { useState, useRef } from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import type { EventPayload } from "@gpuix/native"
+import { expectScreenshotsDiffer } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -923,17 +924,6 @@ describeNative("events", () => {
   })
 
   describe("screenshot", () => {
-    const expectScreenshotsDiffer = (beforePath: string, afterPath: string) => {
-      expect(fs.existsSync(beforePath)).toBe(true)
-      expect(fs.existsSync(afterPath)).toBe(true)
-      expect(fs.statSync(beforePath).size).toBeGreaterThan(0)
-      expect(fs.statSync(afterPath).size).toBeGreaterThan(0)
-
-      const before = fs.readFileSync(beforePath)
-      const after = fs.readFileSync(afterPath)
-      expect(before.equals(after)).toBe(false)
-    }
-
     it("should capture screenshot and reflect visual state changes", () => {
       function ScreenshotProbe() {
         const [active, setActive] = useState(false)

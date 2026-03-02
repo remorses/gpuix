@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import React, { useState } from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import type { EventPayload } from "@gpuix/native"
+import { bufferSimilarity } from "./test-utils"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -313,7 +314,7 @@ describeNative("custom element: input", () => {
 
       const before = fs.readFileSync(path0)
       const after = fs.readFileSync(path1)
-      expect(before.equals(after)).toBe(false)
+      expect(bufferSimilarity(before, after)).toBeLessThan(0.98)
     })
   })
 
