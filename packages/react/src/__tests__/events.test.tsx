@@ -12,7 +12,7 @@
 
 import fs from "fs"
 import { describe, it, expect, beforeEach } from "vitest"
-import React, { useState } from "react"
+import React, { useState, useRef } from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import type { EventPayload } from "@gpuix/native"
 
@@ -1411,6 +1411,53 @@ describeNative("events", () => {
       const offset = testRoot.renderer.getScrollOffset(container.id)
       expect(offset).not.toBeNull()
       expect(offset![1]).toBeLessThan(0)
+    })
+
+    it("should expose element id via ref for programmatic scroll", () => {
+      let capturedRef: any = null
+
+      function RefScroller() {
+        const scrollRef = useRef<any>(null)
+        // Capture the ref after render so the test can access it
+        capturedRef = scrollRef
+
+        return (
+          <div
+            ref={scrollRef}
+            style={{ width: 200, height: 100, overflow: "scroll" }}
+          >
+            <div style={{ height: 80 }}>
+              <text>Item A</text>
+            </div>
+            <div style={{ height: 80 }}>
+              <text>Item B</text>
+            </div>
+            <div style={{ height: 80 }}>
+              <text>Item C</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<RefScroller />)
+
+      // ref.current should be the Instance with a numeric id
+      expect(capturedRef).not.toBeNull()
+      expect(capturedRef.current).not.toBeNull()
+      expect(typeof capturedRef.current.id).toBe("number")
+      expect(capturedRef.current.id).toBeGreaterThan(0)
+
+      // Use the ref's id with the scroll API
+      const elementId = capturedRef.current.id
+
+      // Initially at 0,0
+      expect(testRoot.renderer.getScrollOffset(elementId)).toEqual([0, 0])
+
+      // Programmatic scroll via ref id
+      testRoot.renderer.scrollTo(elementId, 0, -60)
+      const offset = testRoot.renderer.getScrollOffset(elementId)
+      expect(offset).not.toBeNull()
+      expect(offset![1]).toBe(-60)
     })
   })
 })

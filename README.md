@@ -181,6 +181,54 @@ function loop() {
 loop()
 ```
 
+## Scrolling
+
+Containers with `overflow: "scroll"` become natively scrollable — GPUI handles scroll physics, clipping, and offset persistence automatically.
+
+```tsx
+function ScrollableList() {
+  return (
+    <div style={{ height: 300, overflow: 'scroll' }}>
+      {items.map((item, i) => (
+        <div key={i} style={{ height: 60, padding: 12 }}>
+          {item.name}
+        </div>
+      ))}
+    </div>
+  )
+}
+```
+
+Per-axis scrolling: use `overflowX: "scroll"` or `overflowY: "scroll"`.
+
+For programmatic scroll control, use a React ref to get the element's numeric ID, then call the renderer's scroll methods:
+
+```tsx
+function ProgrammaticScroll() {
+  const listRef = useRef<any>(null)
+
+  const jumpToBottom = () => {
+    if (listRef.current) {
+      renderer.scrollTo(listRef.current.id, 0, -999)
+    }
+  }
+
+  return (
+    <>
+      <div ref={listRef} style={{ height: 200, overflow: 'scroll' }}>
+        {items.map((item, i) => <div key={i}>{item}</div>)}
+      </div>
+      <div onClick={jumpToBottom}>Jump to bottom</div>
+    </>
+  )
+}
+
+// Available scroll methods on the renderer:
+renderer.scrollTo(elementId, x, y)        // set offset directly
+renderer.scrollToItem(elementId, index)   // scroll child into view
+renderer.getScrollOffset(elementId)       // returns [x, y] or null
+```
+
 ## Supported Elements
 
 | Element  | Description              |

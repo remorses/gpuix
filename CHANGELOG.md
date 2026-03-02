@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-02 14:54 UTC
+
+- Add test proving React refs expose the element's numeric ID (`ref.current.id`) for use with programmatic scroll API
+- Remove dead `id?: string` prop from `Props` type — it was never wired to anything
+- Add scroll usage docs to README: `overflow: "scroll"` example, per-axis scrolling, and programmatic scroll via refs
+- Comment Props type to document that element IDs come from refs, not a user prop
+
 ## 2026-03-02 14:42 UTC
 
 - Add scrollable container support — `overflow: "scroll"`, `overflowX: "scroll"`, `overflowY: "scroll"` now create native GPUI scrollable divs

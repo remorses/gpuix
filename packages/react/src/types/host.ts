@@ -78,9 +78,10 @@ export type ElementType =
   | "input"
   | "anchored"
 
-// Props passed to elements
+// Props passed to elements.
+// Element IDs are auto-generated numeric IDs (not user-settable).
+// Use React refs to get an element's ID: ref.current.id
 export type Props = Record<string, unknown> & {
-  id?: string
   style?: StyleDesc
   children?: React.ReactNode
 
