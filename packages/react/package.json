@@ -24,6 +24,10 @@
       "types": "./jsx-dev-runtime.d.ts"
     }
   },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -31,7 +35,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@gpuix/native": "workspace:*",
+    "@gpuix/native": "workspace:^",
     "react-reconciler": "^0.31.0"
   },
   "peerDependencies": {

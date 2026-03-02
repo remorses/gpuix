@@ -46,6 +46,9 @@ objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSRunningApplic
 gpui_macos = { git = "https://github.com/zed-industries/zed", rev = "14f37ed5024bbccff2200797d1d9bf69aee01d66" }
 
 [features]
+# test-support is default so published binaries include TestGpuixRenderer,
+# letting users write GPU-backed tests for their apps.
+# On Linux CI, pass --no-default-features since gpui_macos is macOS-only.
 default = ["test-support"]
 test-support = ["gpui/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
 

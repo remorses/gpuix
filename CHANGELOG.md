@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-02 16:50 UTC
+
+- **Add GitHub Actions CI/CD pipeline** (`.github/workflows/ci.yml`) — builds native binaries for 4 targets (macOS arm64/x64, Linux x64/arm64), runs tests on macOS, and publishes to npm.
+- Publish is version-gated: skips if the package.json version is already on npm. Bump version + push to main to release.
+- Two packages published: `@gpuix/native` (per-platform binaries via napi pre-publish) and `@gpuix/react` (pure TypeScript).
+- Generate `packages/native/npm/` per-platform package scaffolding (darwin-arm64, darwin-x64, linux-x64-gnu, linux-arm64-gnu).
+- Add `build:release` script for Linux CI builds without test-support (gpui_macos is macOS-only).
+- macOS builds include test-support by default so published binaries ship `TestGpuixRenderer` for user testing.
+- Update `@gpuix/react` dependency on `@gpuix/native` from `workspace:*` to `workspace:^` for publishing.
+- Add `publishConfig` to `@gpuix/react` package.json.
+- Document Cargo feature gate in Cargo.toml comments.
+
 ## 2026-03-02 16:32 UTC
 
 - **Migrate `packages/native` from napi-rs v2 to v3** — prerequisite for CI/CD and per-platform npm publishing.
