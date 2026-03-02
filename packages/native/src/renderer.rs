@@ -94,7 +94,9 @@ thread_local! {
 /// The main GPUI renderer exposed to Node.js.
 #[napi]
 pub struct GpuixRenderer {
-    event_callback: Option<ThreadsafeFunction<EventPayload>>,
+    /// Wrapped in Arc because napi v3 ThreadsafeFunction is !Clone.
+    /// Arc lets us share it into the GpuixView closure from &self methods.
+    event_callback: Option<Arc<ThreadsafeFunction<EventPayload>>>,
     tree: Arc<Mutex<RetainedTree>>,
     initialized: Arc<Mutex<bool>>,
     needs_redraw: Arc<AtomicBool>,
@@ -106,7 +108,7 @@ impl GpuixRenderer {
     pub fn new(event_callback: Option<ThreadsafeFunction<EventPayload>>) -> Self {
         let _ = env_logger::try_init();
         Self {
-            event_callback,
+            event_callback: event_callback.map(Arc::new),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             initialized: Arc::new(Mutex::new(false)),
             needs_redraw: Arc::new(AtomicBool::new(true)),
@@ -136,8 +138,10 @@ impl GpuixRenderer {
 
         let tree = self.tree.clone();
         // Wrap ThreadsafeFunction in Arc so GpuixView uses the abstracted EventCallback.
-        let callback: Option<EventCallback> = self.event_callback.as_ref().map(|tsf| {
-            let tsf = tsf.clone();
+        // Clone the Option<ThreadsafeFunction> to get an owned value — in napi v3,
+        // #[napi] methods have stricter lifetime bounds on &self, so as_ref() won't
+        // produce a 'static closure.
+        let callback: Option<EventCallback> = self.event_callback.clone().map(|tsf| {
             Arc::new(move |payload: EventPayload| {
                 tsf.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
             }) as EventCallback

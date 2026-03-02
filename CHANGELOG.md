@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-02 16:32 UTC
+
+- **Migrate `packages/native` from napi-rs v2 to v3** — prerequisite for CI/CD and per-platform npm publishing.
+  - Bump `napi` crate from `2` to `3` and `napi-derive` from `2` to `3` in `Cargo.toml` (`napi-build` stays at `2`).
+  - Bump `@napi-rs/cli` from `^2.18.0` to `^3.1.3` in `package.json`.
+  - Switch napi config from v2 `triples` format (`name` + `triples.additional`) to v3 `targets` format (`binaryName` + `targets` array). Add `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` targets.
+  - Change `prepublishOnly` script from `napi prepublish` to `napi pre-publish` (v3 hyphenated command).
+  - Add `publishConfig` with `registry` and `access: "public"`.
+  - Wrap `ThreadsafeFunction` in `Arc` in `GpuixRenderer` — napi v3 `ThreadsafeFunction` is `!Clone`, so `Arc` allows sharing it into the `GpuixView` closure from `&self` methods.
+  - Generated `index.js` now uses v3's `requireNative()` function pattern (replaces v2's switch/case loader).
+  - Generated `index.d.ts` now includes JSDoc comments from Rust `///` doc comments.
+- All 105 tests pass.
+
 ## 2026-03-02 17:05 UTC
 
 - Fix `fontWeight` to accept both string and number values — previously `fontWeight: 700` (number) would reject the entire mutation batch because the Rust deserializer only accepted strings. Now uses a `FontWeightValue` enum with `#[serde(untagged)]` that deserializes both `"bold"` (string) and `700` (number). Numeric values are clamped to 1–1000.
