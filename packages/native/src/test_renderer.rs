@@ -122,6 +122,7 @@ impl TestGpuixRenderer {
                     focus_handles: HashMap::new(),
                     _focus_subscriptions: Vec::new(),
                     custom_registry: CustomElementRegistry::with_defaults(),
+                    scroll_handles: HashMap::new(),
                 })
             })
             .map_err(|e| Error::from_reason(format!("Failed to open test window: {}", e)))?;
@@ -442,6 +443,72 @@ impl TestGpuixRenderer {
                 },
             );
             Ok(())
+        })
+    }
+
+    // ── Scroll API ─────────────────────────────────────────────────────
+
+    /// Set the scroll offset of a scrollable element.
+    /// x and y are negative pixel values (scroll down = more negative y).
+    /// Call flush() after to apply the offset and re-render.
+    #[napi]
+    pub fn scroll_to(&self, element_id: f64, x: f64, y: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| {
+                    if let Some(handle) = view.scroll_handles.get(&id) {
+                        handle.set_offset(gpui::point(gpui::px(x as f32), gpui::px(y as f32)));
+                    }
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    /// Scroll a child into view by its index in the children list.
+    /// Call flush() after to apply and re-render.
+    #[napi]
+    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let index = index as usize;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| {
+                    if let Some(handle) = view.scroll_handles.get(&id) {
+                        handle.scroll_to_item(index);
+                    }
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    /// Get the current scroll offset of a scrollable element.
+    /// Returns [x, y] or null if the element has no scroll handle.
+    #[napi]
+    pub fn get_scroll_offset(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            let result = cx
+                .update_window(window, |_, _window, app| {
+                    view.update(app, |view, _cx| {
+                        view.scroll_handles.get(&id).map(|handle| {
+                            let offset = handle.offset();
+                            vec![
+                                f64::from(f32::from(offset.x)),
+                                f64::from(f32::from(offset.y)),
+                            ]
+                        })
+                    })
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(result)
         })
     }
 

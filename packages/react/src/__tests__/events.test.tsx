@@ -1165,4 +1165,252 @@ describeNative("events", () => {
       `)
     })
   })
+
+  describe("scrollable containers", () => {
+    it("should scroll content when overflow is scroll", () => {
+      function ScrollableList() {
+        return (
+          <div style={{ width: 300, height: 200, overflow: "scroll" }}>
+            <div style={{ height: 100, backgroundColor: "#ff0000" }}>
+              <text>Item 1</text>
+            </div>
+            <div style={{ height: 100, backgroundColor: "#00ff00" }}>
+              <text>Item 2</text>
+            </div>
+            <div style={{ height: 100, backgroundColor: "#0000ff" }}>
+              <text>Item 3</text>
+            </div>
+            <div style={{ height: 100, backgroundColor: "#ffff00" }}>
+              <text>Item 4</text>
+            </div>
+            <div style={{ height: 100, backgroundColor: "#ff00ff" }}>
+              <text>Item 5</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<ScrollableList />)
+
+      // Find the scrollable container (the one with overflow: scroll)
+      const scrollContainer = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflow === "scroll")!
+      expect(scrollContainer).toBeDefined()
+
+      // Initially scroll offset should be 0,0
+      const initialOffset = testRoot.renderer.getScrollOffset(scrollContainer.id)
+      expect(initialOffset).toEqual([0, 0])
+
+      // Simulate scrolling down 50px (negative deltaY = scroll down)
+      testRoot.renderer.nativeSimulateScrollWheel(150, 100, 0, -50)
+
+      // Scroll offset should have changed (y becomes more negative as we scroll down)
+      const afterScrollOffset = testRoot.renderer.getScrollOffset(scrollContainer.id)
+      expect(afterScrollOffset).not.toBeNull()
+      expect(afterScrollOffset![1]).toBeLessThan(0) // scrolled down
+    })
+
+    it("should support overflow-y scroll only", () => {
+      function VerticalScroll() {
+        return (
+          <div style={{ width: 300, height: 100, overflowY: "scroll" }}>
+            <div style={{ height: 500 }}>
+              <text>Tall content</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<VerticalScroll />)
+
+      const container = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflowY === "scroll")!
+      expect(container).toBeDefined()
+
+      const initialOffset = testRoot.renderer.getScrollOffset(container.id)
+      expect(initialOffset).toEqual([0, 0])
+
+      // Scroll down
+      testRoot.renderer.nativeSimulateScrollWheel(150, 50, 0, -80)
+      const offset = testRoot.renderer.getScrollOffset(container.id)
+      expect(offset).not.toBeNull()
+      expect(offset![1]).toBeLessThan(0) // scrolled down vertically
+    })
+
+    it("should support programmatic scrollTo", () => {
+      function ScrollableBox() {
+        return (
+          <div style={{ width: 200, height: 100, overflow: "scroll" }}>
+            <div style={{ height: 500 }}>
+              <text>Very tall content</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<ScrollableBox />)
+
+      const container = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflow === "scroll")!
+
+      // Initially at 0,0
+      expect(testRoot.renderer.getScrollOffset(container.id)).toEqual([0, 0])
+
+      // Scroll programmatically to y=-100
+      testRoot.renderer.scrollTo(container.id, 0, -100)
+
+      const offset = testRoot.renderer.getScrollOffset(container.id)
+      expect(offset).not.toBeNull()
+      expect(offset![1]).toBe(-100)
+    })
+
+    it("should support programmatic scrollToItem", () => {
+      function ItemList() {
+        return (
+          <div style={{ width: 200, height: 100, overflow: "scroll" }}>
+            <div style={{ height: 80 }}>
+              <text>Item A</text>
+            </div>
+            <div style={{ height: 80 }}>
+              <text>Item B</text>
+            </div>
+            <div style={{ height: 80 }}>
+              <text>Item C</text>
+            </div>
+            <div style={{ height: 80 }}>
+              <text>Item D</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<ItemList />)
+
+      const container = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflow === "scroll")!
+
+      // Initially at top
+      expect(testRoot.renderer.getScrollOffset(container.id)).toEqual([0, 0])
+
+      // Scroll to item 3 (index 3, the 4th child "Item D")
+      testRoot.renderer.scrollToItem(container.id, 3)
+
+      // After scrolling to item, offset should have changed
+      const offset = testRoot.renderer.getScrollOffset(container.id)
+      expect(offset).not.toBeNull()
+      expect(offset![1]).toBeLessThan(0) // scrolled down to reveal item
+    })
+
+    it("should render scrollable container with visible screenshot diff", () => {
+      function ScreenshotScroller() {
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              height: "100%",
+              backgroundColor: "#1a1a2e",
+            }}
+          >
+            <div
+              style={{
+                width: 300,
+                height: 200,
+                overflow: "scroll",
+                backgroundColor: "#16213e",
+                borderRadius: 8,
+                borderWidth: 2,
+                borderColor: "#0f3460",
+              }}
+            >
+              <div style={{ height: 80, backgroundColor: "#e94560", padding: 16 }}>
+                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 1 (Red)</text>
+              </div>
+              <div style={{ height: 80, backgroundColor: "#0f3460", padding: 16 }}>
+                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 2 (Blue)</text>
+              </div>
+              <div style={{ height: 80, backgroundColor: "#533483", padding: 16 }}>
+                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 3 (Purple)</text>
+              </div>
+              <div style={{ height: 80, backgroundColor: "#e94560", padding: 16 }}>
+                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 4 (Red)</text>
+              </div>
+              <div style={{ height: 80, backgroundColor: "#0f3460", padding: 16 }}>
+                <text style={{ color: "#ffffff", fontSize: 20 }}>Section 5 (Blue)</text>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<ScreenshotScroller />)
+
+      const path0 = "/tmp/gpuix-scroll-before.png"
+      const path1 = "/tmp/gpuix-scroll-after.png"
+
+      if (fs.existsSync(path0)) fs.unlinkSync(path0)
+      if (fs.existsSync(path1)) fs.unlinkSync(path1)
+
+      // Screenshot before scrolling
+      testRoot.renderer.captureScreenshot(path0)
+
+      // Scroll down 150px inside the scrollable container
+      testRoot.renderer.nativeSimulateScrollWheel(640, 400, 0, -150)
+
+      // Screenshot after scrolling
+      testRoot.renderer.captureScreenshot(path1)
+
+      // Both screenshots should exist and be different (content shifted)
+      expect(fs.existsSync(path0)).toBe(true)
+      expect(fs.existsSync(path1)).toBe(true)
+      expect(fs.statSync(path0).size).toBeGreaterThan(0)
+      expect(fs.statSync(path1).size).toBeGreaterThan(0)
+      // Before and after scroll should produce different pixels
+      expect(fs.readFileSync(path0).equals(fs.readFileSync(path1))).toBe(false)
+    })
+
+    it("should combine onScroll event with overflow scroll", () => {
+      const receivedScrollEvents: EventPayload[] = []
+
+      function ScrollWithEvent() {
+        return (
+          <div
+            style={{ width: 300, height: 100, overflow: "scroll" }}
+            onScroll={(e: EventPayload) => receivedScrollEvents.push(e)}
+          >
+            <div style={{ height: 500 }}>
+              <text>Scrollable with events</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<ScrollWithEvent />)
+
+      // Scroll should fire the onScroll event AND move the content
+      testRoot.renderer.nativeSimulateScrollWheel(150, 50, 0, -40)
+
+      // Event should have fired
+      expect(receivedScrollEvents.length).toBeGreaterThanOrEqual(1)
+      const scrollEvent = receivedScrollEvents.find(
+        (e) => e.eventType === "scroll"
+      )
+      expect(scrollEvent).toBeDefined()
+      expect(scrollEvent!.deltaY).toBe(-40)
+
+      // Content should have scrolled
+      const container = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflow === "scroll")!
+      const offset = testRoot.renderer.getScrollOffset(container.id)
+      expect(offset).not.toBeNull()
+      expect(offset![1]).toBeLessThan(0)
+    })
+  })
 })

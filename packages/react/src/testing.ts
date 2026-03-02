@@ -304,6 +304,33 @@ export class TestRenderer implements NativeRenderer {
     return JSON.parse(this.native.getTreeJson())
   }
 
+  // ── Scroll API ──────────────────────────────────────────────────
+
+  /** Set the scroll offset of a scrollable element (overflow: "scroll").
+   *  x and y are negative pixel values (scroll down = more negative y).
+   *  Call flush() internally to apply. */
+  scrollTo(elementId: number, x: number, y: number): void {
+    this.native.flush()
+    this.native.scrollTo(elementId, x, y)
+    // Flush again to re-render with the new offset
+    this.native.flush()
+  }
+
+  /** Scroll a child into view by its index in the children list. */
+  scrollToItem(elementId: number, index: number): void {
+    this.native.flush()
+    this.native.scrollToItem(elementId, index)
+    this.native.flush()
+  }
+
+  /** Get the current scroll offset [x, y] or null if element is not scrollable. */
+  getScrollOffset(elementId: number): [number, number] | null {
+    this.native.flush()
+    const result = this.native.getScrollOffset(elementId)
+    if (!result) return null
+    return [result[0], result[1]]
+  }
+
   /** Capture a screenshot of the current rendered UI and save as PNG.
    *  macOS only — requires Metal GPU rendering via VisualTestAppContext. */
   captureScreenshot(path: string): void {

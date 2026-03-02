@@ -235,7 +235,9 @@ CSS-like styling via the `style` prop:
 
 **Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`
 
-**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `overflow`, `borderRadius`, `borderWidth`, `borderColor`
+**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `borderRadius`, `borderWidth`, `borderColor`
+
+**Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
 **Text:** `fontSize`, `fontWeight`
 
@@ -272,6 +274,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Mouse events (click, mouseDown, mouseUp, mouseMove, mouseEnter, mouseLeave)
 - [x] Click outside (`onMouseDownOutside`)
 - [x] Scroll wheel events with delta and touch phase
+- [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
+- [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `getScrollOffset`)
 - [x] Keyboard events (keyDown, keyUp) with focus management
 - [x] Focus/blur events with automatic FocusHandle creation
 - [x] GPU-backed test renderer with screenshot capture

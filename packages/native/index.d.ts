@@ -156,6 +156,18 @@ export declare class GpuixRenderer {
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
+  /**
+   * Set the scroll offset of a scrollable element.
+   * x and y are negative pixel values (scroll down = more negative y).
+   */
+  scrollTo(elementId: number, x: number, y: number): void
+  /** Scroll a child into view by its index in the children list. */
+  scrollToItem(elementId: number, index: number): void
+  /**
+   * Get the current scroll offset of a scrollable element.
+   * Returns [x, y] or null if the element has no scroll handle.
+   */
+  getScrollOffset(elementId: number): Array<number> | null
 }
 /**
  * GPU-backed GPUI test renderer. Uses VisualTestAppContext (real Metal
@@ -265,6 +277,22 @@ export declare class TestGpuixRenderer {
    * delta_x and delta_y are in pixels (negative = scroll up/left).
    */
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
+  /**
+   * Set the scroll offset of a scrollable element.
+   * x and y are negative pixel values (scroll down = more negative y).
+   * Call flush() after to apply the offset and re-render.
+   */
+  scrollTo(elementId: number, x: number, y: number): void
+  /**
+   * Scroll a child into view by its index in the children list.
+   * Call flush() after to apply and re-render.
+   */
+  scrollToItem(elementId: number, index: number): void
+  /**
+   * Get the current scroll offset of a scrollable element.
+   * Returns [x, y] or null if the element has no scroll handle.
+   */
+  getScrollOffset(elementId: number): Array<number> | null
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
    * macOS only — requires Metal GPU rendering via VisualTestAppContext.

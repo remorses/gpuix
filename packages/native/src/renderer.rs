@@ -51,6 +51,11 @@ pub(crate) fn to_element_id(id: f64) -> Result<u64> {
 thread_local! {
     static NODE_PLATFORM: RefCell<Option<Rc<NodePlatform>>> = const { RefCell::new(None) };
     static GPUI_WINDOW: RefCell<Option<gpui::AnyWindowHandle>> = const { RefCell::new(None) };
+    /// Shared scroll handles — GpuixView writes here during render(),
+    /// napi methods read from here for programmatic scroll control.
+    /// ScrollHandle is Rc<RefCell<...>> so its methods (set_offset, offset,
+    /// scroll_to_item) work without an App context.
+    static SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
 }
 
 /// The main GPUI renderer exposed to Node.js.
@@ -127,6 +132,7 @@ impl GpuixRenderer {
                             focus_handles: HashMap::new(),
                             _focus_subscriptions: Vec::new(),
                             custom_registry: CustomElementRegistry::with_defaults(),
+                            scroll_handles: HashMap::new(),
                         })
                     },
                 )
@@ -335,6 +341,55 @@ impl GpuixRenderer {
     pub fn blur(&self) -> Result<()> {
         Ok(())
     }
+
+    // ── Scroll API ───────────────────────────────────────────────────
+    // ScrollHandle is Rc<RefCell<...>> — its methods work without an App context.
+    // GpuixView syncs handles to the SCROLL_HANDLES thread_local on each render.
+
+    /// Set the scroll offset of a scrollable element.
+    /// x and y are negative pixel values (scroll down = more negative y).
+    #[napi]
+    pub fn scroll_to(&self, element_id: f64, x: f64, y: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        SCROLL_HANDLES.with(|cell| {
+            let handles = cell.borrow();
+            if let Some(handle) = handles.get(&id) {
+                handle.set_offset(gpui::point(gpui::px(x as f32), gpui::px(y as f32)));
+            }
+        });
+        Ok(())
+    }
+
+    /// Scroll a child into view by its index in the children list.
+    #[napi]
+    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let index = index as usize;
+        SCROLL_HANDLES.with(|cell| {
+            let handles = cell.borrow();
+            if let Some(handle) = handles.get(&id) {
+                handle.scroll_to_item(index);
+            }
+        });
+        Ok(())
+    }
+
+    /// Get the current scroll offset of a scrollable element.
+    /// Returns [x, y] or null if the element has no scroll handle.
+    #[napi]
+    pub fn get_scroll_offset(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        Ok(SCROLL_HANDLES.with(|cell| {
+            let handles = cell.borrow();
+            handles.get(&id).map(|handle| {
+                let offset = handle.offset();
+                vec![
+                    f64::from(f32::from(offset.x)),
+                    f64::from(f32::from(offset.y)),
+                ]
+            })
+        }))
+    }
 }
 
 // ── GPUI View ────────────────────────────────────────────────────────
@@ -352,6 +407,10 @@ pub(crate) struct GpuixView {
     /// Registry for custom element types (input, editor, diff, etc.).
     /// Stores factories (one per type) and live instances (one per element ID).
     pub(crate) custom_registry: CustomElementRegistry,
+    /// Persistent ScrollHandles keyed by element ID.
+    /// Created lazily for elements with overflow: "scroll" (or per-axis scroll).
+    /// Handles persist across renders so GPUI maintains scroll offset state.
+    pub(crate) scroll_handles: HashMap<u64, gpui::ScrollHandle>,
 }
 
 impl GpuixView {
@@ -429,20 +488,37 @@ impl gpui::Render for GpuixView {
         self.custom_registry
             .prune_missing(|id| tree.elements.contains_key(&id));
 
-        // Build the element tree. custom_registry and focus_handles are different
-        // fields of self, so Rust allows borrowing both simultaneously.
-        match tree.root_id {
+        // Clean up scroll handles for elements that no longer exist.
+        self.scroll_handles
+            .retain(|id, _| tree.elements.contains_key(id));
+
+        // Build the element tree. custom_registry, focus_handles, and scroll_handles
+        // are different fields of self, so Rust allows borrowing all simultaneously.
+        let result = match tree.root_id {
             Some(root_id) => build_element(
                 root_id,
                 &tree,
                 &callback,
                 &self.focus_handles,
+                &mut self.scroll_handles,
                 &mut self.custom_registry,
                 window,
                 cx,
             ),
             None => gpui::Empty.into_any_element(),
-        }
+        };
+
+        // Sync scroll handles to thread_local so napi methods (scrollTo,
+        // getScrollOffset) can access them without an App context.
+        SCROLL_HANDLES.with(|cell| {
+            let mut handles = cell.borrow_mut();
+            handles.clear();
+            for (&id, handle) in &self.scroll_handles {
+                handles.insert(id, handle.clone());
+            }
+        });
+
+        result
     }
 }
 
@@ -453,6 +529,7 @@ pub(crate) fn build_element(
     tree: &RetainedTree,
     event_callback: &Option<EventCallback>,
     focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    scroll_handles: &mut HashMap<u64, gpui::ScrollHandle>,
     custom_registry: &mut CustomElementRegistry,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -471,6 +548,7 @@ pub(crate) fn build_element(
                 tree,
                 event_callback,
                 focus_handles,
+                scroll_handles,
                 custom_registry,
                 window,
                 cx,
@@ -483,6 +561,7 @@ pub(crate) fn build_element(
                 tree,
                 event_callback,
                 focus_handles,
+                scroll_handles,
                 custom_registry,
                 window,
                 cx,
@@ -501,6 +580,7 @@ pub(crate) fn build_element(
                         tree,
                         event_callback,
                         focus_handles,
+                        scroll_handles,
                         custom_registry,
                         window,
                         cx,
@@ -569,6 +649,7 @@ pub(crate) fn build_div(
     tree: &RetainedTree,
     event_callback: &Option<EventCallback>,
     focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    scroll_handles: &mut HashMap<u64, gpui::ScrollHandle>,
     custom_registry: &mut CustomElementRegistry,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -580,6 +661,36 @@ pub(crate) fn build_div(
 
     if let Some(ref style) = element.style {
         el = apply_styles(el, style);
+    }
+
+    // ── Overflow: scroll ─────────────────────────────────────────────
+    // overflow_scroll() requires StatefulInteractiveElement (only on Stateful<Div>),
+    // so we handle it here rather than in apply_styles (which takes E: Styled).
+    // When scroll is enabled, we also attach a persistent ScrollHandle so the
+    // scroll offset survives across GPUI frames and can be queried/set from JS.
+    if let Some(ref style) = element.style {
+        let needs_scroll_x = style.overflow.as_deref() == Some("scroll")
+            || style.overflow_x.as_deref() == Some("scroll");
+        let needs_scroll_y = style.overflow.as_deref() == Some("scroll")
+            || style.overflow_y.as_deref() == Some("scroll");
+
+        if needs_scroll_x && needs_scroll_y {
+            el = el.overflow_scroll();
+        } else if needs_scroll_x {
+            el = el.overflow_x_scroll();
+        } else if needs_scroll_y {
+            el = el.overflow_y_scroll();
+        }
+
+        // Attach a persistent ScrollHandle when scrolling is enabled.
+        // The handle persists across renders (stored in GpuixView::scroll_handles)
+        // so GPUI maintains the scroll offset between frames.
+        if needs_scroll_x || needs_scroll_y {
+            let handle = scroll_handles
+                .entry(element.id)
+                .or_insert_with(gpui::ScrollHandle::new);
+            el = el.track_scroll(handle);
+        }
     }
 
     // If a FocusHandle was pre-created for this element (by sync_focus_handles),
@@ -790,6 +901,7 @@ pub(crate) fn build_div(
             tree,
             event_callback,
             focus_handles,
+            scroll_handles,
             custom_registry,
             window,
             cx,
@@ -804,6 +916,7 @@ pub(crate) fn build_text(
     tree: &RetainedTree,
     event_callback: &Option<EventCallback>,
     focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    scroll_handles: &mut HashMap<u64, gpui::ScrollHandle>,
     custom_registry: &mut CustomElementRegistry,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -840,6 +953,7 @@ pub(crate) fn build_text(
             tree,
             event_callback,
             focus_handles,
+            scroll_handles,
             custom_registry,
             window,
             cx,
@@ -1018,8 +1132,18 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("default") => el = el.cursor_default(),
         _ => {}
     }
+    // Overflow: hidden is on the Styled trait, so we can handle it here.
+    // overflow: "scroll" requires StatefulInteractiveElement — handled in build_div().
     match style.overflow.as_deref() {
         Some("hidden") => el = el.overflow_hidden(),
+        _ => {}
+    }
+    match style.overflow_x.as_deref() {
+        Some("hidden") => el = el.overflow_x_hidden(),
+        _ => {}
+    }
+    match style.overflow_y.as_deref() {
+        Some("hidden") => el = el.overflow_y_hidden(),
         _ => {}
     }
 

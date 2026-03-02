@@ -154,6 +154,15 @@ export interface NativeRenderer {
   setCustomProp(id: number, key: string, valueJson: string): void
   /** Apply a batch of mutations in a single FFI call. Returns destroyed IDs. */
   applyBatch?(json: string): Array<number>
+
+  // ── Scroll API ─────────────────────────────────────────────────
+  /** Set the scroll offset of a scrollable element (overflow: "scroll").
+   *  x and y are negative pixel values (scroll down = more negative y). */
+  scrollTo?(elementId: number, x: number, y: number): void
+  /** Scroll a child into view by its index in the children list. */
+  scrollToItem?(elementId: number, index: number): void
+  /** Get the current scroll offset [x, y] or null if element is not scrollable. */
+  getScrollOffset?(elementId: number): Array<number> | null
 }
 
 // Container holds the renderer reference.

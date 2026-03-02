@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-02 14:42 UTC
+
+- Add scrollable container support — `overflow: "scroll"`, `overflowX: "scroll"`, `overflowY: "scroll"` now create native GPUI scrollable divs
+- GPUI handles scroll physics automatically: scroll wheel events update a persistent `ScrollHandle` offset, content is clipped and translated, offset is clamped to valid bounds
+- `ScrollHandle` persists across frames in `GpuixView::scroll_handles` (keyed by element ID), same lifecycle pattern as `focus_handles`
+- Add per-axis overflow hidden support: `overflowX: "hidden"` and `overflowY: "hidden"` now map to `overflow_x_hidden()` / `overflow_y_hidden()`
+- Add programmatic scroll API via napi: `scrollTo(elementId, x, y)`, `scrollToItem(elementId, index)`, `getScrollOffset(elementId)` on both `GpuixRenderer` and `TestGpuixRenderer`
+- Production renderer syncs scroll handles to a thread_local (`SCROLL_HANDLES`) after each render so napi methods can access them without an App context
+- TestRenderer exposes `scrollTo()`, `scrollToItem()`, `getScrollOffset()` wrapper methods
+- NativeRenderer interface updated with optional scroll methods
+- Add 6 new end-to-end scroll tests: basic scroll, overflow-y only, programmatic scrollTo, scrollToItem, screenshot regression (before/after scroll), and onScroll event + overflow scroll combo
+- All 80 tests pass
+
 ## 2026-03-01 20:45 UTC
 
 - Remove JS shadow tree from TestRenderer — all element state now lives exclusively in Rust's RetainedTree, queried via napi
