@@ -20,9 +20,10 @@ import type {
   TextInstance,
 } from "../types/host.js"
 import {
-  registerEventHandler,
-  unregisterEventHandler,
+  isEventProp,
+  mountEventListeners,
   unregisterEventHandlers,
+  updateEventListeners,
 } from "./event-registry.js"
 
 let elementIdCounter = 0
@@ -58,70 +59,6 @@ function rendererFor(node: HostNode): NativeRenderer {
   return stateFor(node).renderer
 }
 
-// ── Event wiring helpers ─────────────────────────────────────────────
-
-const EVENT_PROPS = [
-  // Custom element events
-  ["onToggleFile", "toggleFile"],
-  ["onShowMore", "showMore"],
-  ["onLineClick", "lineClick"],
-  ["onLinkClick", "linkClick"],
-  ["onChange", "change"],
-  ["onSubmit", "submit"],
-  // Mouse events
-  ["onClick", "click"],
-  ["onMouseDown", "mouseDown"],
-  ["onMouseUp", "mouseUp"],
-  ["onMouseEnter", "mouseEnter"],
-  ["onMouseLeave", "mouseLeave"],
-  ["onMouseMove", "mouseMove"],
-  ["onMouseDownOutside", "mouseDownOutside"],
-  // Keyboard events (require focus — tabIndex or autoFocus)
-  ["onKeyDown", "keyDown"],
-  ["onKeyUp", "keyUp"],
-  // Focus events
-  ["onFocus", "focus"],
-  ["onBlur", "blur"],
-  // Scroll events
-  ["onScroll", "scroll"],
-] as const
-
-const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
-
-function syncEventListeners(renderer: NativeRenderer, id: number, props: Props): void {
-  for (const [propName, eventType] of EVENT_PROPS) {
-    const handler = props[propName]
-    if (handler) {
-      registerEventHandler(id, eventType, handler)
-      renderer.setEventListener(id, eventType, true)
-    }
-  }
-}
-
-function diffEventListeners(
-  renderer: NativeRenderer,
-  id: number,
-  oldProps: Props,
-  newProps: Props
-): void {
-  for (const [propName, eventType] of EVENT_PROPS) {
-    const oldHandler = oldProps[propName]
-    const newHandler = newProps[propName]
-
-    if (oldHandler && !newHandler) {
-      // Removed — clean up both JS closure and Rust listener
-      unregisterEventHandler(id, eventType)
-      renderer.setEventListener(id, eventType, false)
-    } else if (newHandler && newHandler !== oldHandler) {
-      // Added or changed
-      registerEventHandler(id, eventType, newHandler)
-      if (!oldHandler) {
-        renderer.setEventListener(id, eventType, true)
-      }
-    }
-  }
-}
-
 // ── Style helper ─────────────────────────────────────────────────────
 
 function sendStyle(renderer: NativeRenderer, id: number, props: Props): void {
@@ -143,7 +80,7 @@ const BUILT_IN_TYPES = new Set(["div", "text"])
 const UNIVERSAL_PROPS = new Set(["autoFocus", "tabIndex", "motion", "testId"])
 
 function isReservedProp(name: string): boolean {
-  return RESERVED_PROPS.has(name) || EVENT_PROP_NAMES.has(name)
+  return RESERVED_PROPS.has(name) || isEventProp(name)
 }
 
 function serializeCustomProp(
@@ -213,7 +150,7 @@ function materialize(node: HostNode): HostNodeState {
   if ("type" in node) {
     renderer.createElement(node.id, node.type)
     sendStyle(renderer, node.id, node.props)
-    syncEventListeners(renderer, node.id, node.props)
+    mountEventListeners(renderer, node.id, node.props)
     syncCustomProps(renderer, node.id, node.type, node.props)
   } else {
     renderer.createElement(node.id, "text")
@@ -366,7 +303,7 @@ export const hostConfig = {
     // bugs from same-reference mutations or style removal.
     renderer.setStyle(instance.id, newProps.style ?? {})
     // Event diff
-    diffEventListeners(renderer, instance.id, oldProps, newProps)
+    updateEventListeners(renderer, instance.id, oldProps, newProps)
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(renderer, instance.id, instance.type, oldProps, newProps)
     instance.props = newProps
