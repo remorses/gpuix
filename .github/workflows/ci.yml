@@ -115,6 +115,13 @@ jobs:
         run: ${{ matrix.settings.build }}
         shell: bash
 
+      - name: Smoke-test Windows native load
+        if: matrix.settings.target == 'x86_64-pc-windows-msvc'
+        run: |
+          node -e "require('./index.js'); console.log('Node loaded the Windows native binding')"
+          bun -e "require('./index.js'); console.log('Bun loaded the Windows native binding')"
+        shell: bash
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
