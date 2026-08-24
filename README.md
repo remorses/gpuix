@@ -1218,7 +1218,7 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
-**Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `alignItems`, `alignSelf`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
+**Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
 
 **Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
 
@@ -1226,7 +1226,24 @@ CSS-like styling via the `style` prop:
 
 **Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
 
-**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderWidth`, `borderColor`
+**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+
+`boxShadow` accepts one structured shadow. Its fields are `offsetX`, `offsetY`,
+`blurRadius`, `spreadRadius`, and `color`:
+
+```tsx
+<div
+  style={{
+    boxShadow: {
+      offsetX: 0,
+      offsetY: 4,
+      blurRadius: 12,
+      spreadRadius: 0,
+      color: '#00000033',
+    },
+  }}
+/>
+```
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
