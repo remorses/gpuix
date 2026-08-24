@@ -116,6 +116,27 @@ describe("style props reach the renderer", () => {
     )
   })
 
+  it("applies per-side border widths after borderWidth", () => {
+    comparePixels(
+      "border-side-width",
+      <div style={{ display: "flex", padding: 20, backgroundColor: "#101010" }}>
+        <div style={{ width: 300, height: 140, backgroundColor: "#7c86ff" }} />
+      </div>,
+      <div style={{ display: "flex", padding: 20, backgroundColor: "#101010" }}>
+        <div
+          style={{
+            width: 300,
+            height: 140,
+            backgroundColor: "#7c86ff",
+            borderWidth: 0,
+            borderBottomWidth: 12,
+            borderColor: "#ff5c7a",
+          }}
+        />
+      </div>
+    )
+  })
+
   it("applies per-corner border radii after borderRadius", () => {
     comparePixels(
       "border-corner-radius",
@@ -137,6 +158,39 @@ describe("style props reach the renderer", () => {
             backgroundColor: "#7c86ff",
             borderRadius: 72,
             borderTopLeftRadius: 0,
+          }}
+        />
+      </div>
+    )
+  })
+
+  it("applies a structured boxShadow", () => {
+    comparePixels(
+      "box-shadow",
+      <div style={{ display: "flex", padding: 80, backgroundColor: "#101010" }}>
+        <div
+          style={{
+            width: 300,
+            height: 140,
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+          }}
+        />
+      </div>,
+      <div style={{ display: "flex", padding: 80, backgroundColor: "#101010" }}>
+        <div
+          style={{
+            width: 300,
+            height: 140,
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+            boxShadow: {
+              offsetX: 24,
+              offsetY: 24,
+              blurRadius: 12,
+              spreadRadius: 6,
+              color: "#ff5c7aff",
+            },
           }}
         />
       </div>

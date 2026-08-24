@@ -35,6 +35,14 @@ export interface MotionProps {
   transition?: MotionTransition
 }
 
+export interface BoxShadow {
+  offsetX: number
+  offsetY: number
+  blurRadius: number
+  spreadRadius: number
+  color: string
+}
+
 export interface StyleDesc {
   display?: string
   visibility?: string
@@ -86,12 +94,17 @@ export interface StyleDesc {
   opacity?: number
 
   borderWidth?: number
+  borderTopWidth?: number
+  borderRightWidth?: number
+  borderBottomWidth?: number
+  borderLeftWidth?: number
   borderColor?: string
   borderRadius?: number
   borderTopLeftRadius?: number
   borderTopRightRadius?: number
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
+  boxShadow?: BoxShadow
 
   fontSize?: number
   fontFamily?: string

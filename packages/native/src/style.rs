@@ -9,6 +9,16 @@ pub enum FontWeightValue {
     Str(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoxShadowValue {
+    pub offset_x: f64,
+    pub offset_y: f64,
+    pub blur_radius: f64,
+    pub spread_radius: f64,
+    pub color: String,
+}
+
 /// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
@@ -151,12 +161,17 @@ pub struct StyleDesc {
 
     // Border
     pub border_width: Option<f64>,
+    pub border_top_width: Option<f64>,
+    pub border_right_width: Option<f64>,
+    pub border_bottom_width: Option<f64>,
+    pub border_left_width: Option<f64>,
     pub border_color: Option<String>,
     pub border_radius: Option<f64>,
     pub border_top_left_radius: Option<f64>,
     pub border_top_right_radius: Option<f64>,
     pub border_bottom_left_radius: Option<f64>,
     pub border_bottom_right_radius: Option<f64>,
+    pub box_shadow: Option<BoxShadowValue>,
 
     // Text
     pub font_size: Option<f64>,

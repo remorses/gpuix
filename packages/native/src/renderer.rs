@@ -2823,9 +2823,33 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(width) = style.border_width {
         el = el.border(gpui::px(width.max(0.0) as f32));
     }
+    if let Some(width) = style.border_top_width {
+        el = el.border_t(gpui::px(width.max(0.0) as f32));
+    }
+    if let Some(width) = style.border_right_width {
+        el = el.border_r(gpui::px(width.max(0.0) as f32));
+    }
+    if let Some(width) = style.border_bottom_width {
+        el = el.border_b(gpui::px(width.max(0.0) as f32));
+    }
+    if let Some(width) = style.border_left_width {
+        el = el.border_l(gpui::px(width.max(0.0) as f32));
+    }
     if let Some(ref color) = style.border_color {
         if let Some(hex) = parse_color_hex(color) {
             el = el.border_color(gpui::rgba(hex));
+        }
+    }
+    if let Some(ref shadow) = style.box_shadow {
+        if let Some(hex) = parse_color_hex(&shadow.color) {
+            let shadow = gpui::BoxShadow::new(
+                gpui::px(shadow.offset_x as f32),
+                gpui::px(shadow.offset_y as f32),
+                gpui::rgba(hex).into(),
+            )
+            .blur_radius(gpui::px(shadow.blur_radius.max(0.0) as f32))
+            .spread_radius(gpui::px(shadow.spread_radius as f32));
+            el = el.shadow(vec![shadow]);
         }
     }
     if let Some(opacity) = style.opacity {
