@@ -2612,10 +2612,24 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(shrink) = style.flex_shrink {
         el.style().flex_shrink = Some(shrink as f32);
     }
+    if let Some(basis) = style.flex_basis {
+        el = el.flex_basis(gpui::px(basis as f32));
+    }
     match style.align_items.as_deref() {
         Some("center") => el = el.items_center(),
         Some("start") | Some("flex-start") => el = el.items_start(),
         Some("end") | Some("flex-end") => el = el.items_end(),
+        _ => {}
+    }
+    match style.align_content.as_deref() {
+        Some("center") => el = el.content_center(),
+        Some("start") | Some("flex-start") => el = el.content_start(),
+        Some("end") | Some("flex-end") => el = el.content_end(),
+        Some("between") | Some("space-between") => el = el.content_between(),
+        Some("around") | Some("space-around") => el = el.content_around(),
+        Some("evenly") | Some("space-evenly") => el = el.content_evenly(),
+        Some("stretch") => el = el.content_stretch(),
+        Some("normal") => el = el.content_normal(),
         _ => {}
     }
     match style.justify_content.as_deref() {
@@ -2790,6 +2804,19 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     if let Some(radius) = style.border_radius {
         el = el.rounded(gpui::px(radius as f32));
+    }
+    // Apply corner longhands after the shorthand so the explicit corner wins.
+    if let Some(radius) = style.border_top_left_radius {
+        el = el.rounded_tl(gpui::px(radius as f32));
+    }
+    if let Some(radius) = style.border_top_right_radius {
+        el = el.rounded_tr(gpui::px(radius as f32));
+    }
+    if let Some(radius) = style.border_bottom_left_radius {
+        el = el.rounded_bl(gpui::px(radius as f32));
+    }
+    if let Some(radius) = style.border_bottom_right_radius {
+        el = el.rounded_br(gpui::px(radius as f32));
     }
     // `borderWidth: 0` must clear a border, not be ignored: an element that
     // draws its own border needs a way for the caller to remove it.

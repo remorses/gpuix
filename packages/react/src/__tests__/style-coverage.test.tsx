@@ -116,6 +116,33 @@ describe("style props reach the renderer", () => {
     )
   })
 
+  it("applies per-corner border radii after borderRadius", () => {
+    comparePixels(
+      "border-corner-radius",
+      <div style={{ display: "flex", padding: 20, backgroundColor: "#101010" }}>
+        <div
+          style={{
+            width: 300,
+            height: 180,
+            backgroundColor: "#7c86ff",
+            borderRadius: 72,
+          }}
+        />
+      </div>,
+      <div style={{ display: "flex", padding: 20, backgroundColor: "#101010" }}>
+        <div
+          style={{
+            width: 300,
+            height: 180,
+            backgroundColor: "#7c86ff",
+            borderRadius: 72,
+            borderTopLeftRadius: 0,
+          }}
+        />
+      </div>
+    )
+  })
+
   it("applies rowGap and columnGap", () => {
     // Both were in StyleDesc and implemented nowhere; only `gap` worked.
     const boxes = [0, 1, 2, 3].map((i) => (
@@ -148,6 +175,62 @@ describe("style props reach the renderer", () => {
         {boxes}
       </div>
     )
+  })
+
+  it("applies flexBasis", () => {
+    const boxes = (withBasis: boolean) => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          width: 600,
+          height: 120,
+          padding: 20,
+          backgroundColor: "#101010",
+        }}
+      >
+        <div
+          style={{
+            flexGrow: 1,
+            flexBasis: withBasis ? 80 : undefined,
+            backgroundColor: "#7c86ff",
+          }}
+        />
+        <div
+          style={{
+            flexGrow: 1,
+            flexBasis: withBasis ? 320 : undefined,
+            backgroundColor: "#ff5c7a",
+          }}
+        />
+      </div>
+    )
+
+    comparePixels("flex-basis", boxes(false), boxes(true))
+  })
+
+  it("applies alignContent to wrapped rows", () => {
+    const boxes = [0, 1, 2, 3].map((i) => (
+      <div key={i} style={{ width: 120, height: 60, backgroundColor: "#7c86ff" }} />
+    ))
+    const layout = (alignContent?: string) => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          flexWrap: "wrap",
+          alignContent,
+          width: 300,
+          height: 400,
+          padding: 20,
+          backgroundColor: "#101010",
+        }}
+      >
+        {boxes}
+      </div>
+    )
+
+    comparePixels("align-content", layout(), layout("center"))
   })
 
   it("lays out children with display grid", () => {
