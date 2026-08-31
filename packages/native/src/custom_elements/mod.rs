@@ -19,6 +19,7 @@ pub mod diff;
 pub mod img;
 pub mod input;
 pub mod markdown;
+pub mod canvas;
 
 // ── Render context ───────────────────────────────────────────────────
 
@@ -285,6 +286,7 @@ impl CustomElementRegistry {
         registry.register(Box::new(code::CodeFactory));
         registry.register(Box::new(diff::DiffFactory));
         registry.register(Box::new(markdown::MarkdownFactory));
+        registry.register(Box::new(canvas::CanvasFactory));
         registry
     }
 

@@ -65,6 +65,8 @@ export type {
   TooltipProviderProps,
   TooltipTriggerProps,
 } from "./components/tooltip.js"
+export { Canvas, VectorPath, OrganicBody, VectorEyes, DecorativeStroke } from "./components/marks.js"
+export type { CanvasPathCommand, CanvasShape, CanvasProps } from "./components/marks.js"
 export { motion } from "./components/index.js"
 export type { Root, FrameLoop, RenderOptions } from "./reconciler/renderer.js"
 export type {
