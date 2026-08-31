@@ -3,6 +3,7 @@ import { GpuixRenderer } from "@gpuix/native"
 import type { EventPayload, WindowOptions } from "@gpuix/native"
 import { createRoot, flushSync, type Root } from "./reconciler.js"
 import type { DebugFrameOverlayMode, NativeRenderer } from "../types/host.js"
+import { pumpFrames } from "../motion-spring.js"
 import { handleGpuixEvent } from "./event-registry.js"
 import {
   App as AutomationApp,
@@ -96,9 +97,12 @@ export function startFrameLoop(
     timer = null
   }
 
+  let lastFrame = performance.now()
   const loop = (): void => {
     if (stopped) return
     const started = performance.now()
+    pumpFrames(Math.min((started - lastFrame) / 1000, 0.032), started)
+    lastFrame = started
     const running = renderer.tick()
     if (running === false) {
       stop()

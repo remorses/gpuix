@@ -66,6 +66,7 @@ export type {
   TooltipTriggerProps,
 } from "./components/tooltip.js"
 export { motion } from "./components/index.js"
+export { onFrame, stepSpring, GELATIN } from "./motion-spring.js"
 export type { Root, FrameLoop, RenderOptions } from "./reconciler/renderer.js"
 export type {
   WindowInsets,
@@ -89,6 +90,8 @@ export type {
   MotionProps,
   MotionStyle,
   MotionTransition,
+  MotionSpringTransition,
+  MotionTweenTransition,
   NativeRenderer,
   NativeWindowInsets,
   PublicInstance,
