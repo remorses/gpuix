@@ -1,6 +1,6 @@
 import { createElement, forwardRef } from "react"
 import type { PublicInstance, Props } from "../types/host.js"
-import { motion, MotionDivProps } from "./index.js"
+import { motion } from "./index.js"
 
 export interface CanvasPathCommand {
   type: "move" | "line" | "curve" | "close"
