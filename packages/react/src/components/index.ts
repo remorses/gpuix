@@ -1,8 +1,16 @@
 // GPUIX component definitions and native motion wrappers.
 
-import { createElement, forwardRef, useContext, useEffect, useMemo } from "react"
+import { createElement, forwardRef, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactElement, ReactNode } from "react"
-import type { MotionProps, Props, PublicInstance, StyleDesc } from "../types/host.js"
+import type {
+  MotionProps,
+  MotionSpringTransition,
+  MotionStyle,
+  Props,
+  PublicInstance,
+  StyleDesc,
+} from "../types/host.js"
+import { GELATIN, onFrame, stepSpring, type SpringTrack } from "../motion-spring.js"
 import { PresenceContext, usePresence } from "./animate-presence.js"
 
 let nextMotionGeneration = 0
@@ -63,28 +71,112 @@ export interface MotionDivProps extends MotionProps {
   autoFocus?: boolean
 }
 
+const SPRING_KEYS = [
+  "width",
+  "height",
+  "opacity",
+  "top",
+  "right",
+  "bottom",
+  "left",
+  "borderRadius",
+] as const
+
+type SpringKey = (typeof SPRING_KEYS)[number]
+
+function isSpringTransition(
+  transition: MotionProps["transition"]
+): transition is MotionSpringTransition {
+  return transition != null && transition.type === "spring"
+}
+
+function readStyle(style: MotionStyle | false | undefined, key: SpringKey): number | undefined {
+  if (style == null || style === false) return undefined
+  return style[key]
+}
+
 const MotionDiv = forwardRef<PublicInstance, MotionDivProps>(function MotionDiv(
-  { initial, animate, exit, transition, onMotionComplete, ...props },
+  { initial, animate, exit, transition, onMotionComplete, style, ...props },
   ref
 ): ReactElement {
   const presence = useContext(PresenceContext)
   const [isPresent, safeToRemove] = usePresence()
   const resolvedInitial = presence?.initial === false ? false : initial
   const resolvedAnimate = !isPresent && exit ? exit : animate
+  const spring = isSpringTransition(transition)
 
   useEffect(() => {
-    if (!isPresent && !exit) safeToRemove?.()
-  }, [exit, isPresent, safeToRemove])
+    // Spring leases are JS-driven and report no native motionComplete yet.
+    if (!isPresent && (!exit || spring)) safeToRemove?.()
+  }, [exit, isPresent, safeToRemove, spring])
+
+  const animateRef = useRef(resolvedAnimate)
+  animateRef.current = resolvedAnimate
+  const [current, setCurrent] = useState<MotionStyle>(() => {
+    const seed: MotionStyle = {}
+    for (const key of SPRING_KEYS) {
+      const value = readStyle(resolvedInitial, key) ?? resolvedAnimate[key]
+      if (value != null) seed[key] = value
+    }
+    return seed
+  })
+  const tracks = useRef<Partial<Record<SpringKey, SpringTrack>>>({})
+  const transitionRef = useRef(transition)
+  transitionRef.current = transition
+
+  useEffect(() => {
+    if (!spring) return
+    return onFrame((dt) => {
+      const spec = transitionRef.current
+      if (!isSpringTransition(spec)) return
+      const stiffness = spec.stiffness ?? GELATIN.stiffness
+      const damping = spec.damping ?? GELATIN.damping
+      const mass = spec.mass ?? GELATIN.mass
+      const kick = spec.velocity ?? 0
+      const target = animateRef.current
+      let changed = false
+      const next: MotionStyle = {}
+      for (const key of SPRING_KEYS) {
+        const to = target[key]
+        if (to == null) continue
+        const rest = key === "opacity" ? 0.002 : 0.05
+        let track = tracks.current[key]
+        if (!track) track = { pos: to, vel: kick }
+        const stepped = stepSpring(track, to, dt, stiffness, damping, mass, rest)
+        if (stepped.pos !== track.pos || stepped.vel !== track.vel) changed = true
+        tracks.current[key] = stepped
+        next[key] = stepped.pos
+      }
+      if (changed) setCurrent(next)
+    })
+  }, [spring])
 
   const motionKey = JSON.stringify([
     isPresent,
     motionStyleKey(resolvedInitial),
     motionStyleKey(resolvedAnimate),
-    transition?.duration,
-    transition?.delay,
-    transition?.ease,
+    transition ?? null,
   ])
   const generation = useMemo(() => ++nextMotionGeneration, [motionKey])
+
+  if (spring) {
+    const hostProps: Props = {
+      ...props,
+      ref,
+      style: {
+        ...(style ?? {}),
+        ...(current.width != null ? { width: current.width } : {}),
+        ...(current.height != null ? { height: current.height } : {}),
+        ...(current.opacity != null ? { opacity: current.opacity } : {}),
+        ...(current.top != null ? { top: current.top } : {}),
+        ...(current.right != null ? { right: current.right } : {}),
+        ...(current.bottom != null ? { bottom: current.bottom } : {}),
+        ...(current.left != null ? { left: current.left } : {}),
+        ...(current.borderRadius != null ? { borderRadius: current.borderRadius } : {}),
+      },
+    }
+    return createElement("div", hostProps)
+  }
 
   const motionDescription = {
     generation,
@@ -96,6 +188,7 @@ const MotionDiv = forwardRef<PublicInstance, MotionDivProps>(function MotionDiv(
   const hostProps: Props = {
     ...props,
     ref,
+    style,
     motion: motionDescription,
   }
   if (!isPresent || onMotionComplete) {
