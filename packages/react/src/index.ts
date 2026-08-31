@@ -68,6 +68,7 @@ export type {
 export { Canvas, VectorPath, OrganicBody, VectorEyes, DecorativeStroke } from "./components/marks.js"
 export type { CanvasPathCommand, CanvasShape, CanvasProps } from "./components/marks.js"
 export { motion } from "./components/index.js"
+export { onFrame, stepSpring, GELATIN } from "./motion-spring.js"
 export type { Root, FrameLoop, RenderOptions } from "./reconciler/renderer.js"
 export type {
   WindowInsets,
@@ -91,6 +92,8 @@ export type {
   MotionProps,
   MotionStyle,
   MotionTransition,
+  MotionSpringTransition,
+  MotionTweenTransition,
   NativeRenderer,
   NativeWindowInsets,
   PublicInstance,
