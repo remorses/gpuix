@@ -1501,6 +1501,7 @@ impl GPUCanvas {
 impl Drop for GPUCanvas {
     fn drop(&mut self) {
         unregister_canvas(self.id);
+        self.inner.lock().destroyed = true;
     }
 }
 
