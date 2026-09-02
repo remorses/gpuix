@@ -12,6 +12,7 @@
     "chat": "bun --hot chat.tsx",
     "infinite-chat": "bun --hot infinite-chat.tsx",
     "timeline": "bun --hot timeline.tsx",
+    "three-webgpu": "bun --hot three-webgpu.tsx",
     "compile": "bun compile-chat.ts",
     "bench:serde": "bun bench-serialization.ts"
   },
@@ -22,6 +23,7 @@
     "react": "^19.2.4",
     "safe-mdx": "1.14.0",
     "shiki": "^3.0.0",
+    "three": "^0.170.0",
     "string-dedent": "^3.0.2"
   },
   "devDependencies": {

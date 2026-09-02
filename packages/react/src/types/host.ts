@@ -479,6 +479,11 @@ export type VirtualListProps =
       windowStart?: number
     })
 
+export interface CanvasProps extends Props {
+  /** Numeric id from `createGPUCanvas()` / `GPUCanvas.id`. */
+  source?: number | { id: number }
+}
+
 // Props for native <img> rendering.
 export interface ImgProps extends Props {
   src?: string

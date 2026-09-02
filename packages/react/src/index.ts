@@ -77,6 +77,7 @@ export type {
 // Re-export types
 export type { MotionDivProps } from "./components/index.js"
 export type {
+  CanvasProps,
   CursorValue,
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,

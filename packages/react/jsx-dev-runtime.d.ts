@@ -6,6 +6,7 @@
 import type * as React from "react"
 import type {
   AnchoredProps,
+  CanvasProps,
   CodeProps,
   DiffProps,
   ImgProps,
@@ -33,7 +34,7 @@ export namespace JSX {
     text: Props
     img: ImgProps
     svg: SvgProps
-    canvas: Props
+    canvas: CanvasProps
     input: InputProps
     textarea: TextareaProps
     anchored: AnchoredProps

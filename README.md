@@ -1950,7 +1950,37 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `img`           | Local/data URL raster or SVG images               |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
-| `canvas`        | Custom drawing (planned)                         |
+| `canvas`        | WebGPU canvas (`createGPUCanvas`)                |
+
+## WebGPU and Three.js
+
+Desktop GPUIX exposes a WebGPU device through `@gpuix/react`. `installWebGpu()`
+sets `navigator.gpu`. `createGPUCanvas()` is the swap surface Three.js needs.
+
+```tsx
+import { render } from '@gpuix/react'
+import { createGPUCanvas, installWebGpu } from '@gpuix/react/webgpu'
+import { WebGPURenderer } from 'three/webgpu'
+
+installWebGpu()
+const canvas = createGPUCanvas(640, 480)
+const renderer = new WebGPURenderer({ canvas, antialias: false })
+await renderer.init()
+
+render(<canvas source={canvas.id} style={{ width: 640, height: 480 }} />)
+// Keep `canvas` alive and call canvas.destroy() when the view unmounts.
+```
+
+Present currently copies pixels through `paint_image` on every OS. The WebGPU
+device is a separate wgpu instance from the window, so Linux cannot sample the
+canvas texture in-scene yet. Untextured materials work. MSAA (`antialias: true`),
+cube maps, stencil, `writeTexture`, and `copyTextureToBuffer` are not implemented.
+
+Run the cube example:
+
+```bash
+cd examples && bun --hot three-webgpu.tsx
+```
 
 ## Images and icons
 
