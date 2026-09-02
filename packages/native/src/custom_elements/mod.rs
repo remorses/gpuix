@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use crate::renderer::EventCallback;
 
 pub mod anchored;
+pub mod canvas;
 pub mod code;
 pub mod diff;
 pub mod img;
@@ -208,8 +209,8 @@ pub trait CustomElement: 'static {
     /// Immutable event capability declaration for this adapter.
     fn supported_events(&self) -> &'static [&'static str];
 
-    /// Clean up resources (GPUI entities, subscriptions, etc.)
-    fn destroy(&mut self);
+    /// Clean up resources (GPUI entities, subscriptions, atlas images).
+    fn destroy(&mut self, window: Option<&mut gpui::Window>);
 }
 
 /// Factory for creating CustomElement instances.
@@ -284,6 +285,7 @@ impl CustomElementRegistry {
         registry.register(Box::new(input::InputFactory));
         registry.register(Box::new(input::TextareaFactory));
         registry.register(Box::new(anchored::AnchoredFactory));
+        registry.register(Box::new(canvas::CanvasFactory));
         registry.register(Box::new(img::ImgFactory));
         registry.register(Box::new(img::SvgFactory));
         registry.register(Box::new(code::CodeFactory));
@@ -305,7 +307,7 @@ impl CustomElementRegistry {
             .get(&id)
             .is_some_and(|entry| entry.element_type != element_type)
         {
-            self.destroy(id);
+            self.destroy(id, None);
         }
 
         match self.instances.entry(id) {
@@ -353,14 +355,14 @@ impl CustomElementRegistry {
     }
 
     /// Called when React destroys an element.
-    pub fn destroy(&mut self, id: u64) {
+    pub fn destroy(&mut self, id: u64, window: Option<&mut gpui::Window>) {
         if let Some(mut entry) = self.instances.remove(&id) {
-            entry.element.destroy();
+            entry.element.destroy(window);
         }
     }
 
     /// Remove and destroy instances whose IDs no longer exist in the tree.
-    pub fn prune_missing<F>(&mut self, mut is_live: F)
+    pub fn prune_missing<F>(&mut self, window: &mut gpui::Window, mut is_live: F)
     where
         F: FnMut(u64) -> bool,
     {
@@ -372,7 +374,7 @@ impl CustomElementRegistry {
             .collect();
 
         for id in stale_ids {
-            self.destroy(id);
+            self.destroy(id, Some(window));
         }
     }
 
@@ -385,7 +387,7 @@ impl CustomElementRegistry {
     pub fn destroy_all(&mut self) {
         let ids: Vec<u64> = self.instances.keys().copied().collect();
         for id in ids {
-            self.destroy(id);
+            self.destroy(id, None);
         }
     }
 }
@@ -424,7 +426,7 @@ mod tests {
             &["click"]
         }
 
-        fn destroy(&mut self) {
+        fn destroy(&mut self, _window: Option<&mut gpui::Window>) {
             self.destroyed.set(self.destroyed.get() + 1);
         }
     }

@@ -45,6 +45,11 @@
       "types": "./dist/automation/index.d.ts",
       "import": "./dist/automation/index.js",
       "default": "./dist/automation/index.js"
+    },
+    "./webgpu": {
+      "types": "./dist/webgpu.d.ts",
+      "import": "./dist/webgpu.js",
+      "default": "./dist/webgpu.js"
     }
   },
   "files": [

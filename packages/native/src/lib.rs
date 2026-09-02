@@ -24,6 +24,8 @@ mod renderer;
 // The data model is public so `examples/bench_serde.rs` measures the real
 // types instead of a copy that silently drifts from them.
 pub mod retained_tree;
+#[cfg(not(target_family = "wasm"))]
+mod webgpu;
 pub mod style;
 mod syntax;
 mod text;

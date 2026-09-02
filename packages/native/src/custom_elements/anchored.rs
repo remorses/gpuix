@@ -411,5 +411,5 @@ impl CustomElement for AnchoredElement {
         &["click", "mouseEnter", "mouseLeave"]
     }
 
-    fn destroy(&mut self) {}
+    fn destroy(&mut self, _window: Option<&mut gpui::Window>) {}
 }

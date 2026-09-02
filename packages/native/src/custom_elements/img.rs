@@ -182,7 +182,7 @@ impl CustomElement for ImgElement {
         &["click", "mouseEnter", "mouseLeave"]
     }
 
-    fn destroy(&mut self) {}
+    fn destroy(&mut self, _window: Option<&mut gpui::Window>) {}
 }
 
 #[derive(Debug, Clone, Default)]
@@ -300,5 +300,5 @@ impl CustomElement for SvgElement {
         &["click", "mouseEnter", "mouseLeave"]
     }
 
-    fn destroy(&mut self) {}
+    fn destroy(&mut self, _window: Option<&mut gpui::Window>) {}
 }

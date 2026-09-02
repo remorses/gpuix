@@ -428,7 +428,7 @@ impl CustomElement for DiffElement {
         ]
     }
 
-    fn destroy(&mut self) {
+    fn destroy(&mut self, _window: Option<&mut gpui::Window>) {
         self.list_state = None;
         self.list_metrics = None;
         self.data = None;

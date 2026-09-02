@@ -45,6 +45,10 @@ syntect = { version = "5.3", default-features = false, features = ["regex-onig"]
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-onig"] }
 gpui = { path = "../../zed/crates/gpui", default-features = false, features = ["font-kit", "profiler"] }
 gpui_platform = { path = "../../zed/crates/gpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+# Same wgpu as zed. Desktop WebGPU napi wraps this; do not add Dawn.
+wgpu = "29.0.4"
+image = "0.25"
+pollster = "0.4"
 
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 napi = { version = "3", features = ["napi8", "serde-json"] }

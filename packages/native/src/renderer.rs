@@ -3856,7 +3856,7 @@ impl gpui::Render for GpuixView {
 
         // Ensure custom element instances are destroyed when their IDs disappear.
         self.custom_registry
-            .prune_missing(|id| tree.elements.contains_key(&id));
+            .prune_missing(window, |id| tree.elements.contains_key(&id));
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed
@@ -4053,11 +4053,11 @@ pub(crate) fn build_element(
         // (onClick, hover, focus, tabIndex) type-checked, registered a JS
         // listener, and then silently did nothing.
         "div" | "text" => {
-            ctx.custom_registry.destroy(id);
+            ctx.custom_registry.destroy(id, Some(window));
             build_host_container(element, style, ctx, window, cx)
         }
         "virtual-list" => {
-            ctx.custom_registry.destroy(id);
+            ctx.custom_registry.destroy(id, Some(window));
             build_virtual_list(element, ctx, window, cx)
         }
 
