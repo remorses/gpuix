@@ -4370,29 +4370,32 @@ pub(crate) fn build_host_container(
     }
 
     // Wire up events.
-    // Some events (on_hover, on_click) require a stateful element (.id()),
+    // Some events (on_hover, on_aux_click) require a stateful element (.id()),
     // which we already set above. Others (on_mouse_down, on_key_down) work
     // on any InteractiveElement.
+    if element.events.contains("click") {
+        let id = element.id;
+        let callback = ctx.event_callback.clone();
+        // GPUI's higher-level on_click gesture is not finalized by the
+        // embedded macOS pump. Bubble listeners run in reverse registration
+        // order, so attach click first to keep onMouseUp ahead of onClick.
+        el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+            emit_event_full(&callback, id, "click", |p| {
+                let (x, y) = point_to_xy(mouse_event.position);
+                p.x = Some(x);
+                p.y = Some(y);
+                p.button = Some(0);
+                p.modifiers = Some(mouse_event.modifiers.into());
+                p.click_count = Some(mouse_event.click_count as u32);
+                p.is_right_click = Some(false);
+            });
+        });
+    }
+
     for event_type in &element.events {
         let id = element.id;
         let callback = ctx.event_callback.clone();
         match event_type.as_str() {
-            // ── Click ────────────────────────────────────────────
-            // Primary button only, like the DOM. Right and middle clicks go to
-            // `onAuxClick`, and `onMouseDown` sees every button.
-            "click" => {
-                el = el.on_click(move |click_event, _window, _cx| {
-                    emit_event_full(&callback, id, "click", |p| {
-                        let (x, y) = point_to_xy(click_event.position());
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.modifiers = Some(click_event.modifiers().into());
-                        p.click_count = Some(click_event.click_count() as u32);
-                        p.is_right_click = Some(click_event.is_right_click());
-                    });
-                });
-            }
-
             // ── Aux click (non-primary), like the DOM `auxclick` ──
             "auxClick" => {
                 el = el.on_aux_click(move |click_event, _window, _cx| {

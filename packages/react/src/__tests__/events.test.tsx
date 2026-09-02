@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import React, { useState, useRef } from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import { startFrameLoop } from "../reconciler/renderer.js"
+import { motion } from "../index"
 import type { EventPayload } from "@gpuix/native"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils"
 
@@ -192,6 +193,80 @@ describeNative("events", () => {
           "Count: 2",
         ]
       `)
+    })
+
+    it("synthesizes click only for the primary button", () => {
+      const received: string[] = []
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 50 }}
+          onMouseDown={(event) => received.push(`down:${event.button}`)}
+          onMouseUp={(event) => received.push(`up:${event.button}`)}
+          onClick={(event) => received.push(`click:${event.button}:${event.isRightClick}`)}
+        />,
+      )
+
+      for (const button of [1, 2]) {
+        testRoot.renderer.nativeSimulateMouseDown(10, 10, button)
+        testRoot.renderer.nativeSimulateMouseUp(10, 10, button)
+      }
+      expect(received).toEqual(["down:1", "up:1", "down:2", "up:2"])
+
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+      expect(received).toEqual([
+        "down:1",
+        "up:1",
+        "down:2",
+        "up:2",
+        "down:0",
+        "up:0",
+        "click:0:false",
+      ])
+    })
+
+    it("dispatches primary clicks from motion elements", () => {
+      let clicks = 0
+      testRoot.render(
+        <motion.div
+          initial={false}
+          animate={{ width: 200 }}
+          style={{ width: 200, height: 50 }}
+          onClick={() => {
+            clicks += 1
+          }}
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+      expect(clicks).toBe(1)
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 2)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 2)
+      expect(clicks).toBe(1)
+    })
+
+    it("dispatches primary clicks from native custom elements", () => {
+      const clicks: EventPayload[] = []
+      testRoot.render(
+        <div style={{ display: "flex", padding: 20 }}>
+          <code
+            code="hello"
+            language="ts"
+            onClick={(event) => {
+              clicks.push(event)
+            }}
+          />
+        </div>,
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(30, 28, 0)
+      testRoot.renderer.nativeSimulateMouseUp(30, 28, 0)
+      expect(clicks).toHaveLength(1)
+      expect(clicks[0]).toMatchObject({ button: 0, isRightClick: false })
+      testRoot.renderer.nativeSimulateMouseDown(30, 28, 2)
+      testRoot.renderer.nativeSimulateMouseUp(30, 28, 2)
+      expect(clicks).toHaveLength(1)
     })
   })
 

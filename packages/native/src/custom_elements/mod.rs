@@ -145,13 +145,17 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
         let callback = ctx.event_callback.clone();
         match event.as_str() {
             "click" => {
-                el = el.on_click(move |click, _window, _cx| {
+                // Match retained hosts: GPUI's semantic click is unreliable under
+                // embedded AppKit pumping, so primary mouse-up is the click boundary.
+                el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
                     crate::renderer::emit_event_full(&callback, id, "click", |p| {
-                        let (x, y) = crate::renderer::point_to_xy(click.position());
+                        let (x, y) = crate::renderer::point_to_xy(mouse_event.position);
                         p.x = Some(x);
                         p.y = Some(y);
-                        p.click_count = Some(click.click_count() as u32);
-                        p.modifiers = Some(click.modifiers().into());
+                        p.button = Some(0);
+                        p.click_count = Some(mouse_event.click_count as u32);
+                        p.modifiers = Some(mouse_event.modifiers.into());
+                        p.is_right_click = Some(false);
                     });
                 });
             }
