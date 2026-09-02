@@ -2,7 +2,8 @@
  * GPUIX Three.js WebGPU cube.
  *
  * Draws a rotating cube with three/webgpu into a GPUCanvas, then composites
- * that canvas into the GPUI window.
+ * that canvas into the GPUI window. Needs three >= 0.175: 0.170's getCacheKey
+ * hashes a circular array and Bun/JSC overflows.
  */
 import "./webgpu-polyfill.ts"
 import React, { useEffect, useState } from "react"
