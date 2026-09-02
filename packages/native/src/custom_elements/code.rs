@@ -263,7 +263,7 @@ impl CustomElement for CodeElement {
         &["click", "mouseEnter", "mouseLeave"]
     }
 
-    fn destroy(&mut self) {}
+    fn destroy(&mut self, _window: Option<&mut gpui::Window>) {}
 }
 
 /// Line-number gutter width, sized analytically from the digit count so the

@@ -471,7 +471,7 @@ impl CustomElement for TextEditorElement {
         ]
     }
 
-    fn destroy(&mut self) {
+    fn destroy(&mut self, _window: Option<&mut gpui::Window>) {
         self.state = None;
     }
 }

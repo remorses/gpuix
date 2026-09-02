@@ -208,28 +208,32 @@ impl GPUDevice {
     }
 
     #[napi(js_name = "createBuffer")]
-    pub fn create_buffer(&self, descriptor: BufferDescriptor) -> GPUBuffer {
+    pub fn create_buffer(&self, descriptor: BufferDescriptor) -> Result<GPUBuffer> {
+        let size = non_negative_u64(descriptor.size, "size")?;
         let mapped_at_creation = descriptor.mapped_at_creation.unwrap_or(false);
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: descriptor.label.as_deref(),
-            size: descriptor.size as u64,
+            size,
             usage: wgpu::BufferUsages::from_bits_truncate(descriptor.usage),
             mapped_at_creation,
         });
-        GPUBuffer {
+        let mapped_bytes = if mapped_at_creation {
+            let length = usize::try_from(size)
+                .map_err(|_| Error::from_reason("size is too large for this platform"))?;
+            Some(MappedRange {
+                offset: 0,
+                end: size,
+                write: true,
+                bytes: Arc::new(Mutex::new(vec![0u8; length])),
+            })
+        } else {
+            None
+        };
+        Ok(GPUBuffer {
             buffer: Arc::new(buffer),
             device: self.device.clone(),
-            mapped: Mutex::new(if mapped_at_creation {
-                Some(MappedRange {
-                    offset: 0,
-                    end: descriptor.size as u64,
-                    write: true,
-                    bytes: Arc::new(Mutex::new(vec![0u8; descriptor.size as usize])),
-                })
-            } else {
-                None
-            }),
-        }
+            mapped: Mutex::new(mapped_bytes),
+        })
     }
 
     #[napi(js_name = "createTexture")]
@@ -614,8 +618,9 @@ impl GPUQueue {
     ) {
         let bytes = data.as_ref();
         let start = data_offset.unwrap_or(0).max(0) as usize;
-        let end = size
-            .map(|size| start.saturating_add(size.max(0) as usize))
+        let copy_size = size.map(|size| size.max(0) as usize);
+        let end = copy_size
+            .map(|size| start.saturating_add(size))
             .unwrap_or(bytes.len())
             .min(bytes.len());
         let slice = if start >= bytes.len() {
@@ -623,6 +628,9 @@ impl GPUQueue {
         } else {
             &bytes[start..end]
         };
+        if offset < 0 {
+            return;
+        }
         self.queue
             .write_buffer(&buffer.buffer, offset as u64, slice);
     }
@@ -661,10 +669,17 @@ impl GPUBuffer {
 
     #[napi(js_name = "mapAsync")]
     pub fn map_async(&self, mode: u32, offset: Option<f64>, size: Option<f64>) -> Result<()> {
-        let offset = offset.unwrap_or(0.0) as u64;
-        let end = size
-            .map(|size| offset + size as u64)
-            .unwrap_or(self.buffer.size());
+        let offset = finite_u64(offset.unwrap_or(0.0), "offset")?;
+        let mapped_size = match size {
+            Some(size) => finite_u64(size, "size")?,
+            None => self.buffer.size().saturating_sub(offset),
+        };
+        let end = offset
+            .checked_add(mapped_size)
+            .ok_or_else(|| Error::from_reason("mapAsync range overflow"))?;
+        if end > self.buffer.size() {
+            return Err(Error::from_reason("mapAsync range is out of bounds"));
+        }
         let mode = if mode & 0x0002 != 0 {
             wgpu::MapMode::Write
         } else {
@@ -1011,10 +1026,10 @@ impl GPUCommandEncoder {
             .ok_or_else(|| Error::from_reason("Command encoder already finished"))?;
         encoder.copy_buffer_to_buffer(
             &source.buffer,
-            source_offset as u64,
+            non_negative_u64(source_offset, "sourceOffset")?,
             &destination.buffer,
-            destination_offset as u64,
-            size as u64,
+            non_negative_u64(destination_offset, "destinationOffset")?,
+            non_negative_u64(size, "size")?,
         );
         Ok(())
     }
@@ -1102,10 +1117,13 @@ impl GPURenderPassEncoder {
     ) -> Result<()> {
         let first_vertex = first_vertex.unwrap_or(0);
         let first_instance = first_instance.unwrap_or(0);
-        self.pass_mut()?.draw(
-            first_vertex..first_vertex + vertex_count,
-            first_instance..first_instance + instance_count.unwrap_or(1),
-        );
+        let last_vertex = first_vertex
+            .checked_add(vertex_count)
+            .ok_or_else(|| Error::from_reason("draw vertex range overflow"))?;
+        let last_instance = first_instance
+            .checked_add(instance_count.unwrap_or(1))
+            .ok_or_else(|| Error::from_reason("draw instance range overflow"))?;
+        self.pass_mut()?.draw(first_vertex..last_vertex, first_instance..last_instance);
         Ok(())
     }
 
@@ -1120,10 +1138,16 @@ impl GPURenderPassEncoder {
     ) -> Result<()> {
         let first_index = first_index.unwrap_or(0);
         let first_instance = first_instance.unwrap_or(0);
+        let last_index = first_index
+            .checked_add(index_count)
+            .ok_or_else(|| Error::from_reason("drawIndexed index range overflow"))?;
+        let last_instance = first_instance
+            .checked_add(instance_count.unwrap_or(1))
+            .ok_or_else(|| Error::from_reason("drawIndexed instance range overflow"))?;
         self.pass_mut()?.draw_indexed(
-            first_index..first_index + index_count,
+            first_index..last_index,
             base_vertex.unwrap_or(0),
-            first_instance..first_instance + instance_count.unwrap_or(1),
+            first_instance..last_instance,
         );
         Ok(())
     }
@@ -1236,14 +1260,19 @@ struct GpuCanvasInner {
     texture: Option<Arc<wgpu::Texture>>,
     cached_image: Option<Arc<gpui::RenderImage>>,
     snapshot_generation: u64,
+    destroyed: bool,
 }
 
 impl GpuCanvasInner {
-    fn configure(&mut self, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, format: wgpu::TextureFormat) {
+    fn configure(&mut self, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, format: wgpu::TextureFormat) -> Result<()> {
+        if self.destroyed {
+            return Err(Error::from_reason("GPUCanvas has been destroyed"));
+        }
         self.device = Some(device.clone());
         self.queue = Some(queue);
         self.format = format;
         self.rebuild_textures(&device);
+        Ok(())
     }
 
     fn set_size(&mut self, width: u32, height: u32) {
@@ -1405,6 +1434,7 @@ impl GPUCanvas {
             texture: None,
             cached_image: None,
             snapshot_generation: 0,
+            destroyed: false,
         }));
         register_canvas(id, inner.clone());
         Self { id, inner }
@@ -1448,6 +1478,7 @@ impl GPUCanvas {
     pub fn destroy(&self) {
         unregister_canvas(self.id);
         let mut inner = self.inner.lock();
+        inner.destroyed = true;
         inner.texture = None;
         inner.cached_image = None;
         inner.device = None;
@@ -1498,15 +1529,16 @@ impl GPUCanvasContext {
             device.device.clone(),
             device.queue_internal.clone(),
             format,
-        );
-        Ok(())
+        )
     }
 
     #[napi(js_name = "getCurrentTexture")]
     pub fn get_current_texture(&self) -> Result<GPUTexture> {
-        let texture = self
-            .inner
-            .lock()
+        let inner = self.inner.lock();
+        if inner.destroyed {
+            return Err(Error::from_reason("GPUCanvas has been destroyed"));
+        }
+        let texture = inner
             .current_texture()
             .ok_or_else(|| Error::from_reason("GPUCanvas is not configured"))?;
         Ok(GPUTexture { texture })
@@ -1846,10 +1878,26 @@ pub struct ComputePassDescriptor {
 
 fn buffer_slice(buffer: &wgpu::Buffer, offset: Option<f64>, size: Option<f64>) -> wgpu::BufferSlice<'_> {
     match (offset, size) {
-        (Some(offset), Some(size)) => buffer.slice(offset as u64..(offset as u64 + size as u64)),
-        (Some(offset), None) => buffer.slice(offset as u64..),
+        (Some(offset), Some(size)) => {
+            let offset = offset.max(0.0) as u64;
+            let size = size.max(0.0) as u64;
+            let end = offset.saturating_add(size).min(buffer.size());
+            buffer.slice(offset.min(buffer.size())..end)
+        }
+        (Some(offset), None) => buffer.slice(offset.max(0.0) as u64..),
         _ => buffer.slice(..),
     }
+}
+
+fn non_negative_u64(value: i64, name: &str) -> Result<u64> {
+    u64::try_from(value).map_err(|_| Error::from_reason(format!("{name} must be non-negative")))
+}
+
+fn finite_u64(value: f64, name: &str) -> Result<u64> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u64::MAX as f64 {
+        return Err(Error::from_reason(format!("{name} must be a non-negative integer")));
+    }
+    Ok(value as u64)
 }
 
 fn parse_texture_format(format: &str) -> Result<wgpu::TextureFormat> {

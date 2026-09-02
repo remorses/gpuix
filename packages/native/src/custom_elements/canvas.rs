@@ -47,12 +47,13 @@ impl CustomElement for CanvasElement {
                             let last_image = last_image.clone();
                             move |bounds, _, window, _| {
                                 let next = source.and_then(crate::webgpu::canvas_snapshot);
-                                let previous = last_image.borrow_mut().take();
+                                let previous = last_image.borrow().clone();
                                 if let Some(previous) = previous {
                                     let changed = next
                                         .as_ref()
                                         .is_none_or(|image| !Arc::ptr_eq(image, &previous));
                                     if changed {
+                                        last_image.borrow_mut().take();
                                         if let Err(error) = window.drop_image(previous) {
                                             log::warn!("drop_image failed: {error:#}");
                                         }
@@ -113,5 +114,13 @@ impl CustomElement for CanvasElement {
         &["click", "mouseEnter", "mouseLeave"]
     }
 
-    fn destroy(&mut self) {}
+    fn destroy(&mut self, window: Option<&mut gpui::Window>) {
+        if let Some(image) = self.last_image.borrow_mut().take() {
+            if let Some(window) = window {
+                if let Err(error) = window.drop_image(image) {
+                    log::warn!("drop_image failed: {error:#}");
+                }
+            }
+        }
+    }
 }
