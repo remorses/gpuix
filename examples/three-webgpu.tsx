@@ -34,7 +34,6 @@ function CubeApp() {
       const renderer = new WebGPURenderer({
         canvas,
         antialias: false,
-        forceWebGPU: true,
       })
       await renderer.init()
       webgpu = renderer

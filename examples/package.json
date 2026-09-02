@@ -23,8 +23,8 @@
     "react": "^19.2.4",
     "safe-mdx": "1.14.0",
     "shiki": "^3.0.0",
-    "three": "^0.170.0",
-    "string-dedent": "^3.0.2"
+    "string-dedent": "^3.0.2",
+    "three": "^0.176.0"
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",
