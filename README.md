@@ -1954,8 +1954,9 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 
 ## WebGPU and Three.js
 
-Desktop GPUIX exposes a WebGPU device through `@gpuix/react`. `installWebGpu()`
-sets `navigator.gpu`. `createGPUCanvas()` is the swap surface Three.js needs.
+Desktop GPUIX exposes a **minimal Three.js WebGPU subset** through
+`@gpuix/react/webgpu`. `installWebGpu()` sets `navigator.gpu`.
+`createGPUCanvas()` is the swap surface Three.js needs.
 
 ```tsx
 import { render } from '@gpuix/react'
@@ -1973,8 +1974,9 @@ render(<canvas source={canvas.id} style={{ width: 640, height: 480 }} />)
 
 Present currently copies pixels through `paint_image` on every OS. The WebGPU
 device is a separate wgpu instance from the window, so Linux cannot sample the
-canvas texture in-scene yet. Untextured materials work. MSAA (`antialias: true`),
-cube maps, stencil, `writeTexture`, and `copyTextureToBuffer` are not implemented.
+canvas texture in-scene yet. Untextured materials, vertex and index buffers, uniforms, and a depth buffer
+work. MSAA (`antialias: true`), cube maps, stencil, `writeTexture`,
+`copyTextureToBuffer`, render bundles, and query sets are not implemented.
 
 Run the cube example:
 
