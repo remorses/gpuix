@@ -157,6 +157,18 @@ export declare class TestGpuixRenderer {
    */
   getRetainedElementCount(): number
   /**
+   * How many styles the renderer has resolved since the last reset.
+   *
+   * The performance tests read this instead of measuring wall-clock time.
+   * GPUI rebuilds its element tree every frame, so the number that matters
+   * is how much of that rebuild repeats work the renderer already did. A
+   * frame that changes nothing must add nothing here. A wall-clock budget
+   * flakes on a loaded machine, and a flaky gate gets muted.
+   */
+  styleResolutions(): number
+  /** Set the style resolution counter back to zero. */
+  resetStyleResolutions(): void
+  /**
    * Apply a batch of mutations in a single FFI call.
    * Same format as GpuixRenderer::apply_batch (string op names).
    * Returns accumulated destroyed IDs from all destroyElement ops.
@@ -233,6 +245,11 @@ export declare class TestGpuixRenderer {
   /** Drop the current selection. */
   clearSelection(): void
   /**
+   * The text the last clipboard write put there, or null when there is
+   * none or it was not text.
+   */
+  readClipboardText(): string | null
+  /**
    * Syntax-cache counters as `[hits, misses, documents]`.
    *
    * GPUIX rebuilds its whole element tree every frame, so a `<code>` block
@@ -304,6 +321,13 @@ export declare class TestGpuixRenderer {
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
+  /**
+   * The colour of one painted pixel as `[r, g, b, a]`, each 0 to 255.
+   *
+   * `x` and `y` are logical pixels from the top left of the window, the
+   * same space every other test coordinate is in.
+   */
+  pixelAt(x: number, y: number): Array<number>
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.

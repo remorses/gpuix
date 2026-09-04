@@ -1,5 +1,6 @@
 // GPUIX React - React bindings for GPUI
 export { createRoot, flushSync } from "./reconciler/index.js"
+export type { ClassNameResolver, RootOptions } from "./types/host.js"
 export {
   createRenderer,
   enableAutomation,

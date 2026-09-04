@@ -1,4 +1,4 @@
 [submodule "zed"]
 	path = zed
-	url = https://github.com/remorses/zed.git
-	branch = gpuix
+	url = git@github.com:mateo-m/zed.git
+	branch = gpui-effect-layers

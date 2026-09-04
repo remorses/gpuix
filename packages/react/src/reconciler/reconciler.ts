@@ -7,9 +7,10 @@ import { GpuixContext } from "../hooks/use-gpuix.js"
 import type {
   Container,
   NativeRenderer,
-  RootEventHandlers,
+  RootOptions,
 } from "../types/host.js"
 import { wrapWithBatching } from "./batch-renderer.js"
+import { createClassNameCache } from "./class-names.js"
 import {
   attachRoot,
   detachRoot,
@@ -57,12 +58,11 @@ export const flushSync = _r.flushSyncFromReconciler ?? _r.flushSync
 export interface Root {
   render: (node: ReactNode) => void
   unmount: () => void
+  /** The renderer this root draws on, which is what `render()` opened. */
+  renderer: NativeRenderer
 }
 
-export function createRoot(
-  renderer: NativeRenderer,
-  rootEventHandlers: RootEventHandlers = {}
-): Root {
+export function createRoot(renderer: NativeRenderer, options: RootOptions = {}): Root {
   let container: OpaqueRoot | null = null
   const batchedRenderer = wrapWithBatching(renderer)
   const ids = idAllocatorFor(renderer)
@@ -71,15 +71,19 @@ export function createRoot(
     renderer: batchedRenderer,
     ids,
     eventHandlers: new Map(),
-    windowKeyEventHandlers: rootEventHandlers,
+    classNames: options.resolveClassName
+      ? createClassNameCache(options.resolveClassName)
+      : null,
+    warnedAboutClassName: false,
+    windowKeyEventHandlers: options,
     windowKeyEventId,
-    onEvent: rootEventHandlers.onEvent,
+    onEvent: options.onEvent,
   }
   attachRoot(renderer, gpuixContainer)
   try {
     renderer.setWindowKeyEvents?.(
-      Boolean(rootEventHandlers.onKeyDown),
-      Boolean(rootEventHandlers.onKeyUp),
+      Boolean(options.onKeyDown),
+      Boolean(options.onKeyUp),
       windowKeyEventId
     )
   } catch (error) {
@@ -133,5 +137,6 @@ export function createRoot(
     },
 
     unmount: cleanup,
+    renderer,
   }
 }

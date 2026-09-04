@@ -403,9 +403,7 @@ impl CustomElement for TextEditorElement {
             .w_full()
             .track_focus(&focus_handle)
             .child(state);
-        if let Some(style) = ctx.style {
-            editor = crate::renderer::apply_interactive_styles(editor, style);
-        }
+        editor = ctx.styled_interactive(editor);
         if ctx
             .style
             .and_then(|style| style.position.as_deref())

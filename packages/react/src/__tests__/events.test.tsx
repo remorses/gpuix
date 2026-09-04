@@ -1726,6 +1726,46 @@ describeNative("events", () => {
       expect(innerOffset).toEqual([0, 0])
     })
 
+    it("keeps a wheel event inside the list it scrolls", () => {
+      function Page({ overscroll }: { overscroll?: string }) {
+        return (
+          <div style={{ width: 240, height: 200, overflowY: "scroll" }}>
+            <div style={{ width: 240, height: 100, overflowY: "scroll", overscrollBehavior: overscroll }}>
+              <div style={{ height: 160 }}>
+                <text>inner</text>
+              </div>
+            </div>
+            <div style={{ height: 600 }}>
+              <text>below</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<Page />)
+      const divs = () => testRoot.renderer.findByType("div").filter((d) => d.style.overflowY === "scroll")
+      const [page, list] = divs()
+
+      // The list has room, so the page does not move.
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, 0, -30)
+      expect(testRoot.renderer.getScrollOffset(list.id)![1]).toBeLessThan(0)
+      expect(testRoot.renderer.getScrollOffset(page.id)).toEqual([0, 0])
+
+      // At the end of the list, `auto` hands the event to the page.
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, 0, -500)
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, 0, -30)
+      expect(testRoot.renderer.getScrollOffset(page.id)![1]).toBeLessThan(0)
+
+      // `contain` keeps it even then.
+      testRoot.render(<Page overscroll="contain" />)
+      const [page2, list2] = divs()
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, 0, -500)
+      const pageBefore = testRoot.renderer.getScrollOffset(page2.id)![1]
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, 0, -30)
+      expect(testRoot.renderer.getScrollOffset(list2.id)![1]).toBeLessThan(0)
+      expect(testRoot.renderer.getScrollOffset(page2.id)![1]).toBe(pageBefore)
+    })
+
     it("pans overflow-x when the child is wider than the viewport", () => {
       function WideRow() {
         return (
