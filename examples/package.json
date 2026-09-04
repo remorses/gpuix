@@ -12,7 +12,9 @@
     "chat": "bun --hot chat.tsx",
     "infinite-chat": "bun --hot infinite-chat.tsx",
     "timeline": "bun --hot timeline.tsx",
-    "compile": "bun compile-chat.ts",
+    "compile": "bun compile.ts chat.tsx --name \"GPUIX Chat\" --id dev.gpuix.chat --icon assets/icons/openai-mark.svg --tint \"#10a37f\"",
+    "demo": "bun --hot demo.tsx",
+    "compile:demo": "bun compile.ts demo.tsx --name \"GPUIX Demo\" --id dev.gpuix.demo",
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {

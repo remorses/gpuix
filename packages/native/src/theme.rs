@@ -96,7 +96,7 @@ fn graph_tone(mut color: Hsla) -> Hsla {
 // ── Syntax palette ───────────────────────────────────────────────────
 
 /// Paint-only colours for one Syntect [`HighlightKind`] each.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SyntaxPalette {
     pub comment: Hsla,
     pub keyword: Hsla,
@@ -437,8 +437,10 @@ impl Default for Metrics {
 /// This is a trimmed Comet theme: only tokens read by the native editors and
 /// document elements remain. Surfaces, buttons and chrome tokens are the host
 /// app's business and stay in JS as ordinary `style` props.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
+    /// Whether this is a dark theme, which is what CSS `light-dark()` reads.
+    pub dark: bool,
     /// Content plane behind code and diff bodies.
     pub bg: Hsla,
     /// Hairline border.
@@ -480,6 +482,7 @@ impl Theme {
     /// Comet's dark theme, token for token.
     pub fn dark() -> Self {
         Self {
+            dark: true,
             bg: grey(6),
             border: hsla(0.0, 0.0, 1.0, 0.08),
             text: neutral(0.922),
@@ -503,6 +506,7 @@ impl Theme {
     /// Comet's light theme.
     pub fn light() -> Self {
         Self {
+            dark: false,
             bg: grey(0xff),
             border: hsla(0.0, 0.0, 0.0, 0.10),
             text: neutral(0.25),
@@ -821,22 +825,30 @@ mod tests {
     }
 
     #[test]
-    fn metrics_hash_changes_with_any_number() {
+    fn diff_layout_hash_tracks_row_heights_and_nothing_else() {
         let hash = |m: &Metrics| {
             use std::hash::Hasher;
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            m.hash_into(&mut h);
+            m.hash_diff_layout_into(&mut h);
             h.finish()
         };
         let base = Metrics::default();
-        let mut changed = base;
-        changed.diff_line_height += 1.0;
-        assert_ne!(hash(&base), hash(&changed));
+        assert_eq!(hash(&base), hash(&Metrics::default()));
 
+        // A row height moves, so the measured-height cache has to drop.
+        let mut taller = base;
+        taller.diff_line_height += 1.0;
+        assert_ne!(hash(&base), hash(&taller));
+
+        let mut header = base;
+        header.diff_hunk_header_height += 1.0;
+        assert_ne!(hash(&base), hash(&header));
+
+        // A markdown tweak leaves diff rows where they are. Hashing it would
+        // drop the scroll anchor and jump every diff on screen back to the top.
         let mut heading = base;
         heading.md_heading_sizes[2] += 1.0;
-        assert_ne!(hash(&base), hash(&heading));
-        assert_eq!(hash(&base), hash(&Metrics::default()));
+        assert_eq!(hash(&base), hash(&heading));
     }
 
     #[test]

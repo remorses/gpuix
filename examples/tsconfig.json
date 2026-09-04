@@ -13,5 +13,9 @@
     // must not litter the folder with .js next to every .tsx.
     "noEmit": true
   },
-  "include": ["./*.tsx"]
+  "include": [
+    "./*.tsx",
+    "./**/*.tsx",
+    "./**/*.ts"
+  ]
 }

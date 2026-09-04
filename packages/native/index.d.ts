@@ -47,6 +47,26 @@ export declare class GpuixRenderer {
   getWindowInsets(): WindowInsets
   /** `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout. */
   setDebugFrameOverlay(mode: string): string
+  /**
+   * Scroll every ancestor scroll box so the element shows, like the
+   * web `scrollIntoView`. `block` places it on the y axis and
+   * `inline` on the x axis: `start`, `center`, `end` or `nearest`.
+   * The defaults match the web: `start` and `nearest`. The
+   * `scroll-margin` of the element and the `scroll-padding` of each
+   * box apply.
+   */
+  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null): void
+  /**
+   * Clone every element that has a `viewTransitionName`, with its painted
+   * bounds. Call this before the React update, then `viewTransitionStart`
+   * after it. `startViewTransition` in `@gpuix/react` does both.
+   */
+  viewTransitionCapture(): void
+  /**
+   * Animate every captured name toward its new element. `options` is the
+   * JSON of a `ViewTransitionOptions` value, or nothing for a crossfade.
+   */
+  viewTransitionStart(options?: string | undefined | null): void
   /** Hidden → minimal → full → hidden. */
   cycleDebugFrameOverlay(): string
   getDebugFrameOverlay(): string
@@ -157,6 +177,18 @@ export declare class TestGpuixRenderer {
    */
   getRetainedElementCount(): number
   /**
+   * How many styles the renderer has resolved since the last reset.
+   *
+   * The performance tests read this instead of measuring wall-clock time.
+   * GPUI rebuilds its element tree every frame, so the number that matters
+   * is how much of that rebuild repeats work the renderer already did. A
+   * frame that changes nothing must add nothing here. A wall-clock budget
+   * flakes on a loaded machine, and a flaky gate gets muted.
+   */
+  styleResolutions(): number
+  /** Set the style resolution counter back to zero. */
+  resetStyleResolutions(): void
+  /**
    * Apply a batch of mutations in a single FFI call.
    * Same format as GpuixRenderer::apply_batch (string op names).
    * Returns accumulated destroyed IDs from all destroyElement ops.
@@ -233,6 +265,11 @@ export declare class TestGpuixRenderer {
   /** Drop the current selection. */
   clearSelection(): void
   /**
+   * The text the last clipboard write put there, or null when there is
+   * none or it was not text.
+   */
+  readClipboardText(): string | null
+  /**
    * Syntax-cache counters as `[hits, misses, documents]`.
    *
    * GPUIX rebuilds its whole element tree every frame, so a `<code>` block
@@ -272,6 +309,21 @@ export declare class TestGpuixRenderer {
    */
   scrollTo(elementId: number, x: number, y: number): void
   /**
+   * Scroll every ancestor scroll box so the element shows, like the
+   * web scrollIntoView. Call flush() after to apply and re-render.
+   */
+  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null): void
+  /**
+   * Clone every element that has a `viewTransitionName`, with its painted
+   * bounds. Call flush() first, so the bounds are current.
+   */
+  viewTransitionCapture(): void
+  /**
+   * Animate every captured name toward its new element. Call flush()
+   * after, and move the automation clock to step through the frames.
+   */
+  viewTransitionStart(options?: string | undefined | null): void
+  /**
    * Scroll a child into view by its index in the children list.
    * Call flush() after to apply and re-render. For a `<virtual-list>` the
    * scroll is queued and applied on that flush, after the child splice.
@@ -304,6 +356,13 @@ export declare class TestGpuixRenderer {
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
+  /**
+   * The colour of one painted pixel as `[r, g, b, a]`, each 0 to 255.
+   *
+   * `x` and `y` are logical pixels from the top left of the window, the
+   * same space every other test coordinate is in.
+   */
+  pixelAt(x: number, y: number): Array<number>
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.
@@ -492,6 +551,16 @@ export interface HighlightRect {
   width: number
   height: number
 }
+
+/**
+ * Records one `process.env` entry for `env_var` readers.
+ *
+ * Rust reads overrides such as `GPUIX_SCROLLBARS` at paint. Node writes a
+ * `process.env` assignment through to `setenv`, but Bun only updates its
+ * JS snapshot. A caller on Bun must push the value across with this
+ * function.
+ */
+export declare function syncEnvVar(key: string, value?: string | undefined | null): void
 
 export interface WindowInsets {
   safeArea: EdgeInsets

@@ -22,8 +22,8 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
-    parse_debug_frame_overlay_mode, to_element_id, DebugFrameOverlayStats, EventCallback,
-    GpuixView,
+    offset_to_js, parse_debug_frame_overlay_mode, to_element_id, DebugFrameOverlayStats,
+    EventCallback, GpuixView,
 };
 use crate::retained_tree::RetainedTree;
 
@@ -230,6 +230,25 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_retained_element_count(&self) -> u32 {
         self.tree.lock().unwrap().elements.len() as u32
+    }
+
+    /// How many styles the renderer has resolved since the last reset.
+    ///
+    /// The performance tests read this instead of measuring wall-clock time.
+    /// GPUI rebuilds its element tree every frame, so the number that matters
+    /// is how much of that rebuild repeats work the renderer already did. A
+    /// frame that changes nothing must add nothing here. A wall-clock budget
+    /// flakes on a loaded machine, and a flaky gate gets muted.
+    #[napi]
+    pub fn style_resolutions(&self) -> f64 {
+        crate::style::resolve::resolutions() as f64
+    }
+
+    /// Set the style resolution counter back to zero.
+    #[napi]
+    pub fn reset_style_resolutions(&self) -> Result<()> {
+        crate::style::resolve::reset_resolutions();
+        Ok(())
     }
 
     /// Apply a batch of mutations in a single FFI call.
@@ -538,6 +557,15 @@ impl TestGpuixRenderer {
         self.selection.lock().clear();
     }
 
+    /// The text the last clipboard write put there, or null when there is
+    /// none or it was not text.
+    #[napi]
+    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
+        with_test_state(|cx, _window, _view| {
+            Ok(cx.read_from_clipboard().and_then(|item| item.text()))
+        })
+    }
+
     /// Syntax-cache counters as `[hits, misses, documents]`.
     ///
     /// GPUIX rebuilds its whole element tree every frame, so a `<code>` block
@@ -618,6 +646,64 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
             Ok(())
+        })
+    }
+
+    /// Scroll every ancestor scroll box so the element shows, like the
+    /// web scrollIntoView. Call flush() after to apply and re-render.
+    #[napi]
+    pub fn scroll_into_view(
+        &self,
+        element_id: f64,
+        block: Option<String>,
+        inline: Option<String>,
+    ) -> Result<()> {
+        use crate::renderer::scroll_into_view::{scroll_into_view, Align};
+        let id = to_element_id(element_id)?;
+        let block = Align::parse(block.as_deref(), Align::Start);
+        let inline = Align::parse(inline.as_deref(), Align::Nearest);
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| {
+                    let tree = view.tree.lock().unwrap();
+                    scroll_into_view(&tree, id, block, inline, |id| {
+                        view.scroll_handles.get(&id).cloned()
+                    });
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    /// Clone every element that has a `viewTransitionName`, with its painted
+    /// bounds. Call flush() first, so the bounds are current.
+    #[napi]
+    pub fn view_transition_capture(&self) -> Result<()> {
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| view.view_transition_capture());
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    /// Animate every captured name toward its new element. Call flush()
+    /// after, and move the automation clock to step through the frames.
+    #[napi]
+    pub fn view_transition_start(&self, options: Option<String>) -> Result<()> {
+        let options = options.unwrap_or_else(|| "{}".to_string());
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            let result = cx
+                .update_window(window, |_, _window, app| {
+                    view.update(app, |view, _cx| view.view_transition_start(&options))
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            result.map_err(Error::from_reason)
         })
     }
 
@@ -745,10 +831,7 @@ impl TestGpuixRenderer {
                         }
                         view.scroll_handles.get(&id).map(|handle| {
                             let offset = handle.offset();
-                            vec![
-                                f64::from(f32::from(offset.x)),
-                                f64::from(f32::from(offset.y)),
-                            ]
+                            offset_to_js(offset).to_vec()
                         })
                     })
                 })
@@ -762,36 +845,35 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         with_test_state(|cx, window, view| {
-            let view = view.clone();
-
-            // Flush: notify view and run until parked so layout/rendering are current.
-            cx.update_window(window, |_, _window, app| {
-                view.update(app, |_, cx| {
-                    cx.notify();
-                });
-            })
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-
-            // Force a window refresh before capture so render_to_image reads
-            // the most recent frame scene.
-            cx.update_window(window, |_, window, _app| {
-                window.refresh();
-            })
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-
-            cx.run_until_parked();
-
-            // Capture via the platform renderer's render_to_image implementation.
-            let image = cx
-                .capture_screenshot(window)
-                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;
-
+            let image = capture(cx, window, view)?;
             // Save as PNG (format inferred from file extension).
             image
                 .save(&path)
                 .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
-
             Ok(())
+        })
+    }
+
+    /// The colour of one painted pixel as `[r, g, b, a]`, each 0 to 255.
+    ///
+    /// `x` and `y` are logical pixels from the top left of the window, the
+    /// same space every other test coordinate is in.
+    #[napi]
+    pub fn pixel_at(&self, x: f64, y: f64) -> Result<Vec<u32>> {
+        with_test_state(|cx, window, view| {
+            let image = capture(cx, window, view)?;
+            let scale = cx
+                .update_window(window, |_, window, _| window.scale_factor())
+                .map_err(|e| Error::from_reason(e.to_string()))? as f64;
+            let (px, py) = ((x * scale) as u32, (y * scale) as u32);
+            if px >= image.width() || py >= image.height() {
+                return Err(Error::from_reason(format!(
+                    "({x}, {y}) is outside the {}x{} window",
+                    image.width() as f64 / scale,
+                    image.height() as f64 / scale
+                )));
+            }
+            Ok(image.get_pixel(px, py).0.iter().map(|c| *c as u32).collect())
         })
     }
 
@@ -995,4 +1077,32 @@ impl TestGpuixRenderer {
             }
         }
     }
+}
+
+/// Render the current state and read the frame back from the GPU.
+fn capture(
+    cx: &mut gpui::VisualTestAppContext,
+    window: gpui::AnyWindowHandle,
+    view: &gpui::Entity<GpuixView>,
+) -> Result<image::RgbaImage> {
+    let view = view.clone();
+    // Flush: notify view and run until parked so layout/rendering are current.
+    cx.update_window(window, |_, _window, app| {
+        view.update(app, |_, cx| {
+            cx.notify();
+        });
+    })
+    .map_err(|e| Error::from_reason(e.to_string()))?;
+
+    // Force a window refresh before capture so render_to_image reads the most
+    // recent frame scene.
+    cx.update_window(window, |_, window, _app| {
+        window.refresh();
+    })
+    .map_err(|e| Error::from_reason(e.to_string()))?;
+
+    cx.run_until_parked();
+
+    cx.capture_screenshot(window)
+        .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))
 }

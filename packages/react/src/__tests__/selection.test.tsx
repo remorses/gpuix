@@ -22,6 +22,19 @@ describe("text selection", () => {
     expect(selected).toBe("hello world")
   })
 
+  it("copies the selection with cmd-c", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
+        <text style={{ fontSize: 20 }}>hello world</text>
+      </div>
+    )
+
+    expect(renderer.dragSelect(21, 30, 900, 30)).toBe("hello world")
+    renderer.simulateKeystrokes("cmd-c")
+    expect(renderer.readClipboardText()).toBe("hello world")
+  })
+
   it("starts a selection in the empty space before the glyphs", () => {
     const { render, renderer } = createTestRoot()
     render(
@@ -178,7 +191,7 @@ describe("text selection", () => {
     const a = createTestRoot()
     a.render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, width: 200 }}>
-        <text style={{ fontSize: 16, lineHeight: 18 }}>
+        <text style={{ fontSize: 16, lineHeight: "18px" }}>
           one two three four five six seven eight nine ten
         </text>
       </div>
@@ -190,7 +203,7 @@ describe("text selection", () => {
     const b = createTestRoot()
     b.render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, width: 200 }}>
-        <text style={{ fontSize: 16, lineHeight: 40 }}>
+        <text style={{ fontSize: 16, lineHeight: "40px" }}>
           one two three four five six seven eight nine ten
         </text>
       </div>
