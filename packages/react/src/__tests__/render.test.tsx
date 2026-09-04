@@ -91,6 +91,41 @@ describeNative("render()", () => {
     renderer = new TestRenderer()
   })
 
+  it("still shuts down the native renderer when React unmount throws", () => {
+    let stopped = 0
+    let shutdown = 0
+    resetRender()
+    Reflect.set(globalThis, "__gpuixRenderHost", {
+      loop: { stop: () => { stopped += 1 } },
+      root: { unmount: () => { throw new Error("window closed") } },
+      renderer: { shutdown: () => { shutdown += 1 } },
+    })
+
+    expect(() => resetRender()).toThrow("window closed")
+    expect(stopped).toBe(1)
+    expect(shutdown).toBe(1)
+    expect(Reflect.has(globalThis, "__gpuixRenderHost")).toBe(false)
+  })
+
+  it("preserves both React and native shutdown failures", () => {
+    const unmountFailure = new Error("window closed")
+    const shutdownFailure = new Error("Chromium shutdown timed out")
+    resetRender()
+    Reflect.set(globalThis, "__gpuixRenderHost", {
+      root: { unmount: () => { throw unmountFailure } },
+      renderer: { shutdown: () => { throw shutdownFailure } },
+    })
+
+    try {
+      resetRender()
+      throw new Error("resetRender unexpectedly succeeded")
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError)
+      expect((error as AggregateError).errors).toEqual([unmountFailure, shutdownFailure])
+    }
+    expect(Reflect.has(globalThis, "__gpuixRenderHost")).toBe(false)
+  })
+
   it("reuses the injected renderer on the second call", () => {
     const ignored = new TestRenderer()
     render(<text>one</text>, { renderer })

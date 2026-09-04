@@ -206,6 +206,7 @@ export type ElementType =
   | "markdown"
   | "shimmer"
   | "terminal"
+  | "browser"
   | "virtual-list"
 
 // ── Theme ────────────────────────────────────────────────────────────
@@ -418,6 +419,9 @@ export interface Props {
   onShowMore?: (event: EventPayload) => void
   onLineClick?: (event: EventPayload) => void
   onLinkClick?: (event: EventPayload) => void
+  onBrowserState?: (event: EventPayload) => void
+  onBrowserOpen?: (event: EventPayload) => void
+  onBrowserError?: (event: EventPayload) => void
   onVisibleRange?: (event: EventPayload) => void
   /** Match count changed for this element's `highlight`. See `matchCount`. */
   onHighlight?: (event: EventPayload) => void
@@ -527,6 +531,20 @@ export interface TerminalFrame {
 
 export interface TerminalProps extends Props {
   frame?: TerminalFrame
+}
+
+/** A persistent native child browser surface. */
+export interface BrowserProps extends Props {
+  source?: string
+  profileId?: string
+  profilePath?: string
+  incognito?: boolean
+  visible?: boolean
+  /** Serialized BrowserCommand. Commands execute once per increasing serial. */
+  command?: string
+  onBrowserState?: (event: EventPayload) => void
+  onBrowserOpen?: (event: EventPayload) => void
+  onBrowserError?: (event: EventPayload) => void
 }
 
 /** A decorative text highlight animated entirely by GPUI. */
@@ -658,8 +676,18 @@ export interface NativeRenderer {
 
   // ── Window API ─────────────────────────────────────────────────
   getWindowSize?(): { width: number; height: number }
+  /** Destroy native child surfaces before the host process exits. */
+  shutdown?(): void
   /** Whether this renderer includes the single-surface native terminal painter. */
   supportsNativeTerminal?(): boolean
+  /** Whether this renderer can host persistent native child browser views. */
+  supportsNativeBrowser?(): boolean
+  /** The active browser adapter: Chromium CEF, system WebView, remote, or unavailable. */
+  nativeBrowserEngine?(): string
+  /** Whether app-owned browser profiles have full storage isolation. */
+  nativeBrowserProfileIsolation?(): string
+  /** Initialization failure detail when native browser support is unavailable. */
+  nativeBrowserError?(): string | null
   /** Stage one compact binary terminal frame without routing cell bytes through React JSON. */
   setTerminalFrame?(elementId: number, metadata: string, cells: Uint8Array): void
   getWindowInsets?(): NativeWindowInsets

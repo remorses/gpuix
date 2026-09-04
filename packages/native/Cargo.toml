@@ -70,6 +70,9 @@ core-text = "=21.0.0"
 core-graphics = "=0.24.0"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
+raw-window-handle = { version = "0.6", features = ["std"], optional = true }
+objc = { version = "0.2", optional = true }
+cef = { git = "https://github.com/tauri-apps/cef-rs", rev = "71a3eba55bb46957b7bdd627ef7caf5c70acf4bb", features = ["sandbox"], optional = true }
 
 # Same crate GPUI uses. A .node cannot ship an exe manifest, so Windows DPI
 # awareness is set at runtime in renderer.rs instead of via windows-manifest.
@@ -82,6 +85,12 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi"] 
 default = ["test-support"]
 test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
 runtime-shaders = ["gpui_macos/runtime_shaders"]
+native-browser-cef = ["dep:cef", "dep:objc", "dep:raw-window-handle"]
+
+[[bin]]
+name = "gpuix-cef-helper"
+path = "src/bin/cef_helper.rs"
+required-features = ["native-browser-cef"]
 
 [build-dependencies]
 napi-build = "2"

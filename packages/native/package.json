@@ -26,6 +26,7 @@
     "build": "napi build --platform --release --features test-support",
     "build:release": "napi build --platform --release --no-default-features",
     "build:debug": "napi build --platform --features test-support",
+    "build:browser": "bun scripts/build-browser.ts",
     "build:web": "bun ../../scripts/web.ts --build-only",
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/native locally. CI builds all platform binaries. See AGENTS.md.'); process.exit(1) }\" && bun run build:web && napi pre-publish -t npm --no-gh-release",
     "universal": "napi universal",
@@ -39,6 +40,7 @@
     "index.d.ts",
     "browser.mjs",
     "wasm",
+    "cef",
     "LICENSE"
   ]
 }

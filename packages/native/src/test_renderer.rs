@@ -969,8 +969,31 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
+    pub fn shutdown(&self) {}
+
+    #[napi]
     pub fn supports_native_terminal(&self) -> bool {
         true
+    }
+
+    #[napi]
+    pub fn supports_native_browser(&self) -> bool {
+        false
+    }
+
+    #[napi]
+    pub fn native_browser_engine(&self) -> String {
+        "unavailable".to_string()
+    }
+
+    #[napi]
+    pub fn native_browser_profile_isolation(&self) -> String {
+        "limited".to_string()
+    }
+
+    #[napi]
+    pub fn native_browser_error(&self) -> Option<String> {
+        None
     }
 
     #[napi]

@@ -1020,15 +1020,31 @@ impl GpuixRenderer {
             Ok(window_handle) => window_handle,
             Err(error) => {
                 app_handle.update(|cx| cx.quit());
-                if platform.pump_events() {
+                let deadline = std::time::Instant::now() + Duration::from_secs(1);
+                let mut platform_running = true;
+                while platform_running && std::time::Instant::now() < deadline {
+                    platform_running = platform.pump_events();
+                    if platform_running {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+
+                if platform_running {
                     MAC_PLATFORM.with(|stored| {
                         *stored.borrow_mut() = Some(platform.clone());
                     });
+                    GPUI_APP.with(|stored| {
+                        *stored.borrow_mut() = Some(app_handle);
+                    });
+                    return Err(Error::from_reason(format!(
+                        "{error}; timed out terminating GPUI after its application window failed to open"
+                    )));
                 }
                 return Err(error);
             }
         };
 
+        crate::custom_elements::browser::initialize(options.browser_root_cache_path.as_deref());
         MAC_PLATFORM.with(|stored| {
             *stored.borrow_mut() = Some(platform);
         });
@@ -1214,6 +1230,7 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            crate::custom_elements::browser::do_message_loop_work();
             let running = MAC_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()
@@ -1248,6 +1265,26 @@ impl GpuixRenderer {
         *self.initialized.lock().unwrap()
     }
 
+    #[napi]
+    pub fn shutdown(&self) -> Result<()> {
+        if !*self.initialized.lock().unwrap() {
+            return Ok(());
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if let Err(error) = update_window(|view, _window, _cx| {
+                view.custom_registry.destroy_all();
+            }) {
+                eprintln!("[gpuix] native element teardown after window close: {error}");
+            }
+            crate::custom_elements::browser::shutdown().map_err(Error::from_reason)?;
+        }
+
+        *self.initialized.lock().unwrap() = false;
+        Ok(())
+    }
+
     /// Whether JavaScript must call tick() until it returns false.
     ///
     /// macOS: tick() pumps AppKit. Windows/Linux: tick() only reports whether
@@ -1266,6 +1303,26 @@ impl GpuixRenderer {
     #[napi]
     pub fn supports_native_terminal(&self) -> bool {
         true
+    }
+
+    #[napi]
+    pub fn supports_native_browser(&self) -> bool {
+        crate::custom_elements::browser::available()
+    }
+
+    #[napi]
+    pub fn native_browser_engine(&self) -> String {
+        crate::custom_elements::browser::engine().to_string()
+    }
+
+    #[napi]
+    pub fn native_browser_profile_isolation(&self) -> String {
+        crate::custom_elements::browser::profile_isolation().to_string()
+    }
+
+    #[napi]
+    pub fn native_browser_error(&self) -> Option<String> {
+        crate::custom_elements::browser::initialization_error()
     }
 
     #[napi]
@@ -2434,9 +2491,31 @@ impl WebGpuixRenderer {
 
     pub fn tick(&self) {}
 
+    pub fn shutdown(&self) {}
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = supportsNativeTerminal)]
     pub fn supports_native_terminal(&self) -> bool {
         true
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = supportsNativeBrowser)]
+    pub fn supports_native_browser(&self) -> bool {
+        false
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = nativeBrowserEngine)]
+    pub fn native_browser_engine(&self) -> String {
+        "unavailable".to_string()
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = nativeBrowserProfileIsolation)]
+    pub fn native_browser_profile_isolation(&self) -> String {
+        "remote".to_string()
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = nativeBrowserError)]
+    pub fn native_browser_error(&self) -> Option<String> {
+        None
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getWindowSize)]
@@ -4391,19 +4470,27 @@ pub(crate) fn build_host_container(
         let callback = ctx.event_callback.clone();
         match event_type.as_str() {
             // ── Click ────────────────────────────────────────────
-            // GPUI's higher-level on_click gesture is not finalized by the
-            // embedded macOS pump. A primary mouse-up is the portable click
-            // boundary; right and middle buttons remain aux/mouse events.
+            // Primary button only, like the DOM. Right and middle clicks go to
+            // `onAuxClick`, and `onMouseDown` sees every button.
             "click" => {
-                el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                let handles_key_down = element.events.contains("keyDown");
+                el = el.on_click(move |click_event, _window, _cx| {
+                    if !should_forward_primary_click(
+                        matches!(click_event, gpui::ClickEvent::Keyboard(_)),
+                        handles_key_down,
+                    ) {
+                        return;
+                    }
                     emit_event_full(&callback, id, "click", |p| {
-                        let (x, y) = point_to_xy(mouse_event.position);
+                        let (x, y) = point_to_xy(click_event.position());
                         p.x = Some(x);
                         p.y = Some(y);
-                        p.button = Some(0);
-                        p.modifiers = Some(mouse_event.modifiers.into());
-                        p.click_count = Some(mouse_event.click_count as u32);
-                        p.is_right_click = Some(false);
+                        p.modifiers = Some(click_event.modifiers().into());
+                        p.click_count = Some(click_event.click_count() as u32);
+                        p.is_right_click = Some(click_event.is_right_click());
+                        if let gpui::ClickEvent::Mouse(mouse) = click_event {
+                            p.button = Some(mouse_button_to_u32(mouse.up.button));
+                        }
                     });
                 });
             }
@@ -4418,6 +4505,9 @@ pub(crate) fn build_host_container(
                         p.modifiers = Some(click_event.modifiers().into());
                         p.click_count = Some(click_event.click_count() as u32);
                         p.is_right_click = Some(click_event.is_right_click());
+                        if let gpui::ClickEvent::Mouse(mouse) = click_event {
+                            p.button = Some(mouse_button_to_u32(mouse.up.button));
+                        }
                     });
                 });
             }
@@ -5006,6 +5096,10 @@ pub(crate) fn point_to_xy(p: gpui::Point<gpui::Pixels>) -> (f64, f64) {
 }
 
 /// Convert GPUI MouseButton to our u32 encoding: 0=left, 1=middle, 2=right.
+fn should_forward_primary_click(is_keyboard_click: bool, has_key_down_handler: bool) -> bool {
+    !is_keyboard_click || !has_key_down_handler
+}
+
 pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
     match button {
         gpui::MouseButton::Left => 0,
@@ -5523,6 +5617,9 @@ pub struct WindowOptions {
     /// `"opaque"` | `"transparent"` | `"blurred"`. `transparent: true` is the
     /// same as `"transparent"` when this is unset.
     pub window_background: Option<String>,
+    /// Absolute directory whose immediate children are persistent Chromium profiles.
+    /// Environment variable `GPUIX_BROWSER_ROOT_CACHE` and the platform default are fallbacks.
+    pub browser_root_cache_path: Option<String>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
     /// Give the window key focus when it opens. `false` opens it behind the
@@ -5547,6 +5644,7 @@ impl Default for WindowOptions {
             transparent: Some(false),
             titlebar_transparent: Some(false),
             window_background: None,
+            browser_root_cache_path: None,
             traffic_light_x: None,
             traffic_light_y: None,
             focus: Some(true),
@@ -5984,6 +6082,14 @@ mod window_options_tests {
         });
         assert!(!gpui_options.show);
         assert!(gpui_options.focus);
+    }
+
+    #[test]
+    fn key_handler_owns_only_keyboard_click_activation() {
+        assert!(!should_forward_primary_click(true, true));
+        assert!(should_forward_primary_click(true, false));
+        assert!(should_forward_primary_click(false, true));
+        assert!(should_forward_primary_click(false, false));
     }
 
     #[test]

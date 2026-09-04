@@ -135,7 +135,7 @@ gpuix/
 │   │   │   ├── syntax/         # Syntect highlighting + bounded cache
 │   │   │   ├── markdown/       # pulldown-cmark parser + gpui renderer
 │   │   │   ├── diff/           # Unified-patch parser + row flattening
-│   │   │   └── custom_elements/# input, img, svg, anchored, code, diff, markdown
+│   │   │   └── custom_elements/# input, img, svg, anchored, code, diff, markdown, shimmer, terminal, browser
 │   │   ├── examples/
 │   │   │   └── hello.rs        # Pure GPUI test (no JS)
 │   │   ├── Cargo.toml

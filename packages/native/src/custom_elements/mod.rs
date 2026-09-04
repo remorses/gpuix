@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use crate::renderer::EventCallback;
 
 pub mod anchored;
+pub mod browser;
 pub mod code;
 pub mod diff;
 pub mod img;
@@ -146,14 +147,20 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
         let callback = ctx.event_callback.clone();
         match event.as_str() {
             "click" => {
-                el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+                let handles_key_down = ctx.events.contains("keyDown");
+                el = el.on_click(move |click, _window, _cx| {
+                    if handles_key_down && matches!(click, gpui::ClickEvent::Keyboard(_)) {
+                        return;
+                    }
                     crate::renderer::emit_event_full(&callback, id, "click", |p| {
-                        let (x, y) = crate::renderer::point_to_xy(mouse_event.position);
+                        let (x, y) = crate::renderer::point_to_xy(click.position());
                         p.x = Some(x);
                         p.y = Some(y);
-                        p.button = Some(0);
-                        p.click_count = Some(mouse_event.click_count as u32);
-                        p.modifiers = Some(mouse_event.modifiers.into());
+                        p.click_count = Some(click.click_count() as u32);
+                        p.modifiers = Some(click.modifiers().into());
+                        if let gpui::ClickEvent::Mouse(mouse) = click {
+                            p.button = Some(crate::renderer::mouse_button_to_u32(mouse.up.button));
+                        }
                     });
                 });
             }
@@ -283,6 +290,7 @@ impl CustomElementRegistry {
         registry.register(Box::new(input::InputFactory));
         registry.register(Box::new(input::TextareaFactory));
         registry.register(Box::new(anchored::AnchoredFactory));
+        registry.register(Box::new(browser::BrowserFactory));
         registry.register(Box::new(img::ImgFactory));
         registry.register(Box::new(img::SvgFactory));
         registry.register(Box::new(code::CodeFactory));

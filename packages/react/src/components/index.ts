@@ -12,6 +12,7 @@ export const gpuixComponents = {
   canvas: "canvas",
   shimmer: "shimmer",
   terminal: "terminal",
+  browser: "browser",
   input: "input",
   textarea: "textarea",
   anchored: "anchored",

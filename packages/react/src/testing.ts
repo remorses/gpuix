@@ -67,6 +67,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   getRootId(): number | null
   getWindowSize(): { width: number; height: number }
   supportsNativeTerminal(): boolean
+  supportsNativeBrowser(): boolean
+  nativeBrowserEngine(): string
+  nativeBrowserProfileIsolation(): string
   setTerminalFrame(elementId: number, metadata: string, cells: Buffer): void
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number): void
@@ -468,6 +471,18 @@ export class TestRenderer implements NativeRenderer {
 
   supportsNativeTerminal(): boolean {
     return this.native.supportsNativeTerminal()
+  }
+
+  supportsNativeBrowser(): boolean {
+    return this.native.supportsNativeBrowser()
+  }
+
+  nativeBrowserEngine(): string {
+    return this.native.nativeBrowserEngine()
+  }
+
+  nativeBrowserProfileIsolation(): string {
+    return this.native.nativeBrowserProfileIsolation()
   }
 
   setTerminalFrame(elementId: number, metadata: string, cells: Uint8Array): void {

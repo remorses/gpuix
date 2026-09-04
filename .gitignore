@@ -9,6 +9,7 @@ opensrc
 tmp/
 screenshots/
 packages/native/wasm/
+packages/native/cef/
 # `bun scripts/web.ts` writes the browser bundle and the Wasm blob here, the
 # same generated pair as packages/native/wasm above.
 examples/web-dist/

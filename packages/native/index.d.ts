@@ -29,6 +29,7 @@ export declare class GpuixRenderer {
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
+  shutdown(): void
   /**
    * Whether JavaScript must call tick() until it returns false.
    *
@@ -38,6 +39,10 @@ export declare class GpuixRenderer {
    */
   requiresTick(): boolean
   supportsNativeTerminal(): boolean
+  supportsNativeBrowser(): boolean
+  nativeBrowserEngine(): string
+  nativeBrowserProfileIsolation(): string
+  nativeBrowserError(): string | null
   setTerminalFrame(elementId: number, metadata: string, cells: Buffer): void
   /**
    * The paintable size of the window in logical pixels, excluding any
@@ -333,7 +338,12 @@ export declare class TestGpuixRenderer {
   advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
+  shutdown(): void
   supportsNativeTerminal(): boolean
+  supportsNativeBrowser(): boolean
+  nativeBrowserEngine(): string
+  nativeBrowserProfileIsolation(): string
+  nativeBrowserError(): string | null
   setTerminalFrame(elementId: number, metadata: string, cells: Buffer): void
   /**
    * The offscreen window size, so `useWindowSize()` reports the same numbers
@@ -526,6 +536,11 @@ export interface WindowOptions {
    * same as `"transparent"` when this is unset.
    */
   windowBackground?: string
+  /**
+   * Absolute directory whose immediate children are persistent Chromium profiles.
+   * Environment variable `GPUIX_BROWSER_ROOT_CACHE` and the platform default are fallbacks.
+   */
+  browserRootCachePath?: string
   trafficLightX?: number
   trafficLightY?: number
   /**

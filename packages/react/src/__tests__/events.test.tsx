@@ -192,6 +192,54 @@ describeNative("events", () => {
       expect(received.filter((event) => event === "click")).toHaveLength(1)
     })
 
+    it("includes the primary mouse button in click payloads", () => {
+      let payload: EventPayload | undefined
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 50 }}
+          onClick={(event: EventPayload) => { payload = event }}
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateClick(10, 10)
+      expect(payload?.button).toBe(0)
+    })
+
+    it("activates once when React handles the activation key explicitly", () => {
+      let activations = 0
+      const activate = () => { activations += 1 }
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 50 }}
+          tabIndex={0}
+          onClick={activate}
+          onKeyDown={(event: EventPayload) => {
+            if (event.key === "enter" || event.key === "space") activate()
+          }}
+        />,
+      )
+
+      const target = testRoot.renderer.findByType("div").find((node) => node.events.has("click"))!
+      testRoot.renderer.nativeSimulateKeystrokes(target.id, "enter")
+      expect(activations).toBe(1)
+    })
+
+    it("does not click when primary release has no matching press", () => {
+      let clicks = 0
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 50 }}
+          onClick={() => { clicks += 1 }}
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+      expect(clicks).toBe(0)
+      testRoot.renderer.nativeSimulateMouseDown(250, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+      expect(clicks).toBe(0)
+    })
+
     it("dispatches primary clicks from native motion elements", () => {
       let clicks = 0
       testRoot.render(

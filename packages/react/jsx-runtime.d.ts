@@ -7,6 +7,7 @@
 import type * as React from "react"
 import type {
   AnchoredProps,
+  BrowserProps,
   CodeProps,
   DiffProps,
   ImgProps,
@@ -40,6 +41,7 @@ export namespace JSX {
     input: InputProps
     textarea: TextareaProps
     anchored: AnchoredProps
+    browser: BrowserProps
     code: CodeProps
     diff: DiffProps
     markdown: MarkdownProps

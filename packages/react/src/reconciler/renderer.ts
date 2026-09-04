@@ -157,6 +157,7 @@ function renderSlot(): RenderSlot {
 
 export interface RenderOptions extends WindowOptions, WindowKeyEventHandlers {
   onEvent?: (event: EventPayload) => void
+  onTerminated?: () => void
   renderer?: NativeRenderer
   /** GPUI scene overlay. Does not go through React or layout. */
   debugFrameOverlay?: DebugFrameOverlayMode
@@ -164,18 +165,37 @@ export interface RenderOptions extends WindowOptions, WindowKeyEventHandlers {
 
 export function resetRender(): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
-  slot?.loop?.stop()
-  slot?.root?.unmount()
+  const failures: unknown[] = []
+  try {
+    slot?.loop?.stop()
+  } catch (error) {
+    failures.push(error)
+  }
+  try {
+    slot?.root?.unmount()
+  } catch (error) {
+    failures.push(error)
+  }
+  try {
+    slot?.renderer?.shutdown?.()
+  } catch (error) {
+    failures.push(error)
+  }
   const automation = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
   void automation?.close()
   Reflect.deleteProperty(globalThis, BROWSER_AUTOMATION_KEY)
   Reflect.deleteProperty(globalThis, RENDER_HOST_KEY)
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "Failed to reset the GPUIX renderer")
+  }
 }
 
 /** Mount the app. Under `bun --hot`, later calls remount on the same native window. */
 export function render(node: ReactNode, options: RenderOptions = {}): Root {
   const {
     onEvent,
+    onTerminated,
     onKeyDown,
     onKeyUp,
     renderer: injected,
@@ -221,9 +241,13 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     const native = slot.renderer
     slot.loop?.stop()
     slot.loop = startFrameLoop(native, {
-      onTerminated: () => {
-        process.exit(0)
-      },
+      onTerminated: onTerminated ?? (() => {
+        try {
+          resetRender()
+        } finally {
+          process.exit(0)
+        }
+      }),
     })
   }
   console.log(remount ? "[gpuix] remount complete" : "[gpuix] mount complete")

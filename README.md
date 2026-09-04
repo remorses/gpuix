@@ -355,6 +355,9 @@ git submodule update --init --recursive
 cd packages/native
 bun run build
 
+# Build the optional CEF-backed Chromium surface on macOS
+bun run build:browser
+
 # Build React package
 cd ../react
 bun run build
@@ -408,6 +411,7 @@ terminal.
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
 | `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
 | `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
+| `browserRootCachePath` | absolute path | Allowed parent for persistent Chromium profiles; set before the first `<browser>` mounts |
 
 Call it again after a save and it remounts the tree on the same window.
 
@@ -443,7 +447,9 @@ later calls only remount React.
 
 `createRenderer()`, `createRoot()`, and `startFrameLoop()` stay public for
 tests and custom hosts. Pass `{ renderer }` into `render()` when you already
-have one.
+have one. Pass `onTerminated` when the application must flush services before
+process exit; it runs after the frame loop observes the last native window
+closing. Without it, `render()` performs the default `resetRender()` and exit.
 
 **One renderer drives one root.** A renderer owns one window, one native root
 id, and one event map, so `createRoot()` throws if that renderer already has a
@@ -1818,6 +1824,95 @@ highlights manually for the same reason.
 </shimmer>
 ```
 
+## Native Chromium browser surface
+
+On macOS, `<browser>` hosts a native `CefBrowserView` inside a frameless,
+CEF-owned `CefWindow` attached to GPUI's window. The CEF Views hierarchy owns the
+native close handshake, and GPUI keeps rendering the surrounding application
+chrome without exposing a browser title bar or tab strip. Build the optional
+native feature and stage its runtime first:
+
+```bash
+cd packages/native
+bun run build:browser
+```
+
+The command builds `@gpuix/native` with `native-browser-cef`, downloads the pinned
+CEF distribution into `CEF_PATH` (or the GPUix cache by default), and writes the
+runtime plus `manifest.json` to `packages/native/cef/`. The manifest binds the
+CEF version/API, architecture, native addon, framework, and all signed helpers by
+hash. A distributable `.app` must validate it, then copy the Chromium framework
+and all five `GPUix Chromium Helper*.app` templates into `Contents/Frameworks`.
+It may replace the `GPUix Chromium` prefix with its own application name, as
+Heddlework does, but must update each helper's bundle executable and identifier
+consistently, preserve every role suffix, and sign the framework, helpers, then
+outer app in that order. The CEF runtime is generated and platform-specific, so
+it is not checked into source control.
+
+CEF on macOS runs only from a coherent application bundle. An unbundled process
+fails browser initialization before launching any helper instead of entering a
+rendezvous crash loop. Build and launch a generated `.app` to develop or smoke
+test the native browser path.
+
+Configure an application-owned profile root when rendering. Persistent
+`profilePath` values must be immediate children of that root; GPUIX rejects paths
+outside it. Use `incognito` for an in-memory browsing context.
+
+```tsx
+render(<App />, {
+  title: 'Browser app',
+  browserRootCachePath: '/absolute/path/to/app/browser/profiles',
+})
+
+function App() {
+  return (
+    <browser
+      source="https://example.com"
+      profileId="workspace"
+      profilePath="/absolute/path/to/app/browser/profiles/workspace"
+      visible
+      command={JSON.stringify([
+        { serial: 1, kind: 'reload' },
+        { serial: 2, kind: 'focus' },
+      ])}
+      style={{ width: 800, height: 600 }}
+      onBrowserState={(event) => console.log(event.value)}
+      onBrowserOpen={(event) => console.log('popup', event.value)}
+      onBrowserError={(event) => console.error(event.value)}
+    />
+  )
+}
+```
+
+Send pending commands as a serial-ordered array and increment `serial` for every
+entry. A legacy single object is still accepted. Supported kinds are `navigate`
+(with a URL in `value`), `back`, `forward`, `reload`, `stop`, `focus`, `devtools`,
+`clearData`, and `print`. `clearData` removes cookies, HTTP cache, certificate
+exceptions, and HTTP-auth credentials; origin databases such as IndexedDB and
+localStorage remain until the profile is deleted. `browserState` reports URL,
+title, loading, history availability, and `commandSerial`, the highest command
+completed in order. Keep entries until that acknowledgement reaches their
+serial.
+
+Popups are surfaced through `browserOpen` instead of silently creating unmanaged
+windows. They are URLs only: adopting CEF opener state, target features,
+referrer/POST bodies, and website permission requests is not implemented.
+Applications must document opener-dependent popup flows and camera, microphone,
+geolocation, notification, Bluetooth, and passkey requests as unsupported until
+they provide explicit policy bridges.
+
+Probe support before exposing browser UI:
+
+```ts
+renderer.supportsNativeBrowser()          // true with staged CEF assets
+renderer.nativeBrowserEngine()            // "chromium"
+renderer.nativeBrowserProfileIsolation()  // "full"
+```
+
+The current embedded implementation is macOS-only. Other builds report the
+browser capability as unavailable rather than falling back to a personal system
+browser profile.
+
 ## Native terminal surface
 
 `<terminal>` is a low-level fixed-cell painter for applications that already own a VT parser and PTY. It remains one retained host node. Cells use a row-major buffer of 16-byte little-endian records: `u32 glyph`, `u32 foreground RGB`, `u32 background RGB`, `u16 flags`, and two reserved bytes. A glyph with bit 31 set indexes `graphemes`; otherwise it is a Unicode scalar value. Flag bits 0–7 are wide, spacer, bold, italic, underline, strike, block-fill, and Nerd Font respectively.
@@ -2103,8 +2198,8 @@ text imports no longer need a runtime flag.
 
 | Event | Props | Payload fields |
 |-------|-------|----------------|
-| Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
-| Aux click | `onAuxClick` | Same fields, for the non-primary buttons |
+| Click | `onClick` | `x`, `y`, `button` (mouse), `clickCount`, `isRightClick`, `modifiers` — primary activation only |
+| Aux click | `onAuxClick` | Same fields, for non-primary mouse buttons |
 | Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse enter | `onMouseEnter` | `hovered` |
@@ -2154,9 +2249,12 @@ is one event per pointer move.
 Capture arms on the **left** button only. A right-button drag is not captured,
 so it ends when the pointer leaves the element.
 
-`onClick` is the primary button too, like the DOM. Use **`onAuxClick`** for the
-others, and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
-button through `event.button` (`0` left, `1` middle, `2` right).
+`onClick` is the primary activation, like the DOM. Mouse clicks report
+`event.button === 0`; use **`onAuxClick`** for other buttons. `onMouseDown` and
+`onMouseUp` see every button (`0` left, `1` middle, `2` right). GPUI also emits
+a clean Enter/Space activation for a focused click listener. If that element
+registers `onKeyDown`, GPUix leaves keyboard activation to that handler so one
+keypress cannot dispatch the action twice.
 
 ## Supported Styles
 
@@ -2700,6 +2798,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>`)
 - [x] GPUI-owned decorative text animation (`<shimmer>`)
 - [x] Fixed-cell GPU terminal surface (`<terminal>`)
+- [x] Sandboxed macOS CEF/Chromium surface (`<browser>`)
 - [x] Cross-element text selection
 - [x] Text highlighting and search (`highlight`, `useTextSearch`)
 - [x] Headless Select, Combobox, and Tooltip

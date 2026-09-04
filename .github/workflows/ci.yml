@@ -35,7 +35,7 @@ jobs:
           - host: macos-latest
             target: aarch64-apple-darwin
             bunTarget: bun-darwin-arm64
-            build: bun run build --target aarch64-apple-darwin
+            build: bun run build:browser --target aarch64-apple-darwin
           # ── Linux (Vulkan/wgpu) ────────────────────────────────────
           # build:release disables test-support until wgpu image readback lands.
           - host: ubuntu-latest
@@ -120,7 +120,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: packages/native/${{ env.APP_NAME }}.*.node
+          path: |
+            packages/native/${{ env.APP_NAME }}.*.node
+            packages/native/cef
           if-no-files-found: error
 
       - name: Build React package
@@ -339,8 +341,11 @@ jobs:
 
       - name: Create npm dirs and move artifacts
         run: |
+          rm -rf cef
+          mv artifacts/bindings-aarch64-apple-darwin/cef cef
           bunx @napi-rs/cli create-npm-dirs
           bunx @napi-rs/cli artifacts
+          test -f cef/manifest.json
         working-directory: packages/native
 
       - name: List packages
