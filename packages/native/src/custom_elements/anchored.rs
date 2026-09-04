@@ -301,14 +301,12 @@ impl CustomElement for AnchoredElement {
             .flex_col();
         content = crate::automation::track_own_bounds(content, ctx.id);
         content = super::wire_standard_events(content, &ctx);
-        if let Some(style) = ctx.style {
-            content = crate::renderer::apply_interactive_styles(content, style);
-        }
+        content = ctx.styled_interactive(content);
         // Deferred overlays paint over the window blur. A missing fill lets the
         // page show through the card. Force an opaque surface when JS omitted one.
         let has_fill = ctx
             .style
-            .and_then(crate::style::StyleDesc::resolved_background)
+            .and_then(|style| crate::style::resolve::background_fill(style, &ctx.cascade.scope()))
             .is_some_and(|background| !background.is_transparent());
         if !has_fill {
             content = content.bg(gpui::rgb(0x1A1A1A));
