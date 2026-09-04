@@ -190,6 +190,7 @@ pub struct SvgElement {
     src: String,
     bytes: Option<std::sync::Arc<[u8]>>,
     source: String,
+    rotation_degrees: Option<f32>,
 }
 
 impl SvgElement {
@@ -272,6 +273,27 @@ impl CustomElement for SvgElement {
             .and_then(|style| style.color.as_deref())
             .and_then(crate::color::parse_color_rgba)
             .unwrap_or_else(|| gpui::rgb(0xe2e2e2).into());
+        if let Some(rotation_degrees) = self.rotation_degrees {
+            use gpui::AnimationExt as _;
+
+            let root = super::custom_surface(gpui::div().id(element_id), &ctx);
+            let animation_id = gpui::SharedString::from(format!("__gpuix_svg_rotation_{}", ctx.id));
+            let icon = gpui::svg()
+                .data(bytes)
+                .size_full()
+                .text_color(tint)
+                .with_spring(
+                    animation_id,
+                    gpui::SpringAnimation::new(gpui::SpringConfig::new(320.0, 30.0, 1.0))
+                        .to(rotation_degrees.to_radians())
+                        .with_epsilon(0.001),
+                    |icon, angle| {
+                        icon.with_transformation(gpui::Transformation::rotate(gpui::radians(angle)))
+                    },
+                );
+            return root.child(icon).into_any_element();
+        }
+
         let mut icon = gpui::svg()
             .data(bytes)
             .flex_none()
@@ -288,12 +310,18 @@ impl CustomElement for SvgElement {
         match key {
             "src" => self.load_src(value.as_str().unwrap_or_default().to_string()),
             "source" => self.source = value.as_str().unwrap_or_default().to_string(),
+            "rotation" => {
+                self.rotation_degrees = value
+                    .as_f64()
+                    .filter(|value| value.is_finite())
+                    .map(|value| value as f32);
+            }
             _ => {}
         }
     }
 
     fn supported_props(&self) -> &'static [&'static str] {
-        &["src", "source"]
+        &["src", "source", "rotation"]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {

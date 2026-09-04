@@ -6,10 +6,15 @@ export interface MotionStyle {
   width?: number
   height?: number
   opacity?: number
+  flexGrow?: number
   top?: number
   right?: number
   bottom?: number
   left?: number
+  paddingTop?: number
+  paddingRight?: number
+  paddingBottom?: number
+  paddingLeft?: number
   borderRadius?: number
 }
 
@@ -199,6 +204,8 @@ export type ElementType =
   | "code"
   | "diff"
   | "markdown"
+  | "shimmer"
+  | "terminal"
   | "virtual-list"
 
 // ── Theme ────────────────────────────────────────────────────────────
@@ -492,6 +499,42 @@ export interface SvgProps extends Props {
   src?: string
   /** Raw SVG markup rendered directly by GPUI. */
   source?: string
+  /** GPUI spring-animated clockwise rotation target in degrees. */
+  rotation?: number
+}
+
+/** A complete visible grid painted by the native GPU terminal surface. */
+export interface TerminalFrame {
+  version: 2
+  cols: number
+  rows: number
+  cellWidth: number
+  lineHeight: number
+  fontSize: number
+  background: string
+  cursorColor: string
+  cursorX: number
+  cursorY: number
+  cursorVisible: boolean
+  fontFamily: string
+  nerdFontFamily: string
+  ligaturesEnabled: boolean
+  /** Base64-encoded little-endian 16-byte cell records. */
+  cells: string
+  /** Strings referenced by cells whose glyph word has bit 31 set. */
+  graphemes: readonly string[]
+}
+
+export interface TerminalProps extends Props {
+  frame?: TerminalFrame
+}
+
+/** A decorative text highlight animated entirely by GPUI. */
+export interface ShimmerProps extends Props {
+  text?: string
+  baseColor?: string
+  highlightColor?: string
+  duration?: number
 }
 
 /**
@@ -615,6 +658,10 @@ export interface NativeRenderer {
 
   // ── Window API ─────────────────────────────────────────────────
   getWindowSize?(): { width: number; height: number }
+  /** Whether this renderer includes the single-surface native terminal painter. */
+  supportsNativeTerminal?(): boolean
+  /** Stage one compact binary terminal frame without routing cell bytes through React JSON. */
+  setTerminalFrame?(elementId: number, metadata: string, cells: Uint8Array): void
   getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
   /** Bring the window forward and focus it. Reveals a `show: false` window. */

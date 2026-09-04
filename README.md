@@ -41,8 +41,8 @@ bun add -d @types/react typescript
 ### 1. Point TypeScript at the GPUIX JSX types
 
 **`jsxImportSource` is required.** Without it TypeScript uses DOM types, so
-`<virtual-list>`, `<markdown>`, `<code>` and `style.hover` all fail to
-typecheck.
+`<virtual-list>`, `<markdown>`, `<code>`, `<shimmer>`, `<terminal>` and
+`style.hover` all fail to typecheck.
 
 ```json
 {
@@ -673,8 +673,11 @@ This is a remount, not React Refresh. Keeping hook state needs Bun to inject
 Native `.node` edits still need a rebuild. See [Developing the Rust side](#developing-the-rust-side).
 
 On **macOS**, `startFrameLoop` calls `renderer.tick()` at a fixed rate (~125fps by
-default). This pumps AppKit on the process main thread without blocking Node. Pass
-`{ frameMs }` to change the rate, and call `.stop()` on the returned handle to end it.
+default). Each tick drains pending NSEvents and ready CoreFoundation sources without
+entering AppKit's blocking run loop, so Bun can continue servicing PTYs, timers,
+promises, and sockets between polls. Pass `{ frameMs }` to change the rate, and call
+`.stop()` on the returned handle to end it. Even an unexpectedly long tick yields at
+least 4ms before the next poll.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
 dedicated Rust UI thread. Node sends in-process commands to that thread, so
@@ -727,7 +730,9 @@ Motion currently accepts these **numeric targets**:
 | Target | Range or unit |
 |---|---|
 | `width`, `height` | pixels, zero or greater |
+| `flexGrow` | unitless, zero or greater |
 | `top`, `right`, `bottom`, `left` | pixels |
+| `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft` | pixels, zero or greater |
 | `opacity` | `0` through `1` |
 | `borderRadius` | pixels, zero or greater |
 
@@ -1797,6 +1802,58 @@ assert the geometry without a screenshot. Zed's own editor paints search
 highlights manually for the same reason.
 </details>
 
+## Native shimmer text
+
+`<shimmer>` paints a repeating travelling highlight with GPUI’s animation clock, so decorative frames do not re-render React. `duration` is measured in seconds, and GPUI automatically stops the animation when reduced motion is enabled. Keep the same text as a child so retained-tree automation and accessibility can read it.
+
+```tsx
+<shimmer
+  text="Working"
+  baseColor="#8b8b8b"
+  highlightColor="#ffffff"
+  duration={2}
+  style={{ fontSize: 13, fontWeight: 650 }}
+>
+  Working
+</shimmer>
+```
+
+## Native terminal surface
+
+`<terminal>` is a low-level fixed-cell painter for applications that already own a VT parser and PTY. It remains one retained host node. Cells use a row-major buffer of 16-byte little-endian records: `u32 glyph`, `u32 foreground RGB`, `u32 background RGB`, `u16 flags`, and two reserved bytes. A glyph with bit 31 set indexes `graphemes`; otherwise it is a Unicode scalar value. Flag bits 0–7 are wide, spacer, bold, italic, underline, strike, block-fill, and Nerd Font respectively.
+
+The portable path sends a complete versioned `frame` prop whose `cells` value is base64:
+
+```tsx
+<terminal
+  frame={{
+    version: 2,
+    cols: 80,
+    rows: 24,
+    cellWidth: 7.83,
+    lineHeight: 17,
+    fontSize: 13,
+    background: '#0b0c0c',
+    cursorColor: '#e7e7e7',
+    cursorX: 0,
+    cursorY: 0,
+    cursorVisible: true,
+    fontFamily: 'Menlo',
+    nerdFontFamily: 'Symbols Nerd Font Mono',
+    ligaturesEnabled: true,
+    cells: packedCellsBase64,
+    graphemes: [],
+  }}
+  style={{ width: 626.4, height: 408, overflow: 'hidden' }}
+/>
+```
+
+Native applications can avoid base64 and React mutation JSON by rendering the host without a `frame` prop, retaining its host ID, and calling `renderer.setTerminalFrame(id, JSON.stringify(metadata), cells)`. `cells` is the raw buffer (a Node `Buffer` for the NAPI renderer, or `Uint8Array` through the React renderer contract); `metadata` contains every field above except `cells`. Feature-detect the optional method and use the complete prop as fallback. Before the element's first paint, the mailbox validates and copies arrivals while retaining only the latest raw payload. Once the element is active, staging prepares only the latest decoded frame and compares its visible text/cursor overlay with the frame already in the scene.
+
+The painter uploads one nearest-sampled texture at two pixels per cell axis. Animated direct frames retain their image identity and update a same-sized Metal, WGPU, or DirectX atlas tile in place instead of deallocating and reallocating it every paint. Backgrounds occupy all four quarter-cell pixels; half blocks, quadrants, and shades replace the corresponding pixels with the foreground, bypassing text shaping for framebuffer graphics. Remaining text is shaped independently of ANSI colour and paints GPUI's cached monochrome glyph-atlas coverage directly with each run's foreground, so colour animation does not reshape text or create a second atlas. Box-drawing runs ignore cell backgrounds that are already owned by the texture, while visible foreground or glyph changes remain part of the overlay identity. Emoji remain on GPUI's polychrome atlas unless the application requests a text-presentation glyph.
+
+On macOS, an unchanged overlay lets `setTerminalFrame` overwrite the stable atlas tile and present the current scene directly. It does not invalidate the root, rebuild retained views, run layout/prepaint/paint, or clone the workbench scene. Text, cursor, geometry, or dimension changes fall back to a normal full draw, as does an atlas update failure. Call the optional `renderer.supportsNativeTerminal()` capability before selecting this surface when supporting older GPUIX binaries; feature-detect `renderer.setTerminalFrame()` independently because older native-terminal builds support only the base64 prop.
+
 ## Native text components
 
 Three elements render text with Syntect syntax highlighting computed in
@@ -1985,7 +2042,8 @@ placeholder instead of crashing.
 
 `<svg>` uses GPUI's **monochrome icon renderer**. Raw `source` works on desktop
 and in the browser. Desktop apps can also use a local `src` path. The icon is
-drawn as one shape and tinted with `style.color`.
+drawn as one shape and tinted with `style.color`. Set `rotation` to a clockwise
+degree target to retarget a GPUI-owned spring without rendering React frames.
 
 For application icons, prefer **raw SVG source**. It works with both GPUIX
 targets and lets a bundler embed each icon in the JavaScript bundle. Use `src`
@@ -2640,6 +2698,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Image and SVG elements (`<img>`, `<svg>`)
 - [x] Virtual lists (`<virtual-list>`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>`)
+- [x] GPUI-owned decorative text animation (`<shimmer>`)
+- [x] Fixed-cell GPU terminal surface (`<terminal>`)
 - [x] Cross-element text selection
 - [x] Text highlighting and search (`highlight`, `useTextSearch`)
 - [x] Headless Select, Combobox, and Tooltip

@@ -66,6 +66,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   advanceTime(milliseconds: number): void
   getRootId(): number | null
   getWindowSize(): { width: number; height: number }
+  supportsNativeTerminal(): boolean
+  setTerminalFrame(elementId: number, metadata: string, cells: Buffer): void
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
@@ -462,6 +464,15 @@ export class TestRenderer implements NativeRenderer {
   /** The offscreen window size, so `useWindowSize()` works under test. */
   getWindowSize(): { width: number; height: number } {
     return this.native.getWindowSize()
+  }
+
+  supportsNativeTerminal(): boolean {
+    return this.native.supportsNativeTerminal()
+  }
+
+  setTerminalFrame(elementId: number, metadata: string, cells: Uint8Array): void {
+    const payload = Buffer.from(cells.buffer, cells.byteOffset, cells.byteLength)
+    this.native.setTerminalFrame(elementId, metadata, payload)
   }
 
   // ── Scroll API ──────────────────────────────────────────────────

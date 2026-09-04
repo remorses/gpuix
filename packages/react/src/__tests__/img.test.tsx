@@ -161,6 +161,33 @@ describeNative("custom element: img", () => {
 })
 
 describeNative("custom element: svg", () => {
+  it("spring-rotates a raw SVG without React frames", () => {
+    const testRoot = createTestRoot({ width: 120, height: 120 })
+    const source = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h15l-4 5 4 5H3z"/></svg>'
+    const beforePath = `${SHOTS_DIR}/gpuix-svg-rotation-0.png`
+    const afterPath = `${SHOTS_DIR}/gpuix-svg-rotation-1.png`
+
+    try {
+      testRoot.render(<svg source={source} rotation={0} style={{ width: 72, height: 72, color: "#ffffff" }} />)
+      testRoot.renderer.captureScreenshot(beforePath)
+      testRoot.render(<svg source={source} rotation={90} style={{ width: 72, height: 72, color: "#ffffff" }} />)
+      for (let frame = 0; frame < 40; frame += 1) {
+        testRoot.renderer.advanceTime(16)
+        testRoot.renderer.flush()
+      }
+      testRoot.renderer.captureScreenshot(afterPath)
+
+      expect(testRoot.renderer.findByType("svg")[0]?.customProps?.rotation).toBe(90)
+      if (!isCI) {
+        const before = fs.readFileSync(beforePath)
+        const after = fs.readFileSync(afterPath)
+        expect(bufferSimilarity(before, after)).toBeLessThan(0.99)
+      }
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("renders raw SVG source with the style color", () => {
     const testRoot = createTestRoot()
 

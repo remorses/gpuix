@@ -44,9 +44,10 @@ export function createRenderer(
   return renderer
 }
 
-/** ~125fps. Above any common display refresh rate, so frames are never the
- *  bottleneck, while still leaving the Node event loop almost entirely idle. */
+/** ~125Hz keeps native input polling above common display rates. The embedded
+ * AppKit pump is nonblocking, so the interval remains JavaScript yield time. */
 const DEFAULT_FRAME_MS = 8
+const MIN_FRAME_YIELD_MS = 4
 
 export interface FrameLoop {
   stop: () => void
@@ -72,8 +73,9 @@ export interface FrameLoop {
  * Each frame is scheduled only after the previous one finishes, so a slow frame
  * delays the next one instead of letting timers pile up.
  *
- * If `tick()` already used the whole budget, wait 0ms. A fixed 8ms sleep after a
- * 10ms frame would cap scroll at ~55fps on a 120Hz display.
+ * `tick()` normally returns immediately. If an exceptional tick uses the whole
+ * budget, still yield briefly so PTY, timer, promise, and socket callbacks cannot
+ * be monopolized by consecutive native pumps.
  *
  * `tick()` returning false means the last window closed. The loop stops and
  * `onTerminated` runs. `render()` uses that to exit the process.
@@ -109,7 +111,7 @@ export function startFrameLoop(
       options.onTerminated?.()
       return
     }
-    const wait = Math.max(0, frameMs - (performance.now() - started))
+    const wait = Math.max(MIN_FRAME_YIELD_MS, frameMs - (performance.now() - started))
     timer = setTimeout(loop, wait)
   }
   loop()

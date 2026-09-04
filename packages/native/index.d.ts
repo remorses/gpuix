@@ -37,6 +37,8 @@ export declare class GpuixRenderer {
    * the last window closes so the JS frame loop can exit the process.
    */
   requiresTick(): boolean
+  supportsNativeTerminal(): boolean
+  setTerminalFrame(elementId: number, metadata: string, cells: Buffer): void
   /**
    * The paintable size of the window in logical pixels, excluding any
    * platform title bar. This used to answer a hardcoded 800x600, so anything
@@ -331,6 +333,8 @@ export declare class TestGpuixRenderer {
   advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
+  supportsNativeTerminal(): boolean
+  setTerminalFrame(elementId: number, metadata: string, cells: Buffer): void
   /**
    * The offscreen window size, so `useWindowSize()` reports the same numbers
    * under test as in a real window instead of falling back to a default.

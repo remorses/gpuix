@@ -81,6 +81,7 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi"] 
 # letting users write GPU-backed tests for their apps.
 default = ["test-support"]
 test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
+runtime-shaders = ["gpui_macos/runtime_shaders"]
 
 [build-dependencies]
 napi-build = "2"

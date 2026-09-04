@@ -92,7 +92,10 @@ export type {
   NativeRenderer,
   NativeWindowInsets,
   PublicInstance,
+  ShimmerProps,
   StyleDesc,
+  TerminalFrame,
+  TerminalProps,
   WindowKeyEventHandler,
   WindowKeyEventHandlers,
 } from "./types/host.js"

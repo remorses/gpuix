@@ -627,10 +627,13 @@ fn register_drag_listeners(
             return;
         }
         let mut selection = up_selection.lock();
+        let was_dragging = selection.is_dragging();
         selection.cancel_pending();
         selection.end_active_drag();
         drop(selection);
-        on_drag_end(cx);
+        if was_dragging {
+            on_drag_end(cx);
+        }
     });
 }
 

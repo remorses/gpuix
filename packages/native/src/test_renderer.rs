@@ -968,6 +968,24 @@ impl TestGpuixRenderer {
         self.tree.lock().unwrap().root_id.map(|id| id as f64)
     }
 
+    #[napi]
+    pub fn supports_native_terminal(&self) -> bool {
+        true
+    }
+
+    #[napi]
+    pub fn set_terminal_frame(
+        &self,
+        element_id: f64,
+        metadata: String,
+        cells: Buffer,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        crate::custom_elements::terminal::stage_frame(id, &metadata, cells.as_ref())
+            .map(|_| ())
+            .map_err(Error::from_reason)
+    }
+
     /// The offscreen window size, so `useWindowSize()` reports the same numbers
     /// under test as in a real window instead of falling back to a default.
     #[napi]

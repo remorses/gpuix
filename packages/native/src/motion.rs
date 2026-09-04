@@ -13,10 +13,15 @@ pub(crate) struct MotionStyle {
     pub width: Option<f64>,
     pub height: Option<f64>,
     pub opacity: Option<f64>,
+    pub flex_grow: Option<f64>,
     pub top: Option<f64>,
     pub right: Option<f64>,
     pub bottom: Option<f64>,
     pub left: Option<f64>,
+    pub padding_top: Option<f64>,
+    pub padding_right: Option<f64>,
+    pub padding_bottom: Option<f64>,
+    pub padding_left: Option<f64>,
     pub border_radius: Option<f64>,
 }
 
@@ -30,10 +35,15 @@ impl MotionStyle {
             width: value(self.width, target.width, progress),
             height: value(self.height, target.height, progress),
             opacity: value(self.opacity, target.opacity, progress),
+            flex_grow: value(self.flex_grow, target.flex_grow, progress),
             top: value(self.top, target.top, progress),
             right: value(self.right, target.right, progress),
             bottom: value(self.bottom, target.bottom, progress),
             left: value(self.left, target.left, progress),
+            padding_top: value(self.padding_top, target.padding_top, progress),
+            padding_right: value(self.padding_right, target.padding_right, progress),
+            padding_bottom: value(self.padding_bottom, target.padding_bottom, progress),
+            padding_left: value(self.padding_left, target.padding_left, progress),
             border_radius: value(self.border_radius, target.border_radius, progress),
         }
     }
@@ -48,6 +58,9 @@ impl MotionStyle {
         if let Some(value) = self.opacity {
             style.opacity = Some(value);
         }
+        if let Some(value) = self.flex_grow {
+            style.flex_grow = Some(value);
+        }
         if let Some(value) = self.top {
             style.top = Some(value);
         }
@@ -59,6 +72,18 @@ impl MotionStyle {
         }
         if let Some(value) = self.left {
             style.left = Some(value);
+        }
+        if let Some(value) = self.padding_top {
+            style.padding_top = Some(value);
+        }
+        if let Some(value) = self.padding_right {
+            style.padding_right = Some(value);
+        }
+        if let Some(value) = self.padding_bottom {
+            style.padding_bottom = Some(value);
+        }
+        if let Some(value) = self.padding_left {
+            style.padding_left = Some(value);
         }
         if let Some(value) = self.border_radius {
             style.border_radius = Some(value);
@@ -240,10 +265,15 @@ fn validate_style(style: &MotionStyle) -> Result<(), String> {
         ("width", style.width),
         ("height", style.height),
         ("opacity", style.opacity),
+        ("flexGrow", style.flex_grow),
         ("top", style.top),
         ("right", style.right),
         ("bottom", style.bottom),
         ("left", style.left),
+        ("paddingTop", style.padding_top),
+        ("paddingRight", style.padding_right),
+        ("paddingBottom", style.padding_bottom),
+        ("paddingLeft", style.padding_left),
         ("borderRadius", style.border_radius),
     ] {
         if value.is_some_and(|value| !value.is_finite() || value.abs() > f32::MAX as f64) {
@@ -252,9 +282,16 @@ fn validate_style(style: &MotionStyle) -> Result<(), String> {
     }
     if style.width.is_some_and(|value| value < 0.0)
         || style.height.is_some_and(|value| value < 0.0)
+        || style.flex_grow.is_some_and(|value| value < 0.0)
+        || style.padding_top.is_some_and(|value| value < 0.0)
+        || style.padding_right.is_some_and(|value| value < 0.0)
+        || style.padding_bottom.is_some_and(|value| value < 0.0)
+        || style.padding_left.is_some_and(|value| value < 0.0)
         || style.border_radius.is_some_and(|value| value < 0.0)
     {
-        return Err("motion sizes and borderRadius must be non-negative".to_string());
+        return Err(
+            "motion sizes, flexGrow, padding, and borderRadius must be non-negative".to_string(),
+        );
     }
     if style
         .opacity
@@ -369,6 +406,22 @@ mod tests {
                 .width,
             Some(25.0)
         );
+    }
+
+    #[test]
+    fn interpolates_flex_growth_and_directional_padding() {
+        let started = Instant::now();
+        let description = serde_json::json!({
+            "initial": { "flexGrow": 0.0, "paddingLeft": 8.0 },
+            "animate": { "flexGrow": 1.0, "paddingLeft": 104.0 },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        let state = MotionState::new(&description, started).unwrap();
+        let middle = state.frame(started + Duration::from_millis(500));
+
+        assert_eq!(middle.style.flex_grow, Some(0.5));
+        assert_eq!(middle.style.padding_left, Some(56.0));
+        assert!(middle.active);
     }
 
     #[test]
