@@ -191,6 +191,16 @@ export function resetRender(): void {
   }
 }
 
+export function terminateDefaultRenderer(): never {
+  try {
+    resetRender()
+  } catch (error) {
+    console.error("[gpuix] Native renderer shutdown failed:", error)
+    process.exit(1)
+  }
+  process.exit(0)
+}
+
 /** Mount the app. Under `bun --hot`, later calls remount on the same native window. */
 export function render(node: ReactNode, options: RenderOptions = {}): Root {
   const {
@@ -241,13 +251,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     const native = slot.renderer
     slot.loop?.stop()
     slot.loop = startFrameLoop(native, {
-      onTerminated: onTerminated ?? (() => {
-        try {
-          resetRender()
-        } finally {
-          process.exit(0)
-        }
-      }),
+      onTerminated: onTerminated ?? terminateDefaultRenderer,
     })
   }
   console.log(remount ? "[gpuix] remount complete" : "[gpuix] mount complete")

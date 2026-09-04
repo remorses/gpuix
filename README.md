@@ -1841,9 +1841,12 @@ The command builds `@gpuix/native` with `native-browser-cef`, downloads the pinn
 CEF distribution into `CEF_PATH` (or the GPUix cache by default), and writes the
 runtime plus `manifest.json` to `packages/native/cef/`. The manifest binds the
 CEF version/API, architecture, native addon, and the complete framework/helper
-tree (including file contents, modes, directories, and symlinks). CI transports
-the runtime as a tar archive so those metadata remain intact. A distributable
-`.app` must validate it, then copy the Chromium framework
+tree (including file contents, permission/special-mode bits, directories, and
+contained relative symlinks). CI transports the runtime as a tar archive, then
+packs and extracts the root and Darwin platform npm packages and verifies the
+extracted tree and addon against that manifest before publication. A
+distributable `.app` must validate a private snapshot, preserve symlinks
+verbatim, then copy the Chromium framework
 and all five `GPUix Chromium Helper*.app` templates into `Contents/Frameworks`.
 It may replace the `GPUix Chromium` prefix with its own application name, as
 Heddlework does, but must update each helper's bundle executable and identifier
@@ -1851,10 +1854,14 @@ consistently, preserve every role suffix, and sign the framework, helpers, then
 outer app in that order. The CEF runtime is generated and platform-specific, so
 it is not checked into source control.
 
-CEF on macOS runs only from a coherent application bundle. Production builds
-resolve the runtime only from that bundle and ignore environment and source-tree
-paths. An unbundled process fails browser initialization before launching any
-helper instead of entering a rendezvous crash loop. Build and launch a generated
+CEF on macOS runs only from a coherent application bundle. Production performs
+a strict deep code-signature check, requires the current executable directly
+under `Contents/MacOS`, canonicalizes the bundle and every runtime executable,
+and rejects a `Frameworks` directory, framework,
+framework binary, or helper whose symlink chain leaves the owning bundle.
+Environment and source-tree paths are ignored. An unbundled process fails
+browser initialization before launching any helper instead of entering a
+rendezvous crash loop. Build and launch a generated
 `.app` to develop or smoke test the native browser path. Native-library developers
 who intentionally need an unbundled runtime must opt into the
 `cef-development-overrides` Cargo feature.
@@ -1901,10 +1908,12 @@ completed in order. Keep entries until that acknowledgement reaches their
 serial.
 
 `generation` identifies one logical surface incarnation. Increment it whenever a
-retained browser node is reused with a different profile/session. Every
-`browserState` payload includes that generation, while `browserOpen` and
-`browserError` contain `{ generation, value }`. Reject callbacks whose generation
-is not current so queued CEF events cannot cross profile boundaries.
+retained browser node is reused with a different profile/session. GPUix retires
+the old native browser and resets its command acknowledgement/retry sequence for
+the new generation, so serials may restart at one. Every `browserState` payload
+includes that generation, while `browserOpen` and `browserError` contain
+`{ generation, value }`. Reject callbacks whose generation is not current so
+queued CEF events cannot cross profile boundaries.
 
 Popups are surfaced through `browserOpen` instead of silently creating unmanaged
 windows. They are URLs only: adopting CEF opener state, target features,
@@ -1959,7 +1968,7 @@ Native applications can avoid base64 and React mutation JSON by rendering the ho
 
 The painter uploads one nearest-sampled texture at two pixels per cell axis. Animated direct frames retain their image identity and update a same-sized Metal, WGPU, or DirectX atlas tile in place instead of deallocating and reallocating it every paint. Backgrounds occupy all four quarter-cell pixels; half blocks, quadrants, and shades replace the corresponding pixels with the foreground, bypassing text shaping for framebuffer graphics. Remaining text is shaped independently of ANSI colour and paints GPUI's cached monochrome glyph-atlas coverage directly with each run's foreground, so colour animation does not reshape text or create a second atlas. Box-drawing runs ignore cell backgrounds that are already owned by the texture, while visible foreground or glyph changes remain part of the overlay identity. Emoji remain on GPUI's polychrome atlas unless the application requests a text-presentation glyph.
 
-On macOS, an unchanged overlay lets `setTerminalFrame` overwrite the stable atlas tile and present the current scene directly. It does not invalidate the root, rebuild retained views, run layout/prepaint/paint, or clone the workbench scene. Text, cursor, geometry, or dimension changes fall back to a normal full draw, as does an atlas update failure. Call the optional `renderer.supportsNativeTerminal()` capability before selecting this surface when supporting older GPUIX binaries; feature-detect `renderer.setTerminalFrame()` independently because older native-terminal builds support only the base64 prop.
+On macOS, an unchanged overlay lets `setTerminalFrame` wait for the latest ordered Metal command buffer to finish sampling the tile, overwrite that stable atlas tile, and present the current scene directly. The completion fence prevents CPU `replace_region` writes from racing an in-flight GPU frame. It does not invalidate the root, rebuild retained views, run layout/prepaint/paint, or clone the workbench scene. Text, cursor, geometry, or dimension changes fall back to a normal full draw, as does an atlas update failure. Call the optional `renderer.supportsNativeTerminal()` capability before selecting this surface when supporting older GPUIX binaries; feature-detect `renderer.setTerminalFrame()` independently because older native-terminal builds support only the base64 prop.
 
 ## Native text components
 

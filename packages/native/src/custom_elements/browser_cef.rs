@@ -260,11 +260,12 @@ struct CefRuntimePaths {
 fn resolve_runtime() -> Result<CefRuntimePaths, String> {
     let main_bundle = main_app_bundle();
     #[cfg(not(feature = "cef-development-overrides"))]
-    if main_bundle.is_none() {
-        return Err(
+    {
+        let bundle = main_bundle.as_ref().ok_or_else(|| {
             "Native Chromium requires a macOS application bundle; run `bun run build` and launch the generated .app"
-                .to_string(),
-        );
+                .to_string()
+        })?;
+        validate_app_bundle_signature(bundle)?;
     }
     let roots = main_bundle
         .iter()
@@ -305,13 +306,11 @@ fn resolve_runtime() -> Result<CefRuntimePaths, String> {
             "Chromium Embedded Framework.framework was not found in the application bundle"
                 .to_string()
         })?;
-    let framework_directory = framework_directory.canonicalize().map_err(|error| {
-        format!(
-            "Could not resolve Chromium framework {}: {error}",
-            framework_directory.display()
-        )
-    })?;
-    let framework_binary = framework_directory.join("Chromium Embedded Framework");
+    let framework_directory = canonical_runtime_path(&framework_directory, "Chromium framework")?;
+    let framework_binary = canonical_runtime_path(
+        &framework_directory.join("Chromium Embedded Framework"),
+        "Chromium framework binary",
+    )?;
     if !framework_binary.is_file() {
         return Err(format!(
             "Chromium framework binary is missing at {}",
@@ -320,12 +319,63 @@ fn resolve_runtime() -> Result<CefRuntimePaths, String> {
     }
 
     let helper_executable = resolve_helper(&roots, main_bundle.as_deref())?;
+    #[cfg(not(feature = "cef-development-overrides"))]
+    {
+        let bundle = main_bundle
+            .as_ref()
+            .expect("production runtime already rejected an unbundled executable");
+        let frameworks_root = canonical_runtime_path(
+            &bundle.join("Contents/Frameworks"),
+            "application Frameworks directory",
+        )?;
+        ensure_runtime_contained(&frameworks_root, bundle, "application Frameworks directory")?;
+        ensure_runtime_contained(&framework_directory, &frameworks_root, "Chromium framework")?;
+        ensure_runtime_contained(
+            &framework_binary,
+            &frameworks_root,
+            "Chromium framework binary",
+        )?;
+        ensure_runtime_contained(&helper_executable, &frameworks_root, "Chromium helper")?;
+    }
     Ok(CefRuntimePaths {
         framework_directory,
         framework_binary,
         helper_executable,
         main_bundle,
     })
+}
+
+#[cfg(not(feature = "cef-development-overrides"))]
+fn validate_app_bundle_signature(bundle: &Path) -> Result<(), String> {
+    let status = std::process::Command::new("/usr/bin/codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(bundle)
+        .status()
+        .map_err(|error| format!("Could not verify application bundle signature: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Native Chromium requires an intact signed application bundle: {}",
+            bundle.display()
+        ))
+    }
+}
+
+fn canonical_runtime_path(path: &Path, label: &str) -> Result<PathBuf, String> {
+    path.canonicalize()
+        .map_err(|error| format!("Could not resolve {label} {}: {error}", path.display()))
+}
+
+fn ensure_runtime_contained(path: &Path, root: &Path, label: &str) -> Result<(), String> {
+    if path.starts_with(root) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{label} escapes its trusted application bundle root: {}",
+            path.display()
+        ))
+    }
 }
 
 fn resolve_helper(roots: &[PathBuf], main_bundle: Option<&Path>) -> Result<PathBuf, String> {
@@ -443,12 +493,24 @@ fn remote_debugging_port() -> i32 {
 }
 
 fn main_app_bundle() -> Option<PathBuf> {
-    let executable = std::env::current_exe().ok()?;
+    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
     executable.ancestors().find_map(|ancestor| {
-        ancestor
+        if !ancestor
             .extension()
             .is_some_and(|extension| extension == "app")
-            .then(|| ancestor.to_path_buf())
+        {
+            return None;
+        }
+        let bundle = ancestor.canonicalize().ok()?;
+        let relative_executable = executable
+            .strip_prefix(bundle.join("Contents/MacOS"))
+            .ok()?;
+        if relative_executable.components().count() != 1
+            || !bundle.join("Contents/Info.plist").is_file()
+        {
+            return None;
+        }
+        Some(bundle)
     })
 }
 
@@ -791,13 +853,7 @@ impl BrowserRuntime {
             "{}:{}:{}",
             config.profile_id, config.profile_path, config.incognito
         );
-        if self.profile_key.as_deref() != Some(&profile_key)
-            || self.generation != Some(config.generation)
-        {
-            self.retire_active_browser();
-            self.profile_key = Some(profile_key);
-            self.generation = Some(config.generation);
-        }
+        self.switch_identity(profile_key, config.generation);
         let logical_bounds = (
             f32::from(bounds.origin.x),
             f32::from(bounds.origin.y),
@@ -907,6 +963,19 @@ impl BrowserRuntime {
         }
         self.report_state(callback, id, config.generation);
         Ok(())
+    }
+
+    fn switch_identity(&mut self, profile_key: String, generation: u64) {
+        if self.profile_key.as_deref() == Some(&profile_key) && self.generation == Some(generation)
+        {
+            return;
+        }
+        self.retire_active_browser();
+        self.last_command_serial = 0;
+        self.last_retry_serial = 0;
+        self.pending_command = None;
+        self.profile_key = Some(profile_key);
+        self.generation = Some(generation);
     }
 
     fn create(
@@ -2292,6 +2361,7 @@ mod tests {
         ))
     }
 
+    #[cfg(not(feature = "cef-development-overrides"))]
     #[test]
     fn unbundled_process_fails_before_resolving_cef_assets() {
         if main_app_bundle().is_none() {
@@ -2300,6 +2370,88 @@ mod tests {
                 Ok(_) => panic!("unbundled CEF must fail closed"),
             }
         }
+    }
+
+    #[cfg(not(feature = "cef-development-overrides"))]
+    #[test]
+    fn unsigned_application_bundle_fails_signature_validation() {
+        let base = temporary_root();
+        let bundle = base.join("Unsigned.app");
+        fs::create_dir_all(bundle.join("Contents/MacOS")).expect("bundle");
+        fs::write(bundle.join("Contents/Info.plist"), "not signed").expect("plist");
+
+        assert!(validate_app_bundle_signature(&bundle).is_err());
+
+        fs::remove_dir_all(base).expect("cleanup");
+    }
+
+    #[cfg(feature = "cef-development-overrides")]
+    #[test]
+    fn development_resolution_does_not_require_an_application_bundle() {
+        if main_app_bundle().is_none() {
+            if let Err(error) = resolve_runtime() {
+                assert!(!error.contains("requires a macOS application bundle"));
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_containment_rejects_symlink_escape() {
+        let base = temporary_root();
+        let root = base.join("Frameworks");
+        let outside = base.join("outside");
+        fs::create_dir_all(&root).expect("root");
+        fs::create_dir_all(&outside).expect("outside");
+        let linked = root.join("escaped.framework");
+        symlink(&outside, &linked).expect("symlink");
+
+        let canonical_root = root.canonicalize().expect("canonical root");
+        let canonical_link = linked.canonicalize().expect("canonical link");
+        assert!(
+            ensure_runtime_contained(&canonical_link, &canonical_root, "test framework").is_err()
+        );
+
+        fs::remove_dir_all(base).expect("cleanup");
+    }
+
+    #[test]
+    fn canonical_containment_rejects_an_escaping_frameworks_directory() {
+        let base = temporary_root();
+        let bundle = base.join("Heddlework.app");
+        let contents = bundle.join("Contents");
+        let outside = base.join("external-frameworks");
+        fs::create_dir_all(&contents).expect("bundle contents");
+        fs::create_dir_all(&outside).expect("external frameworks");
+        symlink(&outside, contents.join("Frameworks")).expect("Frameworks symlink");
+
+        let canonical_bundle = bundle.canonicalize().expect("canonical bundle");
+        let canonical_frameworks = contents
+            .join("Frameworks")
+            .canonicalize()
+            .expect("canonical Frameworks");
+        assert!(ensure_runtime_contained(
+            &canonical_frameworks,
+            &canonical_bundle,
+            "application Frameworks directory"
+        )
+        .is_err());
+
+        fs::remove_dir_all(base).expect("cleanup");
+    }
+
+    #[test]
+    fn generation_change_resets_command_acknowledgements() {
+        let mut runtime = BrowserRuntime::default();
+        runtime.profile_key = Some("workspace:/tmp/profile:false".to_string());
+        runtime.generation = Some(1);
+        runtime.last_command_serial = 9;
+        runtime.last_retry_serial = 9;
+
+        runtime.switch_identity("workspace:/tmp/profile:false".to_string(), 2);
+
+        assert_eq!(runtime.generation, Some(2));
+        assert_eq!(runtime.last_command_serial, 0);
+        assert_eq!(runtime.last_retry_serial, 0);
     }
 
     #[test]

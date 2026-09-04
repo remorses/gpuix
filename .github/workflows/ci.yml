@@ -190,6 +190,9 @@ jobs:
           name: bindings-aarch64-apple-darwin
           path: packages/native/
 
+      - name: Test browser artifact verifier
+        run: bun test packages/native/scripts/cef-artifacts.test.ts
+
       - name: Run React tests
         run: bun run test
         working-directory: packages/react
@@ -352,6 +355,10 @@ jobs:
           bunx @napi-rs/cli artifacts
           node -e "const m=require('./cef/manifest.json'); if(m.schemaVersion!==2 || !m.artifacts || Object.keys(m.artifacts).length===0) process.exit(1)"
           test -f cef/manifest.json
+        working-directory: packages/native
+
+      - name: Verify packed native browser runtime
+        run: bun scripts/verify-packed-browser.ts
         working-directory: packages/native
 
       - name: List packages

@@ -91,6 +91,26 @@ describeNative("render()", () => {
     renderer = new TestRenderer()
   })
 
+  it("exits nonzero when default native termination cannot shut down", async () => {
+    const rendererModule = new URL("../reconciler/renderer.ts", import.meta.url).href
+    const source = `
+      import { terminateDefaultRenderer } from ${JSON.stringify(rendererModule)}
+      Reflect.set(globalThis, "__gpuixRenderHost", {
+        renderer: { shutdown() { throw new Error("Chromium shutdown timed out") } },
+      })
+      terminateDefaultRenderer()
+    `
+    const child = spawn("bun", ["-e", source], { stdio: ["ignore", "pipe", "pipe"] })
+    let stderr = ""
+    child.stderr?.on("data", (chunk) => { stderr += String(chunk) })
+    const exitCode = await new Promise<number | null>((resolve) => {
+      child.once("close", resolve)
+    })
+
+    expect(exitCode).toBe(1)
+    expect(stderr).toContain("Chromium shutdown timed out")
+  })
+
   it("still shuts down the native renderer when React unmount throws", () => {
     let stopped = 0
     let shutdown = 0
