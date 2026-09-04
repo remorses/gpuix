@@ -86,7 +86,7 @@ thread_local! {
 }
 
 /// A zero-size canvas that clears the per-frame registries and installs the
-/// frame's copy and mouse-down listeners. Paint it FIRST in the root, before
+/// frame's mouse-down listener. Paint it FIRST in the root, before
 /// any text, so each frame holds exactly that frame's visible text elements
 /// in paint order.
 pub fn selection_frame_reset(
@@ -215,6 +215,10 @@ pub struct SelectableText {
     /// False under `userSelect: "none"`: the text is still painted, logged and
     /// clickable, but it does not join the selection registry.
     pub selectable: bool,
+    /// The cursor over the text. `new` picks the I-beam, as `cursor: auto`
+    /// does over text on the web. Pass `None` when an ancestor sets a cursor,
+    /// which CSS inherits, so the ancestor's choice stands.
+    pub cursor: Option<gpui::CursorStyle>,
     /// See [`crate::text::selection::RegisteredText::group`]. `None` for a run
     /// that must never merge with its neighbour, which is every custom element.
     pub group: Option<u64>,
@@ -241,6 +245,7 @@ impl SelectableText {
             links: Vec::new(),
             on_link: None,
             selectable: true,
+            cursor: Some(gpui::CursorStyle::IBeam),
             group: None,
             highlight: None,
         }
@@ -261,6 +266,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         links,
         on_link,
         selectable,
+        cursor,
         group,
         highlight,
     } = opts;
@@ -324,11 +330,18 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     .absolute()
     .size_full();
 
-    div()
-        .relative()
-        .child(underlay)
-        .child(styled)
-        .into_any_element()
+    let wrapper = div().relative().child(underlay).child(styled);
+    match cursor.filter(|_| selectable) {
+        // A cursor makes gpui insert a hitbox. That hitbox needs its own
+        // element id. Without one it takes the parent div's identity, and a
+        // pointer capture on the parent rebinds to this hitbox on the next
+        // frame, so the parent stops receiving moves.
+        Some(cursor) => wrapper
+            .id(SharedString::from(format!("__gpuix_text_{element_id}_{sub}")))
+            .cursor(cursor)
+            .into_any_element(),
+        None => wrapper.into_any_element(),
+    }
 }
 
 /// Paint one run's highlight washes and log their geometry.
@@ -652,7 +665,7 @@ fn register_copy_listener(window: &mut Window, selection: &SharedSelection) {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
             cx.stop_propagation();
         }
-    });
+    })
 }
 
 /// The wash boxes for one byte range: one box per visual line the range covers,

@@ -10,6 +10,10 @@ license-file = "LICENSE"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+image = { version = "0.25", default-features = false }
+# CSS value reading, including `calc()`. Kept in its own crate so its tests run
+# without a GPU. See `css/`.
+gpuix-css = { path = "css" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 anyhow = "1"
@@ -100,3 +104,13 @@ path = "examples/bench_serde.rs"
 
 [profile.release]
 lto = true
+# Cargo strips debug info from release builds by default. Apple strip writes a
+# LINKEDIT string pool at a 4-byte offset, and the dyld on macOS 26 rejects
+# that with "mis-aligned LINKEDIT string pool", so the addon fails to load.
+strip = "none"
+
+# The style parse benchmark. `harness = false` because it prints its own
+# numbers rather than running as a test.
+[[bench]]
+name = "style_parse"
+harness = false

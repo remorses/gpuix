@@ -14,6 +14,7 @@ use napi_derive::napi;
 #[cfg(target_os = "macos")]
 mod app_menu;
 mod automation;
+mod inheritance;
 mod color;
 mod custom_elements;
 mod diff;

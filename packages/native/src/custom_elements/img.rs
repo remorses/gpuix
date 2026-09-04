@@ -153,9 +153,7 @@ impl CustomElement for ImgElement {
             })
             .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
 
-        if let Some(style) = ctx.style {
-            el = crate::renderer::apply_interactive_styles(el, style);
-        }
+        el = ctx.styled_interactive(el);
 
         let el = super::wire_standard_events(el, &ctx);
         crate::automation::track_own_bounds(el, ctx.id).into_any_element()
@@ -277,9 +275,7 @@ impl CustomElement for SvgElement {
             .flex_none()
             .text_color(tint)
             .id(element_id);
-        if let Some(style) = ctx.style {
-            icon = crate::renderer::apply_interactive_styles(icon, style);
-        }
+        icon = ctx.styled_interactive(icon);
         let icon = super::wire_standard_events(icon, &ctx);
         crate::automation::track_own_bounds(icon, ctx.id).into_any_element()
     }
