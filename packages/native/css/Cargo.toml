@@ -1,0 +1,11 @@
+[package]
+name = "gpuix-css"
+version = "0.1.0"
+edition = "2021"
+description = "CSS value parsing for GPUIX. Knows nothing about GPUI."
+license = "Apache-2.0"
+
+# This crate must not depend on gpui. Its tests are pure CSS value tests, so
+# they run on any machine with no GPU, no window and no Metal toolchain.
+[dependencies]
+lightningcss = { version = "1.0.0-alpha.72", features = ["into_owned"] }

@@ -136,14 +136,14 @@ jobs:
           COMPILE_TARGET: ${{ matrix.settings.bunTarget }}
           COMPILE_SKIP_ICONS: "1"
           COMPILE_SKIP_APP: "1"
-        run: bun compile-chat.ts
+        run: bun compile.ts chat.tsx --name "GPUIX Chat" --id dev.gpuix.chat --icon assets/icons/openai-mark.svg --tint "#10a37f"
 
       # A release asset is served as raw bytes, so a download loses the
       # executable bit and arrives with no extension: macOS and Linux users
       # got a file the OS refused to open. `.tar.gz` keeps the mode and names
       # itself. Windows already ships a `.exe`, which needs no unpacking.
       - name: Package chat example
-        working-directory: examples/dist
+        working-directory: examples/dist/chat
         shell: bash
         env:
           NAME: example-chat-${{ matrix.settings.target }}
@@ -161,7 +161,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: example-chat-${{ matrix.settings.target }}
-          path: examples/dist/example-chat-${{ matrix.settings.target }}.*
+          path: examples/dist/chat/example-chat-${{ matrix.settings.target }}.*
           if-no-files-found: error
 
   test:
@@ -189,6 +189,12 @@ jobs:
 
       - name: Build React package
         run: bun run build
+        working-directory: packages/react
+
+      # After the build, never before it. The script cleans and rebuilds
+      # `dist`, and a plain `tsc` build fails with TS5055 when `dist` exists.
+      - name: Typecheck React package
+        run: bun run typecheck
         working-directory: packages/react
 
       - name: Run example tests

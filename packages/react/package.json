@@ -69,6 +69,7 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "dev": "tsc --watch",
     "test": "vitest run",
+    "typecheck": "bun run clean && tsc && tsc -p tsconfig.typecheck.json",
     "test:watch": "vitest"
   },
   "dependencies": {

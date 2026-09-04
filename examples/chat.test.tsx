@@ -166,9 +166,11 @@ describeNative('chat example', () => {
 
     const transcript = renderer.findByType('virtual-list')[0]
     expect(transcript).toBeDefined()
+    // Every row declares `width: "100%"`, and the retained style now reports
+    // back what was written rather than a number it read the percentage as.
     expect(
       transcript.children.map((id) => renderer.getElement(id)?.style.width)
-    ).toEqual(Array(transcript.children.length).fill(1))
+    ).toEqual(Array(transcript.children.length).fill('100%'))
 
     const painted = renderer.getPaintedText()
 

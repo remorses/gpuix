@@ -1,16 +1,44 @@
 import type { EventPayload } from "@gpuix/native"
 
+/**
+ * A value `width`, `height` and the four min and max forms take.
+ *
+ * A bare number is pixels. A string is read by the same length parser every
+ * other length property uses, so `"6rem"`, `"1in"`, `"calc(100px + 2rem)"` and
+ * `"var(--size)"` all work. On top of those it takes a percentage of the
+ * parent, such as `"50%"`, and `"auto"` for the size the content takes.
+ *
+ * A value the parser cannot read drops the one declaration and leaves the rest
+ * of the style alone, the way a browser drops a declaration it cannot parse.
+ */
 export type DimensionValue = number | string
 
 export interface MotionStyle {
   width?: number
-  height?: number
-  opacity?: number
-  top?: number
-  right?: number
-  bottom?: number
-  left?: number
-  borderRadius?: number
+  /**
+   * A length in pixels, or `"auto"` for the height the content takes.
+   *
+   * `"auto"` is measured at the width the element really gets, whether that
+   * comes from a declared length, from `flex`, from a percentage or from a
+   * stretched cross axis, so text wraps the way it will on screen. The
+   * measurement repeats every frame, so the animation follows content that
+   * changes while it runs.
+   */
+  height?: number | "auto"
+  opacity?: Numeric
+  /** A `filter: blur()` sigma in pixels, on the element and its children. */
+  blur?: Numeric
+  top?: Numeric
+  right?: Numeric
+  bottom?: Numeric
+  left?: Numeric
+  borderRadius?: Numeric
+  /**
+   * A corner shape keyword, `superellipse(K)` text, or the number `K` itself.
+   * Interpolates in the half-corner space CSS Borders 4 names, so
+   * `round` to `square` moves at an even pace.
+   */
+  cornerShape?: number | string
 }
 
 export type MotionEase =
@@ -78,6 +106,16 @@ export interface BoxShadow {
   color: string
 }
 
+/**
+ * A style value that resolves to a number.
+ *
+ * A bare number is pixels, which is what the `style` prop has always taken.
+ * A string is there for `var()` and for writing the unit, so `8`, `"8px"` and
+ * `"var(--pad)"` all mean the same padding. Any other unit drops the
+ * declaration rather than paint the wrong size, so `"2rem"` does nothing.
+ */
+export type Numeric = number | string
+
 export interface LinearGradientStop {
   color: string
   /** Position along the gradient from 0 to 1. */
@@ -97,18 +135,18 @@ export interface StyleDesc {
   visibility?: string
   flexDirection?: string
   flexWrap?: string
-  flexGrow?: number
-  flexShrink?: number
-  flexBasis?: number
+  flexGrow?: Numeric
+  flexShrink?: Numeric
+  flexBasis?: Numeric
   alignItems?: string
   alignSelf?: string
   alignContent?: string
   justifyContent?: string
-  gap?: number
-  rowGap?: number
-  columnGap?: number
-  gridTemplateColumns?: number
-  gridTemplateRows?: number
+  gap?: Numeric
+  rowGap?: Numeric
+  columnGap?: Numeric
+  gridTemplateColumns?: Numeric
+  gridTemplateRows?: Numeric
   gridColumnMin?: "zero" | "min-content" | "max-content"
   gridRowMin?: "zero" | "min-content" | "max-content"
 
@@ -119,17 +157,17 @@ export interface StyleDesc {
   maxWidth?: DimensionValue
   maxHeight?: DimensionValue
 
-  padding?: number
-  paddingTop?: number
-  paddingRight?: number
-  paddingBottom?: number
-  paddingLeft?: number
+  padding?: Numeric
+  paddingTop?: Numeric
+  paddingRight?: Numeric
+  paddingBottom?: Numeric
+  paddingLeft?: Numeric
 
-  margin?: number
-  marginTop?: number
-  marginRight?: number
-  marginBottom?: number
-  marginLeft?: number
+  margin?: Numeric
+  marginTop?: Numeric
+  marginRight?: Numeric
+  marginBottom?: Numeric
+  marginLeft?: Numeric
 
   position?: string
   top?: number
@@ -137,36 +175,213 @@ export interface StyleDesc {
   bottom?: number
   left?: number
 
+  /** A colour or a `linear-gradient()`. The shorthand, so both longhands
+   *  win over it. */
   background?: string | LinearGradientBackground
   backgroundColor?: string
+  /** A `linear-gradient()` or `none`, painted over `backgroundColor` the
+   *  way a browser paints it. Stop positions are percentages.
+   *
+   *  An easing function between two stops bends the mix, which CSS cannot
+   *  do yet: `linear-gradient(to top, black, ease-in-out, transparent)`.
+   *  Takes `ease`, `ease-in`, `ease-out`, `ease-in-out` or `cubic-bezier()`,
+   *  following csswg-drafts issue 1332. A straight mix looks dense near the
+   *  solid stop and thin near the clear one, and an eased scrim does not. */
+  backgroundImage?: string
+  /** How `backgroundImage` mixes with `backgroundColor`: any CSS
+   *  `<blend-mode>` except `plus-darker`. */
+  backgroundBlendMode?: string
+  /** How the element and its children mix with what is under them: any CSS
+   *  `<blend-mode>` except `plus-darker`. */
+  mixBlendMode?: string
+  /** A CSS filter list on the element and its children, or `none`. `blur()`,
+   *  `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`,
+   *  `opacity()`, `saturate()` and `sepia()` are painted. `drop-shadow()`
+   *  and `url()` drop the whole property. The functions other than `blur()`
+   *  fold into one colour matrix, so a long list costs one pass. */
+  filter?: string
+  /** The same list applied to what is under the element, clipped to its
+   *  corners like CSS `backdrop-filter`. */
+  backdropFilter?: string
+  /** A `linear-gradient()` whose alpha keeps or drops each pixel of the
+   *  element and its children, over the border box. Over a `backdropFilter`
+   *  blur the alpha scales the blur radius instead, unlike CSS, which fades
+   *  a sharp copy over the blur. Add an easing between the stops for a
+   *  progressive blur under a header. */
+  maskImage?: string
   color?: string
   opacity?: number
 
-  borderWidth?: number
-  borderTopWidth?: number
-  borderRightWidth?: number
-  borderBottomWidth?: number
-  borderLeftWidth?: number
+  borderWidth?: Numeric
+  borderTopWidth?: Numeric
+  borderRightWidth?: Numeric
+  borderBottomWidth?: Numeric
+  borderLeftWidth?: Numeric
   borderColor?: string
   borderRadius?: number
-  borderTopLeftRadius?: number
-  borderTopRightRadius?: number
-  borderBottomLeftRadius?: number
-  borderBottomRightRadius?: number
+  borderTopLeftRadius?: Numeric
+  borderTopRightRadius?: Numeric
+  borderBottomLeftRadius?: Numeric
+  borderBottomRightRadius?: Numeric
+  borderStartStartRadius?: Numeric
+  borderStartEndRadius?: Numeric
+  borderEndStartRadius?: Numeric
+  borderEndEndRadius?: Numeric
+
+  /**
+   * CSS Borders 4 `corner-shape`, one to four of `round`, `squircle`,
+   * `square`, `bevel`, `scoop`, `notch` or `superellipse(K)`, read
+   * top-left, top-right, bottom-right, bottom-left like `borderRadius`.
+   * The shape only shows where the corner has a radius. A value the spec
+   * rejects drops the whole property. Logical names assume `horizontal-tb`
+   * and `ltr`.
+   */
+  cornerShape?: string
+  cornerTopLeftShape?: string
+  cornerTopRightShape?: string
+  cornerBottomRightShape?: string
+  cornerBottomLeftShape?: string
+  cornerStartStartShape?: string
+  cornerStartEndShape?: string
+  cornerEndStartShape?: string
+  cornerEndEndShape?: string
+  /** Two shapes, in the order the side runs: left to right, or top to bottom. */
+  cornerTopShape?: string
+  cornerRightShape?: string
+  cornerBottomShape?: string
+  cornerLeftShape?: string
+  cornerBlockStartShape?: string
+  cornerBlockEndShape?: string
+  cornerInlineStartShape?: string
+  cornerInlineEndShape?: string
+  /**
+   * Radius and shape together, in either order: `"8px squircle"`. A part
+   * you leave out resets, so `corner: "bevel"` also sets the radius to 0.
+   * `/` (elliptical radii) is not supported and makes the value invalid.
+   * A narrower property wins over a wider one, and a single-purpose one
+   * over a shorthand: `cornerTopLeftShape` beats `cornerTopLeft`, which
+   * beats `cornerTop`, which beats `cornerShape` and `borderRadius`, which
+   * beat `corner`.
+   */
+  corner?: string
+  cornerTopLeft?: string
+  cornerTopRight?: string
+  cornerBottomRight?: string
+  cornerBottomLeft?: string
+  cornerStartStart?: string
+  cornerStartEnd?: string
+  cornerEndStart?: string
+  cornerEndEnd?: string
+  cornerTop?: string
+  cornerRight?: string
+  cornerBottom?: string
+  cornerLeft?: string
+  cornerBlockStart?: string
+  cornerBlockEnd?: string
+  cornerInlineStart?: string
+  cornerInlineEnd?: string
   boxShadow?: BoxShadow
 
-  fontSize?: number
+  fontSize?: Numeric
   fontFamily?: string
   fontWeight?: string | number
   textAlign?: string
-  lineHeight?: number
+  lineHeight?: Numeric
   whiteSpace?: "normal" | "nowrap"
   textOverflow?: "ellipsis" | "ellipsis-start"
-  lineClamp?: number
+  lineClamp?: Numeric
 
+  /** `visible`, `hidden`, `clip`, `scroll` or `auto`. `scroll` and `auto`
+   *  make a scroll box with a scrollbar. The OS picks the kind of bar: an
+   *  overlay bar that fades out after a scroll, or a classic bar in a
+   *  gutter. A classic bar shows at all times for `scroll` and only while
+   *  the content overflows for `auto`. */
   overflow?: string
   overflowX?: string
   overflowY?: string
+  /** `auto`, `thin` or `none`. `none` paints no bar and reserves no gutter. */
+  scrollbarWidth?: string
+  /** `auto`, or the thumb colour then the track colour, as in CSS. */
+  scrollbarColor?: string
+  /** `auto`, `stable` or `stable both-edges`. `stable` reserves the gutter
+   *  of a classic bar even while the content fits, and `both-edges` adds
+   *  the same gutter at the start of the axis. Overlay bars reserve
+   *  nothing, as in CSS. */
+  scrollbarGutter?: string
+  /** Space scrollIntoView keeps around this element, a number of pixels
+   *  or "Npx", alone or as the CSS one-to-four shorthand. */
+  scrollMargin?: Numeric
+  scrollMarginTop?: Numeric
+  scrollMarginRight?: Numeric
+  scrollMarginBottom?: Numeric
+  scrollMarginLeft?: Numeric
+  /** The logical sides. GPUIX lays text out horizontally, left to right,
+   *  so block is vertical and inline is horizontal. */
+  scrollMarginBlock?: Numeric
+  scrollMarginBlockStart?: Numeric
+  scrollMarginBlockEnd?: Numeric
+  scrollMarginInline?: Numeric
+  scrollMarginInlineStart?: Numeric
+  scrollMarginInlineEnd?: Numeric
+  /** Space scrollIntoView keeps inside this scroll box. */
+  scrollPadding?: Numeric
+  scrollPaddingTop?: Numeric
+  scrollPaddingRight?: Numeric
+  scrollPaddingBottom?: Numeric
+  scrollPaddingLeft?: Numeric
+  scrollPaddingBlock?: Numeric
+  scrollPaddingBlockStart?: Numeric
+  scrollPaddingBlockEnd?: Numeric
+  scrollPaddingInline?: Numeric
+  scrollPaddingInlineStart?: Numeric
+  scrollPaddingInlineEnd?: Numeric
+  /** `auto` moves a programmatic scroll in one step. `smooth` glides it,
+   *  and a wheel move cancels the glide. */
+  scrollBehavior?: string
+  /** `none`, or an axis (`x`, `y`, `both`, `inline`, `block`) with an
+   *  optional strictness. `mandatory` always snaps when the scroll rests.
+   *  `proximity`, the default, snaps within half a viewport. */
+  scrollSnapType?: string
+  /** `none`, `start`, `center` or `end`. One word for both axes, or the
+   *  block word then the inline word. */
+  scrollSnapAlign?: string
+  /** `normal`, or `always` to stop a long scroll at this element instead
+   *  of passing over it. */
+  scrollSnapStop?: string
+  /** `none`, or `nearest` to scroll this element into view once, when it
+   *  first paints. */
+  scrollInitialTarget?: string
+  /** The shorthand: a `--name` and an optional axis, so a scroll box
+   *  publishes a timeline other elements point their `motion` at. */
+  scrollTimeline?: string
+  /** The `--name` of the timeline this scroll box publishes. Wins over
+   *  the shorthand. */
+  scrollTimelineName?: string
+  /** `block` (or `y`, the default) reads the vertical offset, `inline`
+   *  (or `x`) the horizontal one. */
+  scrollTimelineAxis?: string
+  /** Points the `motion` prop at a scroll timeline: a `--name`, or
+   *  `scroll(nearest | self | root, axis)`. The scroll offset then drives
+   *  the progress from `initial` (0%) to `animate` (100%), and
+   *  `transition.ease` bends it. Duration and delay play no part. A name
+   *  no box declares holds the animation at 0. Any other value keeps the
+   *  clock. */
+  animationTimeline?: string
+  /** `before` or `after` adds a group of markers along that edge of this
+   *  scroll box, one marker per snap area. A click on a marker scrolls to
+   *  its area. GPUIX has no pseudo-elements, so the markers are round
+   *  dots rather than `::scroll-marker` content. */
+  scrollMarkerGroup?: string
+  /** The name that pairs this element across a `startViewTransition` call:
+   *  the old element with this name animates into the new one. */
+  viewTransitionName?: string
+  /** `auto`, `contain` or `none`, one word for both axes or two with the x
+   *  axis first. A scroll box keeps a wheel event it can scroll with. At its
+   *  end, `auto` hands the event to the nearest scroll box around it and
+   *  `contain` or `none` keeps it. */
+  overscrollBehavior?: string
+  overscrollBehaviorX?: string
+  overscrollBehaviorY?: string
 
   cursor?: CursorValue
   /** `"auto"` blocks hits behind this element **and its wheel**. `"none"` never
@@ -180,10 +395,49 @@ export interface StyleDesc {
   /** Selection wash colour for this subtree. Defaults to the theme accent at 35%. */
   selectionColor?: string
 
-  // Pseudo-selector styles — applied by GPUI natively (no JS round-trip).
+  // Pseudo-selector styles, applied by GPUI natively (no JS round-trip).
   // Nesting is one level deep: hover/active cannot contain hover/active.
-  hover?: Omit<StyleDesc, "hover" | "active">
-  active?: Omit<StyleDesc, "hover" | "active">
+  //
+  // These two named fields are here for history. A CSS `style` attribute
+  // holds declarations, not selectors, so the style prop gets no further
+  // condition. A class resolver sends every other condition through
+  // `selectors` below.
+  hover?: StyleDeclarations
+  active?: StyleDeclarations
+
+  // Conditioned blocks from a class resolver. `on` takes a canonical
+  // selector spelling from the closed set the engine reads:
+  // `:first-child`, `:last-child`, `:nth-child(odd)`, `:nth-child(even)`,
+  // `:only-child` for the element's own position, and `& > *`,
+  // `& > :not(:last-child)`, `& *` for rules on its children. Anything
+  // else warns once in the engine and drops.
+  selectors?: SelectorRule[]
+
+  // Custom properties. A declaration here is in scope for `var()` on this
+  // element and on everything below it, the same as in CSS.
+  //
+  // A number declares its own plain text, so `{ "--pad": 8 }` declares `8`.
+  // The name needs both dashes: `"-pad"` is a type error rather than a
+  // variable that silently never resolves.
+  [name: `--${string}`]: string | number | undefined
+}
+
+/**
+ * What `hover`, `active` and a selector rule may hold.
+ *
+ * No nesting, and no custom properties. A declaration inside a state has
+ * nothing to apply to, because the cascade reads variables from the element
+ * itself, not from one of its states.
+ */
+export type StyleDeclarations = Omit<
+  StyleDesc,
+  "hover" | "active" | "selectors" | `--${string}`
+>
+
+/** One conditioned block from a class resolver. */
+export interface SelectorRule {
+  on: string
+  style: StyleDeclarations
 }
 
 // Element types supported by GPUIX
@@ -374,7 +628,17 @@ export interface Props {
   // `DetailedHTMLProps` already carries `key`. Without this field every
   // `<div key={...} />` inside a `.map()` fails to typecheck.
   key?: React.Key | null
-  style?: StyleDesc
+  // A style attribute holds declarations, not selectors, so the prop cannot
+  // carry `selectors`. A class resolver is the only writer of that field.
+  style?: Omit<StyleDesc, "selectors">
+  /**
+   * Class tokens, separated by spaces, read by the root's resolver.
+   *
+   * `string | undefined` is the whole type, so `clsx` and `cn` need no special
+   * handling. Without a resolver on the root this does nothing and warns once.
+   * A declaration in `style` beats one from a class in every state.
+   */
+  className?: string
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
 
@@ -457,7 +721,7 @@ type VirtualListShared = {
   /** No `hover` or `active`: gpui's `List` has no interactive element identity,
    *  so it cannot hold the pressed or hovered state those styles read. Put them
    *  on a wrapping `<div>` instead. */
-  style?: Omit<StyleDesc, "hover" | "active">
+  style?: Omit<StyleDesc, "selectors" | "hover" | "active">
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
   alignment?: "top" | "bottom"
@@ -588,18 +852,43 @@ export interface NativeRenderer {
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
-   *  x and y are negative pixel values (scroll down = more negative y). */
-  scrollTo?(elementId: number, x: number, y: number): void
+   *  x and y are negative pixel values (scroll down = more negative y).
+   *  behavior is "auto", "instant" or "smooth", like the web scrollTo
+   *  option. "auto", the default, reads the scroll-behavior of the box. */
+  scrollTo?(elementId: number, x: number, y: number, behavior?: string): void
   /** Scroll a child into view by its index in the children list.
    *  `offsetInItem` is in pixels; a negative value anchors the viewport top
    *  above the item, resolved against measured row heights at layout time. */
   scrollToItem?(elementId: number, index: number, offsetInItem?: number): void
+  /** Scroll every ancestor scroll box so the element shows, like the web
+   *  scrollIntoView. block places it on the y axis and inline on the x
+   *  axis: "start", "center", "end" or "nearest". The defaults match the
+   *  web: "start" and "nearest". behavior works like the scrollTo one.
+   *  container is "all" (the default) or "nearest", the web option:
+   *  "nearest" scrolls only the nearest scroll box, so outer views
+   *  stay put. */
+  scrollIntoView?(
+    elementId: number,
+    block?: string,
+    inline?: string,
+    behavior?: string,
+    container?: string,
+  ): void
   /** Get the current scroll offset [x, y] or null if element is not scrollable. */
   getScrollOffset?(elementId: number): Array<number> | null
   /** The logical scroll anchor of a `<virtual-list>`:
    *  `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
    *  else. `itemIndex == item count` is gpui's at-end sentinel. */
   getListScrollTop?(elementId: number): Array<number> | null
+
+  // ── View transitions ───────────────────────────────────────────
+  /** Clone every element that has a `viewTransitionName`, with its painted
+   *  bounds. Call before the update, then `viewTransitionStart` after it.
+   *  `startViewTransition` does both. */
+  viewTransitionCapture?(): void
+  /** Animate every captured name toward its new element. `options` is the
+   *  JSON of a `ViewTransitionOptions` value, or nothing for a crossfade. */
+  viewTransitionStart?(options?: string): void
 
   // ── Selection API ──────────────────────────────────────────────
   /** The current text selection joined in document order, or null. */
@@ -699,6 +988,38 @@ export interface Container {
   windowKeyEventHandlers: WindowKeyEventHandlers
   windowKeyEventId: number
   onEvent?: (event: EventPayload) => void
+  /** How this root reads `className`, or `null` when nothing registered one. */
+  classNames: ClassNameCache | null
+  /** Whether this root has already warned that it has no resolver. */
+  warnedAboutClassName: boolean
+}
+
+/**
+ * Reads one class token, such as `p-4`, into the style it declares.
+ *
+ * Returns `null` for a token it does not know. The token never holds a space,
+ * because the root splits the string before it calls this.
+ */
+export type ClassNameResolver = (token: string) => StyleDesc | null
+
+/** A resolver with what a root has already asked it. */
+export interface ClassNameCache {
+  resolve: ClassNameResolver
+  /** One entry per token, holding `null` for a token the resolver rejected. */
+  tokens: Map<string, StyleDesc | null>
+  /** Whole strings, bounded, least recently used out first. */
+  strings: Map<string, StyleDesc>
+}
+
+/** Options for a root. */
+export interface RootOptions extends RootEventHandlers {
+  /**
+   * How to read `className` on this root's elements.
+   *
+   * This is an option on the root rather than a global, so two roots can hold
+   * different resolvers and two test files can run at once.
+   */
+  resolveClassName?: ClassNameResolver
 }
 
 // Instance — minimal handle for React's reconciler.

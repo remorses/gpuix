@@ -108,7 +108,8 @@ impl Typography {
 
 fn typography(style: Option<&StyleDesc>, theme: &Theme, m: &Metrics) -> Typography {
     let text_size = style
-        .and_then(|style| style.font_size)
+        .and_then(|style| style.font_size.as_ref())
+        .and_then(|size| size.as_number())
         .map(|size| size as f32)
         .filter(|size| *size > 0.0)
         .unwrap_or(m.code_text_size);
@@ -127,7 +128,8 @@ fn typography(style: Option<&StyleDesc>, theme: &Theme, m: &Metrics) -> Typograp
         // A zero `codeTextSize` metric would divide by zero and hand Taffy an
         // infinity, which paints nothing at all, so guard the ratio.
         line_height: style
-            .and_then(|style| style.line_height)
+            .and_then(|style| style.line_height.as_ref())
+            .and_then(|height| height.as_number())
             .map(|height| height as f32)
             .filter(|height| *height > 0.0)
             .unwrap_or_else(|| {
@@ -306,8 +308,8 @@ mod tests {
         let theme = Theme::dark();
         let style = StyleDesc {
             font_family: Some("Fira Code".to_string()),
-            font_size: Some(20.0),
-            line_height: Some(30.0),
+            font_size: Some(crate::style::Numeric::Number(20.0)),
+            line_height: Some(crate::style::Numeric::Number(30.0)),
             color: Some("#ff0000".to_string()),
             ..Default::default()
         };
@@ -325,8 +327,8 @@ mod tests {
     fn typography_ignores_a_zero_size_or_line_height() {
         let theme = Theme::dark();
         let style = StyleDesc {
-            font_size: Some(0.0),
-            line_height: Some(0.0),
+            font_size: Some(crate::style::Numeric::Number(0.0)),
+            line_height: Some(crate::style::Numeric::Number(0.0)),
             ..Default::default()
         };
         let resolved = typography(Some(&style), &theme, &theme.metrics);
@@ -338,7 +340,7 @@ mod tests {
     fn a_bare_font_size_scales_the_row_height() {
         let theme = Theme::dark();
         let style = StyleDesc {
-            font_size: Some((theme.metrics.code_text_size * 2.0) as f64),
+            font_size: Some(crate::style::Numeric::Number((theme.metrics.code_text_size * 2.0) as f64)),
             ..Default::default()
         };
         let resolved = typography(Some(&style), &theme, &theme.metrics);
@@ -351,7 +353,7 @@ mod tests {
         let mut metrics = Metrics::default();
         metrics.code_text_size = 0.0;
         let style = StyleDesc {
-            font_size: Some(20.0),
+            font_size: Some(crate::style::Numeric::Number(20.0)),
             ..Default::default()
         };
         let resolved = typography(Some(&style), &Theme::dark(), &metrics);

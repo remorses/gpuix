@@ -16,8 +16,10 @@ import type {
   MutationRenderer,
   Props,
   PublicInstance,
+  StyleDesc,
   TextInstance,
 } from "../types/host.js"
+import { styleForClassName, withInlineStyle } from "./class-names.js"
 import {
   registerEventHandler,
   unregisterEventHandler,
@@ -123,10 +125,37 @@ function diffEventListeners(
 
 // ── Style helper ─────────────────────────────────────────────────────
 
-function sendStyle(renderer: MutationRenderer, id: number, props: Props): void {
-  const style = props.style
-  if (style == null || Object.keys(style).length === 0) return
-  renderer.setStyle(id, style)
+/**
+ * The style an element should have, from all of its style sources.
+ *
+ * Every place that sends a style to the renderer goes through here. When a
+ * source is added, one edit covers all of them. The previous code repeated
+ * `props.style` at each call site, and `hideInstance` did not repeat it, so
+ * hiding an element dropped its style.
+ */
+function computeStyle(props: Props, container: Container): StyleDesc {
+  if (props.className && !container.classNames) {
+    warnAboutMissingResolver(container)
+    return props.style ?? {}
+  }
+  return withInlineStyle(styleForClassName(props.className, container.classNames), props.style)
+}
+
+/// One warning per root. A `className` with no resolver is a setup mistake, and
+/// repeating it once per element per commit would bury everything else.
+function warnAboutMissingResolver(container: Container): void {
+  if (container.warnedAboutClassName) return
+  container.warnedAboutClassName = true
+  console.warn(
+    "GPUIX: an element has a `className` but this root has no resolver. " +
+      "Pass one to createRoot, such as createRoot(renderer, { resolveClassName })."
+  )
+}
+
+function sendStyle(container: Container, id: number, props: Props): void {
+  const style = computeStyle(props, container)
+  if (Object.keys(style).length === 0) return
+  container.renderer.setStyle(id, style)
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -220,7 +249,7 @@ function materialize(node: HostNode): HostNodeState {
   const renderer = state.container.renderer
   if ("type" in node) {
     renderer.createElement(node.id, node.type)
-    sendStyle(renderer, node.id, node.props)
+    sendStyle(state.container, node.id, node.props)
     syncEventListeners(state.container, node.id, node.props)
     syncCustomProps(renderer, node.id, node.type, node.props)
   } else {
@@ -384,7 +413,7 @@ export const hostConfig = {
     const container = containerFor(instance)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
-    container.renderer.setStyle(instance.id, newProps.style ?? {})
+    container.renderer.setStyle(instance.id, computeStyle(newProps, container))
     diffEventListeners(container, instance.id, oldProps, newProps)
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance.id, instance.type, oldProps, newProps)
@@ -410,11 +439,26 @@ export const hostConfig = {
   },
 
   hideInstance(instance: Instance): void {
-    rendererFor(instance).setStyle(instance.id, { visibility: "hidden" })
+    // Keep the element's own style. `visibility: hidden` skips the paint and
+    // keeps the layout box, so replacing the whole style here would collapse
+    // the box and lose every other style source on the element.
+    //
+    // The pseudo-selector styles go, because a hidden element must stay
+    // hidden. A hover style that sets `visibility` would otherwise paint an
+    // element React asked to hide.
+    const container = containerFor(instance)
+    const {
+      hover: _hover,
+      active: _active,
+      selectors: _selectors,
+      ...base
+    } = computeStyle(instance.props, container)
+    container.renderer.setStyle(instance.id, { ...base, visibility: "hidden" })
   },
 
-  unhideInstance(instance: Instance, _props: Props): void {
-    rendererFor(instance).setStyle(instance.id, instance.props.style ?? {})
+  unhideInstance(instance: Instance, props: Props): void {
+    const container = containerFor(instance)
+    container.renderer.setStyle(instance.id, computeStyle(props, container))
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},

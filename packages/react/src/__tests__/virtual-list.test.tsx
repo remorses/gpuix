@@ -1,7 +1,7 @@
 /// The native <virtual-list>: lazy rows, programmatic scrolling, and chat tail following.
 
 import React from "react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { createTestRoot } from "../testing.js"
 
 function Rows({ count }: { count: number }) {
@@ -474,6 +474,52 @@ describe("<virtual-list>", () => {
     // Away from the top, a prepend must not move the rows under the pointer.
     render(grown(13))
     expect(renderer.getPaintedText()[0]).toBe("row-7")
+  })
+
+  describe("scrollbar", () => {
+    afterEach(() => {
+      delete process.env.GPUIX_SCROLLBARS
+    })
+
+    const overflowing = (
+      <virtual-list overdraw={0} estimatedItemHeight={40} style={{ width: 400, height: 160 }}>
+        {Array.from({ length: 100 }, (_, index) => (
+          <div key={index} style={{ width: "100%", height: 40, flexShrink: 0 }}>
+            <text>{`row-${index}`}</text>
+          </div>
+        ))}
+      </virtual-list>
+    )
+
+    it("a classic bar reserves a gutter, and rows shrink by it", () => {
+      process.env.GPUIX_SCROLLBARS = "classic"
+      const { render, renderer } = createTestRoot()
+      render(overflowing)
+      const row = renderer.findByType("div")[0]!
+      // The first frame learns that the content overflows, and the
+      // second one reserves the gutter.
+      renderer.getElementBounds(row.id)
+      renderer.getElementBounds(row.id)
+      expect(renderer.getElementBounds(row.id)![2]).toBe(385)
+    })
+
+    it("a thumb drag scrolls the list", () => {
+      process.env.GPUIX_SCROLLBARS = "classic"
+      const { render, renderer } = createTestRoot()
+      render(overflowing)
+      const list = renderer.findByType("virtual-list")[0]!
+      const row = renderer.findByType("div")[0]!
+      renderer.getElementBounds(row.id)
+      renderer.getElementBounds(row.id)
+      // 100 rows of 40 in a 160 viewport. The thumb is the 20px floor,
+      // at the top of the 15px strip on the right edge. Take it to the
+      // middle of the 140px of track room: (80 - 10) / 140 of the
+      // 3840px range is 1920.
+      renderer.nativeSimulateMouseDown(392, 10)
+      renderer.nativeSimulateMouseMove(392, 80, 0)
+      renderer.nativeSimulateMouseUp(392, 80)
+      expect(renderer.getScrollOffset(list.id)![1]).toBeCloseTo(-1920, 0)
+    })
   })
 
   it("lets overflow-x inside a row pan without moving the list", () => {

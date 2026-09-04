@@ -18,7 +18,7 @@ import type {
   DebugFrameOverlayStats,
   HighlightMatch,
   NativeRenderer,
-  WindowKeyEventHandlers,
+  RootOptions,
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
@@ -31,6 +31,14 @@ export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
   flush(): void
+  simulateScrollWheelProbe(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+    phase?: string
+  ): boolean
   drainEvents(): EventPayload[]
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
@@ -45,7 +53,8 @@ interface NativeTestRendererApi extends NativeRenderer {
     y: number,
     deltaX: number,
     deltaY: number,
-    modifiers?: string
+    modifiers?: string,
+    phase?: string
   ): void
   simulateMouseMove(
     x: number,
@@ -67,22 +76,35 @@ interface NativeTestRendererApi extends NativeRenderer {
   getRootId(): number | null
   getWindowSize(): { width: number; height: number }
   getAllText(): string[]
-  scrollTo(elementId: number, x: number, y: number): void
+  scrollTo(elementId: number, x: number, y: number, behavior?: string): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
+  scrollIntoView(
+    elementId: number,
+    block?: string,
+    inline?: string,
+    behavior?: string,
+    container?: string,
+  ): void
   getScrollOffset(elementId: number): number[] | null
+  viewTransitionCapture(): void
+  viewTransitionStart(options?: string): void
   getListScrollTop(elementId: number): number[] | null
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
   cycleDebugFrameOverlay(): string
   resetDebugFrameOverlayStats(): void
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  styleResolutions(): number
+  resetStyleResolutions(): void
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
+  readClipboardText(): string | null
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
+  pixelAt(x: number, y: number): number[]
 }
 
 interface NativeTestRendererConstructor {
@@ -95,7 +117,7 @@ export interface TestRendererOptions {
   height?: number
 }
 
-export type TestWindowOptions = TestRendererOptions & WindowKeyEventHandlers
+export type TestWindowOptions = TestRendererOptions & RootOptions
 
 // The class is always exported. hasTestGpuixRenderer is the real GPU impl.
 //
@@ -120,6 +142,36 @@ try {
 
 /** Whether the native TestGpuixRenderer is available (for conditional test registration). */
 export const hasNativeTestRenderer = NativeTestRenderer != null
+
+/// The env overrides the Rust side reads with `std::env::var`.
+const NATIVE_ENV_OVERRIDES = ["GPUIX_SCROLLBARS"] as const
+
+/**
+ * Copies the env overrides from `process.env` into the real environment.
+ *
+ * Node writes a `process.env` assignment through to `setenv`, but Bun only
+ * updates its JS snapshot, so under `bun test` the Rust side cannot see a
+ * `process.env.GPUIX_SCROLLBARS = "classic"` from a test. This runs before
+ * every frame flush to push the current values across.
+ */
+// Resolved once. The module registry caches the require, but this also
+// skips the try/catch and the property read on every flush.
+let nativeSyncEnvVar: ((key: string, value?: string) => void) | undefined
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  nativeSyncEnvVar = (
+    require("@gpuix/native") as { syncEnvVar?: typeof nativeSyncEnvVar }
+  ).syncEnvVar
+} catch {
+  // Native module not available. Nothing to sync.
+}
+
+function syncEnvOverrides(): void {
+  if (!nativeSyncEnvVar) return
+  for (const key of NATIVE_ENV_OVERRIDES) {
+    nativeSyncEnvVar(key, process.env[key])
+  }
+}
 
 // ── Test element tree ────────────────────────────────────────────────
 
@@ -167,7 +219,24 @@ export class TestRenderer implements NativeRenderer {
   /** Trigger the real GPUI rendering pipeline (GpuixView::render() →
    *  build_element() → apply_styles() → layout). */
   flush(): void {
+    syncEnvOverrides()
     this.native.flush()
+  }
+
+  /** Dispatch a wheel event and report whether it left the window
+   *  asking for a paint. The live window only paints when something
+   *  asks, so a lift that asks for nothing freezes the snap glide.
+   *  `nativeSimulateScrollWheel` paints on demand and clears the mark,
+   *  so it cannot catch a lost frame request. */
+  nativeSimulateScrollWheelProbe(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+    phase?: "started" | "moved" | "ended"
+  ): boolean {
+    return this.native.simulateScrollWheelProbe(x, y, deltaX, deltaY, modifiers, phase)
   }
 
   /** Drain events collected by the native GPUI event handlers. */
@@ -262,16 +331,18 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** End-to-end: simulate scroll wheel through GPUI →
-   *  dispatch resulting events to React. */
+   *  dispatch resulting events to React. phase is "started", "moved"
+   *  (the default) or "ended", the touch phase of a trackpad gesture. */
   nativeSimulateScrollWheel(
     x: number,
     y: number,
     deltaX: number,
     deltaY: number,
-    modifiers?: string
+    modifiers?: string,
+    phase?: string
   ): void {
     this.native.flush()
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers, phase)
     this.dispatchNativeEvents()
   }
 
@@ -469,9 +540,9 @@ export class TestRenderer implements NativeRenderer {
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
    *  x and y are negative pixel values (scroll down = more negative y).
    *  Call flush() internally to apply. */
-  scrollTo(elementId: number, x: number, y: number): void {
+  scrollTo(elementId: number, x: number, y: number, behavior?: string): void {
     this.native.flush()
-    this.native.scrollTo(elementId, x, y)
+    this.native.scrollTo(elementId, x, y, behavior)
     // Flush again to re-render with the new offset
     this.native.flush()
   }
@@ -484,6 +555,25 @@ export class TestRenderer implements NativeRenderer {
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void {
     this.native.flush()
     this.native.scrollToItem(elementId, index, offsetInItem)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
+  /** Scroll every ancestor scroll box so the element shows, like the web
+   *  scrollIntoView. block places it on the y axis and inline on the x
+   *  axis: "start", "center", "end" or "nearest". The defaults match the
+   *  web: "start" and "nearest". scrollMargin on the element and
+   *  scrollPadding on a box apply. container is "all" (the default)
+   *  or "nearest": "nearest" scrolls only the nearest scroll box. */
+  scrollIntoView(
+    elementId: number,
+    block?: string,
+    inline?: string,
+    behavior?: string,
+    container?: string,
+  ): void {
+    this.native.flush()
+    this.native.scrollIntoView(elementId, block, inline, behavior, container)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -508,6 +598,22 @@ export class TestRenderer implements NativeRenderer {
     return [result[0], result[1], result[2]]
   }
 
+  // ── View transitions ────────────────────────────────────────────
+
+  /** Clone every element that has a `viewTransitionName`, with its painted
+   *  bounds. The flush first makes those bounds current. */
+  viewTransitionCapture(): void {
+    this.native.flush()
+    this.native.viewTransitionCapture()
+  }
+
+  /** Animate every captured name toward its new element. Pause the clock
+   *  first and move it to step through the frames. */
+  viewTransitionStart(options?: string): void {
+    this.native.viewTransitionStart(options)
+    this.native.flush()
+  }
+
   // ── Selection API ───────────────────────────────────────────────
 
   /** Drag-select from (x1,y1) to (x2,y2) and return the selected text.
@@ -523,6 +629,11 @@ export class TestRenderer implements NativeRenderer {
   /** The current selection joined in document order, or null. */
   getSelectedText(): string | null {
     return this.native.getSelectedText()
+  }
+
+  /// The text on the clipboard after a copy, or null when the clipboard has no text.
+  readClipboardText(): string | null {
+    return this.native.readClipboardText()
   }
 
   /** Every string painted in the last frame, in paint order.
@@ -573,10 +684,27 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getDebugFrameOverlayStats()
   }
 
+  /** How many styles the renderer resolved since the last reset.
+   *  A frame that changes nothing must not raise this. */
+  styleResolutions(): number {
+    return this.native.styleResolutions()
+  }
+
+  resetStyleResolutions(): void {
+    this.native.resetStyleResolutions()
+  }
+
   /** Capture the current Metal or DirectX frame and save it as a PNG. */
   captureScreenshot(path: string): void {
     this.native.flush()
     this.native.captureScreenshot(path)
+  }
+
+  /** The painted colour at a logical pixel, as `[r, g, b, a]` from 0 to 255. */
+  pixelAt(x: number, y: number): [number, number, number, number] {
+    this.native.flush()
+    const [r, g, b, a] = this.native.pixelAt(x, y)
+    return [r, g, b, a]
   }
 
   /** Whether the native GPUI test renderer is available. Always true. */
@@ -606,10 +734,7 @@ export interface TestRoot {
  */
 export function createTestRoot(options: TestWindowOptions = {}): TestRoot {
   const renderer = new TestRenderer(options)
-  const root = createRoot(renderer, {
-    onKeyDown: options.onKeyDown,
-    onKeyUp: options.onKeyUp,
-  })
+  const root = createRoot(renderer, options)
 
   const render = (node: ReactNode): void => {
     flushSync(() => root.render(node))
