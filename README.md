@@ -1840,8 +1840,10 @@ bun run build:browser
 The command builds `@gpuix/native` with `native-browser-cef`, downloads the pinned
 CEF distribution into `CEF_PATH` (or the GPUix cache by default), and writes the
 runtime plus `manifest.json` to `packages/native/cef/`. The manifest binds the
-CEF version/API, architecture, native addon, framework, and all signed helpers by
-hash. A distributable `.app` must validate it, then copy the Chromium framework
+CEF version/API, architecture, native addon, and the complete framework/helper
+tree (including file contents, modes, directories, and symlinks). CI transports
+the runtime as a tar archive so those metadata remain intact. A distributable
+`.app` must validate it, then copy the Chromium framework
 and all five `GPUix Chromium Helper*.app` templates into `Contents/Frameworks`.
 It may replace the `GPUix Chromium` prefix with its own application name, as
 Heddlework does, but must update each helper's bundle executable and identifier
@@ -1849,10 +1851,13 @@ consistently, preserve every role suffix, and sign the framework, helpers, then
 outer app in that order. The CEF runtime is generated and platform-specific, so
 it is not checked into source control.
 
-CEF on macOS runs only from a coherent application bundle. An unbundled process
-fails browser initialization before launching any helper instead of entering a
-rendezvous crash loop. Build and launch a generated `.app` to develop or smoke
-test the native browser path.
+CEF on macOS runs only from a coherent application bundle. Production builds
+resolve the runtime only from that bundle and ignore environment and source-tree
+paths. An unbundled process fails browser initialization before launching any
+helper instead of entering a rendezvous crash loop. Build and launch a generated
+`.app` to develop or smoke test the native browser path. Native-library developers
+who intentionally need an unbundled runtime must opt into the
+`cef-development-overrides` Cargo feature.
 
 Configure an application-owned profile root when rendering. Persistent
 `profilePath` values must be immediate children of that root; GPUIX rejects paths
@@ -1870,15 +1875,16 @@ function App() {
       source="https://example.com"
       profileId="workspace"
       profilePath="/absolute/path/to/app/browser/profiles/workspace"
+      generation={1}
       visible
       command={JSON.stringify([
         { serial: 1, kind: 'reload' },
         { serial: 2, kind: 'focus' },
       ])}
       style={{ width: 800, height: 600 }}
-      onBrowserState={(event) => console.log(event.value)}
-      onBrowserOpen={(event) => console.log('popup', event.value)}
-      onBrowserError={(event) => console.error(event.value)}
+      onBrowserState={(event) => console.log(JSON.parse(event.value!))}
+      onBrowserOpen={(event) => console.log('popup', JSON.parse(event.value!))}
+      onBrowserError={(event) => console.error(JSON.parse(event.value!))}
     />
   )
 }
@@ -1893,6 +1899,12 @@ localStorage remain until the profile is deleted. `browserState` reports URL,
 title, loading, history availability, and `commandSerial`, the highest command
 completed in order. Keep entries until that acknowledgement reaches their
 serial.
+
+`generation` identifies one logical surface incarnation. Increment it whenever a
+retained browser node is reused with a different profile/session. Every
+`browserState` payload includes that generation, while `browserOpen` and
+`browserError` contain `{ generation, value }`. Reject callbacks whose generation
+is not current so queued CEF events cannot cross profile boundaries.
 
 Popups are surfaced through `browserOpen` instead of silently creating unmanaged
 windows. They are URLs only: adopting CEF opener state, target features,

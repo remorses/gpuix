@@ -37,6 +37,7 @@ struct BrowserCommand {
 #[derive(Clone, Debug, Default)]
 struct BrowserConfig {
     source: String,
+    generation: u64,
     profile_id: String,
     profile_path: String,
     incognito: bool,
@@ -47,6 +48,7 @@ struct BrowserConfig {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BrowserStateEvent {
+    generation: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,7 +100,7 @@ impl CustomElement for BrowserElement {
                     .borrow_mut()
                     .update(&config, bounds, window, &callback, id)
                 {
-                    emit_value(&callback, id, "browserError", error);
+                    emit_tagged_value(&callback, id, "browserError", config.generation, error);
                 }
             },
             |_bounds, _, _window, _cx| {},
@@ -118,6 +120,7 @@ impl CustomElement for BrowserElement {
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
             "source" => self.config.source = value.as_str().unwrap_or_default().to_string(),
+            "generation" => self.config.generation = value.as_u64().unwrap_or_default(),
             "profileId" => self.config.profile_id = value.as_str().unwrap_or_default().to_string(),
             "profilePath" => {
                 self.config.profile_path = value.as_str().unwrap_or_default().to_string()
@@ -134,6 +137,7 @@ impl CustomElement for BrowserElement {
     fn supported_props(&self) -> &'static [&'static str] {
         &[
             "source",
+            "generation",
             "profileId",
             "profilePath",
             "incognito",
@@ -163,7 +167,28 @@ fn emit_value(callback: &Option<EventCallback>, id: u64, event: &str, value: Str
     });
 }
 
-fn emit_state(callback: &Option<EventCallback>, id: u64, state: BrowserStateEvent) {
+fn emit_tagged_value(
+    callback: &Option<EventCallback>,
+    id: u64,
+    event: &str,
+    generation: u64,
+    value: String,
+) {
+    if let Ok(value) = serde_json::to_string(&serde_json::json!({
+        "generation": generation,
+        "value": value,
+    })) {
+        emit_value(callback, id, event, value);
+    }
+}
+
+fn emit_state(
+    callback: &Option<EventCallback>,
+    id: u64,
+    generation: u64,
+    mut state: BrowserStateEvent,
+) {
+    state.generation = generation;
     if let Ok(value) = serde_json::to_string(&state) {
         emit_value(callback, id, "browserState", value);
     }
@@ -187,10 +212,11 @@ impl BrowserRuntime {
     ) -> Result<(), String> {
         if !self.reported && !config.source.is_empty() {
             self.reported = true;
-            emit_value(
+            emit_tagged_value(
                 callback,
                 id,
                 "browserError",
+                config.generation,
                 "This GPUix build does not include a native browser engine".to_string(),
             );
         }
@@ -259,7 +285,49 @@ pub fn profile_isolation() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_commands;
+    use std::sync::{Arc, Mutex};
+
+    use super::{decode_commands, emit_state, emit_tagged_value, BrowserStateEvent, EventCallback};
+
+    #[test]
+    fn browser_events_include_the_originating_generation() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let callback: EventCallback = Arc::new(move |payload| {
+            captured.lock().unwrap().push(payload);
+        });
+        let callback = Some(callback);
+
+        emit_state(
+            &callback,
+            12,
+            41,
+            BrowserStateEvent {
+                title: Some("Current".to_string()),
+                ..Default::default()
+            },
+        );
+        emit_tagged_value(
+            &callback,
+            12,
+            "browserOpen",
+            41,
+            "https://example.com".to_string(),
+        );
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, "browserState");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(events[0].value.as_deref().unwrap()).unwrap(),
+            serde_json::json!({ "generation": 41, "title": "Current" })
+        );
+        assert_eq!(events[1].event_type, "browserOpen");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(events[1].value.as_deref().unwrap()).unwrap(),
+            serde_json::json!({ "generation": 41, "value": "https://example.com" })
+        );
+    }
 
     #[test]
     fn command_wire_accepts_fifo_and_legacy_object() {

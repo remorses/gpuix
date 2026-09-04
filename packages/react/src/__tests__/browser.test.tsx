@@ -11,6 +11,7 @@ describeNative("browser", () => {
       root.render(
         <browser
           source="https://example.com"
+          generation={1}
           profileId="workspace"
           profilePath="/tmp/gpuix-browser-test"
           visible
@@ -27,6 +28,7 @@ describeNative("browser", () => {
       expect(root.renderer.nativeBrowserEngine()).toBe("unavailable")
       expect(root.renderer.nativeBrowserProfileIsolation()).toBe("limited")
       expect(root.renderer.getRetainedElementCount()).toBe(1)
+      expect(root.renderer.findByType("browser")[0]?.customProps?.generation).toBe(1)
     } finally {
       root.unmount()
     }

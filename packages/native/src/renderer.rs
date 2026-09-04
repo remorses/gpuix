@@ -1044,7 +1044,9 @@ impl GpuixRenderer {
             }
         };
 
-        crate::custom_elements::browser::initialize(options.browser_root_cache_path.as_deref());
+        if options.native_browser_enabled.unwrap_or(true) {
+            crate::custom_elements::browser::initialize(options.browser_root_cache_path.as_deref());
+        }
         MAC_PLATFORM.with(|stored| {
             *stored.borrow_mut() = Some(platform);
         });
@@ -5620,6 +5622,8 @@ pub struct WindowOptions {
     /// Absolute directory whose immediate children are persistent Chromium profiles.
     /// Environment variable `GPUIX_BROWSER_ROOT_CACHE` and the platform default are fallbacks.
     pub browser_root_cache_path: Option<String>,
+    /// Prevent native browser initialization before any profile storage is touched.
+    pub native_browser_enabled: Option<bool>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
     /// Give the window key focus when it opens. `false` opens it behind the
@@ -5645,6 +5649,7 @@ impl Default for WindowOptions {
             titlebar_transparent: Some(false),
             window_background: None,
             browser_root_cache_path: None,
+            native_browser_enabled: Some(true),
             traffic_light_x: None,
             traffic_light_y: None,
             focus: Some(true),

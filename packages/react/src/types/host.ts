@@ -536,6 +536,8 @@ export interface TerminalProps extends Props {
 /** A persistent native child browser surface. */
 export interface BrowserProps extends Props {
   source?: string
+  /** Immutable incarnation token copied into every asynchronous native event. */
+  generation: number
   profileId?: string
   profilePath?: string
   incognito?: boolean

@@ -541,6 +541,8 @@ export interface WindowOptions {
    * Environment variable `GPUIX_BROWSER_ROOT_CACHE` and the platform default are fallbacks.
    */
   browserRootCachePath?: string
+  /** Prevent native browser initialization before any profile storage is touched. */
+  nativeBrowserEnabled?: boolean
   trafficLightX?: number
   trafficLightY?: number
   /**

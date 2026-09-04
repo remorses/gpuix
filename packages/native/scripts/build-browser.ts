@@ -1,6 +1,6 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 if (process.platform !== 'darwin') {
@@ -66,27 +66,79 @@ for (const variant of helperVariants) {
 const nativeAddon = join(packageDirectory, `gpuix-native.darwin-${architecture}.node`)
 if (!existsSync(nativeAddon)) throw new Error(`CEF-enabled native addon is missing: ${nativeAddon}`)
 const frameworkBinary = join(destination, 'Chromium Embedded Framework.framework', 'Chromium Embedded Framework')
-const helperFiles = Object.fromEntries(helperVariants.map((variant) => {
-  const helperName = `${helperBaseName}${variant.nameSuffix}`
-  const executable = join(destination, `${helperName}.app`, 'Contents', 'MacOS', helperName)
-  return [helperName, { path: `${helperName}.app/Contents/MacOS/${helperName}`, sha256: sha256(executable) }]
-}))
 for (const executable of [nativeAddon, frameworkBinary, ...helperVariants.map((variant) => {
   const helperName = `${helperBaseName}${variant.nameSuffix}`
   return join(destination, `${helperName}.app`, 'Contents', 'MacOS', helperName)
 })]) assertArchitecture(executable)
 writeFileSync(join(destination, 'manifest.json'), `${JSON.stringify({
-  schemaVersion: 1,
+  schemaVersion: 2,
   cefVersion: CEF_VERSION,
   cefApiVersion,
   platform: 'darwin',
   arch: architecture,
   minMacOS: '13.0',
   nativeAddon: { path: nativeAddon.slice(packageDirectory.length + 1), sha256: sha256(nativeAddon) },
-  framework: { path: 'Chromium Embedded Framework.framework/Chromium Embedded Framework', sha256: sha256(frameworkBinary) },
-  helpers: helperFiles,
+  artifacts: artifactInventory(destination),
 }, null, 2)}\n`)
 console.log(`[gpuix] staged Chromium ${cefDirectory} -> ${destination}`)
+
+type ArtifactEntry =
+  | { type: 'directory'; mode: number }
+  | { type: 'file'; mode: number; size: number; sha256: string }
+  | { type: 'symlink'; target: string }
+
+function artifactInventory(root: string): Record<string, ArtifactEntry> {
+  const inventory: Record<string, ArtifactEntry> = {}
+  visit(root)
+  return inventory
+
+  function visit(directory: string): void {
+    const entries = readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+    for (const entry of entries) {
+      const path = resolve(directory, entry.name)
+      const artifactPath = relative(root, path).split(sep).join('/')
+      if (artifactPath === 'manifest.json') continue
+      const stats = lstatSync(path)
+      if (entry.isDirectory()) {
+        inventory[artifactPath] = { type: 'directory', mode: stats.mode & 0o777 }
+        visit(path)
+      } else if (entry.isFile()) {
+        inventory[artifactPath] = {
+          type: 'file',
+          mode: stats.mode & 0o777,
+          size: stats.size,
+          sha256: sha256(path),
+        }
+      } else if (entry.isSymbolicLink()) {
+        const target = readlinkSync(path)
+        assertContainedSymlink(root, path, target)
+        inventory[artifactPath] = { type: 'symlink', target }
+      } else {
+        throw new Error(`Unsupported CEF artifact type: ${artifactPath}`)
+      }
+    }
+  }
+}
+
+function assertContainedSymlink(root: string, path: string, target: string): void {
+  const lexicalRelative = relative(resolve(root), resolve(dirname(path), target))
+  let resolvedRelative: string
+  try {
+    resolvedRelative = relative(realpathSync(root), realpathSync(path))
+  } catch {
+    throw new Error(`CEF artifact symlink target is missing: ${relative(root, path)}`)
+  }
+  if (
+    isAbsolute(target)
+    || lexicalRelative === '..'
+    || lexicalRelative.startsWith(`..${sep}`)
+    || resolvedRelative === '..'
+    || resolvedRelative.startsWith(`..${sep}`)
+  ) {
+    throw new Error(`CEF artifact symlink escapes its package root: ${relative(root, path)}`)
+  }
+}
 
 function parseTarget(arguments_: string[]): string | undefined {
   if (arguments_.length === 0) return undefined

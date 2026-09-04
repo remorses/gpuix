@@ -240,6 +240,25 @@ describeNative("events", () => {
       expect(clicks).toBe(0)
     })
 
+    it("does not click when mouse-down and mouse-up buttons differ", () => {
+      let clicks = 0
+      let auxiliaryClicks = 0
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 50 }}
+          onClick={() => { clicks += 1 }}
+          onAuxClick={() => { auxiliaryClicks += 1 }}
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 2)
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 2)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+      expect(clicks).toBe(0)
+      expect(auxiliaryClicks).toBe(0)
+    })
+
     it("dispatches primary clicks from native motion elements", () => {
       let clicks = 0
       testRoot.render(

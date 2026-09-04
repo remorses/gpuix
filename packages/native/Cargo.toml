@@ -86,6 +86,7 @@ default = ["test-support"]
 test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
 runtime-shaders = ["gpui_macos/runtime_shaders"]
 native-browser-cef = ["dep:cef", "dep:objc", "dep:raw-window-handle"]
+cef-development-overrides = []
 
 [[bin]]
 name = "gpuix-cef-helper"

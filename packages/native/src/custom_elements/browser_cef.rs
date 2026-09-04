@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
-    ffi::{c_char, c_void, CStr, CString},
+    ffi::{c_char, c_void, CString},
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -19,9 +19,11 @@ use objc::{
     sel, sel_impl,
 };
 use raw_window_handle::RawWindowHandle;
+#[cfg(feature = "cef-development-overrides")]
+use std::ffi::CStr;
 
 use super::{
-    emit_state, emit_value, BrowserCommand, BrowserConfig, BrowserStateEvent, EventCallback,
+    emit_state, emit_tagged_value, BrowserCommand, BrowserConfig, BrowserStateEvent, EventCallback,
 };
 
 static HANDLING_SEND_EVENT: AtomicBool = AtomicBool::new(false);
@@ -212,11 +214,7 @@ fn initialize_process(
     let handler = GpuixBrowserProcessHandler::new(ready);
     let mut app = GpuixCefApp::new(handler);
     let settings = Settings {
-        no_sandbox: if cef_sandbox_enabled(runtime.main_bundle.is_some()) {
-            0
-        } else {
-            1
-        },
+        no_sandbox: if cef_sandbox_enabled() { 0 } else { 1 },
         browser_subprocess_path: cef_path_string(&runtime.helper_executable)?,
         framework_dir_path: cef_path_string(&runtime.framework_directory)?,
         main_bundle_path: runtime
@@ -260,21 +258,32 @@ struct CefRuntimePaths {
 }
 
 fn resolve_runtime() -> Result<CefRuntimePaths, String> {
-    let main_bundle = main_app_bundle().ok_or_else(|| {
-        "Native Chromium requires a macOS application bundle; run `bun run build` and launch the generated .app"
-            .to_string()
-    })?;
-    let mut roots = Vec::new();
-    if let Some(configured) = std::env::var_os("GPUIX_CEF_DIR") {
-        roots.push(PathBuf::from(configured));
+    let main_bundle = main_app_bundle();
+    #[cfg(not(feature = "cef-development-overrides"))]
+    if main_bundle.is_none() {
+        return Err(
+            "Native Chromium requires a macOS application bundle; run `bun run build` and launch the generated .app"
+                .to_string(),
+        );
     }
-    roots.push(main_bundle.join("Contents/Frameworks"));
-    if let Some(module) = current_module_directory() {
-        roots.push(module.join("cef"));
-    }
-    if let Some(directory) = cef::sys::get_cef_dir() {
-        roots.push(directory);
-    }
+    let roots = main_bundle
+        .iter()
+        .map(|bundle| bundle.join("Contents/Frameworks"))
+        .collect::<Vec<_>>();
+    #[cfg(feature = "cef-development-overrides")]
+    let roots = {
+        let mut roots = roots;
+        if let Some(configured) = std::env::var_os("GPUIX_CEF_DIR") {
+            roots.insert(0, PathBuf::from(configured));
+        }
+        if let Some(module) = current_module_directory() {
+            roots.push(module.join("cef"));
+        }
+        if let Some(directory) = cef::sys::get_cef_dir() {
+            roots.push(directory);
+        }
+        roots
+    };
 
     let framework_directory = roots
         .iter()
@@ -293,7 +302,7 @@ fn resolve_runtime() -> Result<CefRuntimePaths, String> {
             }
         })
         .ok_or_else(|| {
-            "Chromium Embedded Framework.framework was not found; set GPUIX_CEF_DIR or build the packaged CEF assets"
+            "Chromium Embedded Framework.framework was not found in the application bundle"
                 .to_string()
         })?;
     let framework_directory = framework_directory.canonicalize().map_err(|error| {
@@ -310,17 +319,18 @@ fn resolve_runtime() -> Result<CefRuntimePaths, String> {
         ));
     }
 
-    let helper_executable = resolve_helper(&roots, Some(&main_bundle))?;
+    let helper_executable = resolve_helper(&roots, main_bundle.as_deref())?;
     Ok(CefRuntimePaths {
         framework_directory,
         framework_binary,
         helper_executable,
-        main_bundle: Some(main_bundle),
+        main_bundle,
     })
 }
 
 fn resolve_helper(roots: &[PathBuf], main_bundle: Option<&Path>) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
+    #[cfg(feature = "cef-development-overrides")]
     if let Some(configured) = std::env::var_os("GPUIX_CEF_HELPER_PATH") {
         candidates.push(PathBuf::from(configured));
     }
@@ -346,10 +356,7 @@ fn resolve_helper(roots: &[PathBuf], main_bundle: Option<&Path>) -> Result<PathB
         .into_iter()
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| candidate.canonicalize().ok())
-        .ok_or_else(|| {
-            "GPUix Chromium Helper was not found; set GPUIX_CEF_HELPER_PATH or run the native browser build"
-                .to_string()
-        })
+        .ok_or_else(|| "GPUix Chromium Helper was not found in the application bundle".to_string())
 }
 
 fn load_cef_framework(path: &Path) -> Result<(), String> {
@@ -414,20 +421,25 @@ fn cef_path_string(path: &Path) -> Result<CefString, String> {
         .ok_or_else(|| format!("Path is not valid UTF-8: {}", path.display()))
 }
 
-fn cef_sandbox_enabled(is_bundled: bool) -> bool {
-    match std::env::var("GPUIX_CEF_SANDBOX").as_deref() {
-        Ok("1") => true,
-        Ok("0") => false,
-        _ => is_bundled,
+fn cef_sandbox_enabled() -> bool {
+    #[cfg(feature = "cef-development-overrides")]
+    if std::env::var("GPUIX_CEF_SANDBOX").as_deref() == Ok("0") {
+        return false;
     }
+    true
 }
 
 fn remote_debugging_port() -> i32 {
-    std::env::var("GPUIX_CEF_REMOTE_DEBUGGING_PORT")
-        .ok()
-        .and_then(|value| value.parse::<i32>().ok())
-        .filter(|port| (1024..=65535).contains(port))
-        .unwrap_or(0)
+    #[cfg(feature = "cef-development-overrides")]
+    {
+        return std::env::var("GPUIX_CEF_REMOTE_DEBUGGING_PORT")
+            .ok()
+            .and_then(|value| value.parse::<i32>().ok())
+            .filter(|port| (1024..=65535).contains(port))
+            .unwrap_or(0);
+    }
+    #[cfg(not(feature = "cef-development-overrides"))]
+    0
 }
 
 fn main_app_bundle() -> Option<PathBuf> {
@@ -440,6 +452,7 @@ fn main_app_bundle() -> Option<PathBuf> {
     })
 }
 
+#[cfg(feature = "cef-development-overrides")]
 #[repr(C)]
 struct DlInfo {
     file_name: *const c_char,
@@ -448,11 +461,13 @@ struct DlInfo {
     symbol_address: *mut c_void,
 }
 
+#[cfg(feature = "cef-development-overrides")]
 #[link(name = "System")]
 extern "C" {
     fn dladdr(address: *const c_void, info: *mut DlInfo) -> i32;
 }
 
+#[cfg(feature = "cef-development-overrides")]
 fn current_module_directory() -> Option<PathBuf> {
     let mut info = DlInfo {
         file_name: std::ptr::null(),
@@ -579,6 +594,7 @@ struct ClearDataState {
     context: RequestContext,
     callback: Option<EventCallback>,
     id: u64,
+    generation: u64,
     serial: u64,
     done: Arc<AtomicBool>,
     cancelled: Arc<AtomicBool>,
@@ -639,6 +655,7 @@ fn advance_clear_data(state: ClearDataState, stage: ClearDataStage) {
                 emit_state(
                     &state.callback,
                     state.id,
+                    state.generation,
                     BrowserStateEvent {
                         command_serial: Some(state.serial),
                         ..Default::default()
@@ -691,6 +708,7 @@ pub(super) struct BrowserRuntime {
     client: Option<Client>,
     request_context: Option<RequestContext>,
     profile_key: Option<String>,
+    generation: Option<u64>,
     parent_view: *mut c_void,
     host_window: Option<Arc<AtomicPtr<c_void>>>,
     pending_creation: Option<PendingBrowserCreation>,
@@ -717,6 +735,7 @@ impl Default for BrowserRuntime {
             client: None,
             request_context: None,
             profile_key: None,
+            generation: None,
             parent_view: std::ptr::null_mut(),
             host_window: None,
             pending_creation: None,
@@ -772,9 +791,12 @@ impl BrowserRuntime {
             "{}:{}:{}",
             config.profile_id, config.profile_path, config.incognito
         );
-        if self.profile_key.as_deref() != Some(&profile_key) {
+        if self.profile_key.as_deref() != Some(&profile_key)
+            || self.generation != Some(config.generation)
+        {
             self.retire_active_browser();
             self.profile_key = Some(profile_key);
+            self.generation = Some(config.generation);
         }
         let logical_bounds = (
             f32::from(bounds.origin.x),
@@ -860,6 +882,7 @@ impl BrowserRuntime {
                 emit_state(
                     callback,
                     id,
+                    config.generation,
                     BrowserStateEvent {
                         command_serial: Some(serial),
                         ..Default::default()
@@ -882,7 +905,7 @@ impl BrowserRuntime {
                 }
             }
         }
-        self.report_state(callback, id);
+        self.report_state(callback, id, config.generation);
         Ok(())
     }
 
@@ -906,6 +929,7 @@ impl BrowserRuntime {
         let mut client = browser_client(
             callback.clone(),
             id,
+            config.generation,
             events_enabled.clone(),
             closing.clone(),
             profile_key.clone(),
@@ -1023,7 +1047,7 @@ impl BrowserRuntime {
             command_serial: Some(self.last_command_serial),
             ..Default::default()
         };
-        emit_state(callback, id, self.last_state.clone());
+        emit_state(callback, id, config.generation, self.last_state.clone());
         if debug_enabled() {
             eprintln!("[gpuix-cef] browser Views host created");
         }
@@ -1097,6 +1121,7 @@ impl BrowserRuntime {
                         context,
                         callback: callback.clone(),
                         id,
+                        generation: self.generation.unwrap_or_default(),
                         serial: command.serial,
                         done,
                         cancelled,
@@ -1114,7 +1139,7 @@ impl BrowserRuntime {
         Ok(true)
     }
 
-    fn report_state(&mut self, callback: &Option<EventCallback>, id: u64) {
+    fn report_state(&mut self, callback: &Option<EventCallback>, id: u64, generation: u64) {
         let Some(browser) = self.browser.as_ref() else {
             return;
         };
@@ -1130,7 +1155,7 @@ impl BrowserRuntime {
         };
         if state != self.last_state {
             self.last_state = state.clone();
-            emit_state(callback, id, state);
+            emit_state(callback, id, generation, state);
         }
     }
 
@@ -1186,6 +1211,7 @@ impl BrowserRuntime {
         self.client = None;
         self.request_context = None;
         self.profile_key = None;
+        self.generation = None;
         self.parent_view = std::ptr::null_mut();
         self.host_window = None;
         self.pending_creation = None;
@@ -1599,6 +1625,7 @@ cef::wrap_window_delegate! {
 fn browser_client(
     callback: Option<EventCallback>,
     id: u64,
+    generation: u64,
     events_enabled: Arc<AtomicBool>,
     closing: Arc<AtomicBool>,
     profile_key: String,
@@ -1611,11 +1638,17 @@ fn browser_client(
             }
         }) as EventCallback
     });
-    let display = GpuixDisplayHandler::new(callback.clone(), id);
-    let load = GpuixLoadHandler::new(callback.clone(), id);
-    let life_span =
-        GpuixLifeSpanHandler::new(callback.clone(), id, closing, profile_key, pending_creation);
-    let request = GpuixRequestHandler::new(callback.clone(), id);
+    let display = GpuixDisplayHandler::new(callback.clone(), id, generation);
+    let load = GpuixLoadHandler::new(callback.clone(), id, generation);
+    let life_span = GpuixLifeSpanHandler::new(
+        callback.clone(),
+        id,
+        generation,
+        closing,
+        profile_key,
+        pending_creation,
+    );
+    let request = GpuixRequestHandler::new(callback.clone(), id, generation);
     let download = GpuixDownloadHandler::new();
     GpuixClient::new(display, load, life_span, request, download)
 }
@@ -1624,6 +1657,7 @@ cef::wrap_display_handler! {
     struct GpuixDisplayHandler {
         callback: Option<EventCallback>,
         id: u64,
+        generation: u64,
     }
 
     impl DisplayHandler {
@@ -1637,6 +1671,7 @@ cef::wrap_display_handler! {
                 emit_state(
                     &self.callback,
                     self.id,
+                    self.generation,
                     BrowserStateEvent {
                         url: url.map(ToString::to_string),
                         ..Default::default()
@@ -1649,6 +1684,7 @@ cef::wrap_display_handler! {
             emit_state(
                 &self.callback,
                 self.id,
+                self.generation,
                 BrowserStateEvent {
                     title: title.map(ToString::to_string),
                     ..Default::default()
@@ -1662,6 +1698,7 @@ cef::wrap_load_handler! {
     struct GpuixLoadHandler {
         callback: Option<EventCallback>,
         id: u64,
+        generation: u64,
     }
 
     impl LoadHandler {
@@ -1675,6 +1712,7 @@ cef::wrap_load_handler! {
             emit_state(
                 &self.callback,
                 self.id,
+                self.generation,
                 BrowserStateEvent {
                     loading: Some(is_loading != 0),
                     can_go_back: Some(can_go_back != 0),
@@ -1704,13 +1742,20 @@ cef::wrap_load_handler! {
             emit_state(
                 &self.callback,
                 self.id,
+                self.generation,
                 BrowserStateEvent {
                     loading: Some(false),
                     error: Some(message.clone()),
                     ..Default::default()
                 },
             );
-            emit_value(&self.callback, self.id, "browserError", message);
+            emit_tagged_value(
+                &self.callback,
+                self.id,
+                "browserError",
+                self.generation,
+                message,
+            );
         }
     }
 }
@@ -1719,6 +1764,7 @@ cef::wrap_life_span_handler! {
     struct GpuixLifeSpanHandler {
         callback: Option<EventCallback>,
         id: u64,
+        generation: u64,
         closing: Arc<AtomicBool>,
         profile_key: String,
         pending_creation: PendingBrowserCreation,
@@ -1743,15 +1789,22 @@ cef::wrap_life_span_handler! {
         ) -> i32 {
             let url = target_url.map(ToString::to_string).unwrap_or_default();
             if !browser_url_allowed(&url) {
-                emit_value(
+                emit_tagged_value(
                     &self.callback,
                     self.id,
                     "browserError",
+                    self.generation,
                     format!("Blocked unsupported browser URL: {url}"),
                 );
                 return 1;
             }
-            emit_value(&self.callback, self.id, "browserOpen", url);
+            emit_tagged_value(
+                &self.callback,
+                self.id,
+                "browserOpen",
+                self.generation,
+                url,
+            );
             1
         }
 
@@ -1865,6 +1918,7 @@ cef::wrap_request_handler! {
     struct GpuixRequestHandler {
         callback: Option<EventCallback>,
         id: u64,
+        generation: u64,
     }
 
     impl RequestHandler {
@@ -1885,10 +1939,11 @@ cef::wrap_request_handler! {
             if url.is_empty() || browser_url_allowed(&url) {
                 return 0;
             }
-            emit_value(
+            emit_tagged_value(
                 &self.callback,
                 self.id,
                 "browserError",
+                self.generation,
                 format!("Blocked unsupported browser URL: {url}"),
             );
             1
@@ -1901,10 +1956,11 @@ cef::wrap_request_handler! {
             error_code: i32,
             error_string: Option<&CefString>,
         ) {
-            emit_value(
+            emit_tagged_value(
                 &self.callback,
                 self.id,
                 "browserError",
+                self.generation,
                 format!(
                     "Chromium renderer terminated ({:?}, {error_code}): {}",
                     status,
