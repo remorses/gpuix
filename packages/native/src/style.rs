@@ -1,12 +1,138 @@
+pub(crate) mod corners;
+pub(crate) mod resolve;
+pub(crate) mod vars;
+
+/// A style value that resolves to a number.
+///
+/// A bare number is the common case and stays a number. Text goes through
+/// `var()` first, then reads as a plain number or a `px` length, which are the
+/// two forms the `style` prop already takes.
+///
+/// Every numeric field uses this, including the unitless ones such as `opacity`
+/// and `flexGrow`, because `var()` is legal in any property and a field that
+/// stayed `f64` would reject it.
+///
+/// `Deserialize` is hand written for the same reason as `StyleDesc`. An
+/// `#[serde(untagged)]` enum buffers every value it reads before it picks a
+/// variant, and 36 fields use this one.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum Numeric {
+    Number(f64),
+    Text(String),
+}
+
+impl<'de> Deserialize<'de> for Numeric {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct NumericVisitor;
+
+        impl Visitor<'_> for NumericVisitor {
+            type Value = Numeric;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a number or a CSS value such as \"8px\" or \"var(--pad)\"")
+            }
+
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Numeric, E> {
+                Ok(Numeric::Number(value))
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Numeric, E> {
+                Ok(Numeric::Number(value as f64))
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Numeric, E> {
+                Ok(Numeric::Number(value as f64))
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Numeric, E> {
+                Ok(Numeric::Text(value.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Numeric, E> {
+                Ok(Numeric::Text(value))
+            }
+        }
+
+        deserializer.deserialize_any(NumericVisitor)
+    }
+}
+
+impl Numeric {
+    /// The number this holds, without resolving anything.
+    ///
+    /// Text always reads as `None` here, even plain `"8px"`. Only
+    /// `Scope::number` reads text, so a caller that skips the scope cannot
+    /// half-resolve a value.
+    pub fn as_number(&self) -> Option<f64> {
+        match self {
+            Self::Number(value) => Some(*value),
+            Self::Text(_) => None,
+        }
+    }
+}
+
+impl From<f64> for Numeric {
+    fn from(value: f64) -> Self {
+        Self::Number(value)
+    }
+}
+
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Font weight value — accepts both CSS strings ("bold", "700") and numbers (700).
 /// JS style objects commonly use both `fontWeight: "bold"` and `fontWeight: 700`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum FontWeightValue {
     Num(f64),
     Str(String),
+}
+
+impl<'de> Deserialize<'de> for FontWeightValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct WeightVisitor;
+
+        impl Visitor<'_> for WeightVisitor {
+            type Value = FontWeightValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a number or a weight name such as \"bold\"")
+            }
+
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<FontWeightValue, E> {
+                Ok(FontWeightValue::Num(value))
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<FontWeightValue, E> {
+                Ok(FontWeightValue::Num(value as f64))
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<FontWeightValue, E> {
+                Ok(FontWeightValue::Num(value as f64))
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<FontWeightValue, E> {
+                Ok(FontWeightValue::Str(value.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, value: String) -> Result<FontWeightValue, E> {
+                Ok(FontWeightValue::Str(value))
+            }
+        }
+
+        deserializer.deserialize_any(WeightVisitor)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -19,278 +145,530 @@ pub struct BoxShadowValue {
     pub color: String,
 }
 
+/// A `background` value.
+///
+/// The `style` prop sends CSS text. It also takes the object form
+/// `{ "type": "linear-gradient", "angle": 90, "stops": [...] }`. That form is
+/// the only way to ask for a colour space, because lightningcss does not read
+/// `in oklab` inside `linear-gradient()`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum BackgroundValue {
+    Text(String),
+    Gradient(LinearGradientValue),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum GradientKind {
+    #[serde(rename = "linear-gradient")]
+    LinearGradient,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+pub struct LinearGradientValue {
+    #[serde(rename = "type")]
+    pub kind: GradientKind,
+    /// Degrees clockwise from `to top`.
+    pub angle: f64,
+    pub stops: Vec<LinearGradientStopValue>,
+    /// `srgb` or `oklab`. Unset means `srgb`.
+    #[serde(rename = "colorSpace", default, skip_serializing_if = "Option::is_none")]
+    pub color_space: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LinearGradientStopValue {
     pub color: String,
+    /// Where on the gradient line, from 0 to 1.
     pub position: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum GradientValue {
-    #[serde(rename = "linear-gradient")]
-    LinearGradient {
-        angle: f64,
-        stops: [LinearGradientStopValue; 2],
-        #[serde(rename = "colorSpace")]
-        color_space: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum BackgroundValue {
-    Color(String),
-    Gradient(Box<GradientValue>),
-}
-
-/// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
-pub enum DimensionValue {
-    Pixels(f64),
-    Percentage(f64), // 0.0 to 1.0
-    Auto,
-}
-
-impl Default for DimensionValue {
-    fn default() -> Self {
-        DimensionValue::Auto
-    }
-}
-
-impl<'de> Deserialize<'de> for DimensionValue {
+impl<'de> Deserialize<'de> for BackgroundValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        use serde::de::{self, Visitor};
+        use serde::de::{self, MapAccess, Visitor};
 
-        struct DimensionVisitor;
+        struct BackgroundVisitor;
 
-        impl<'de> Visitor<'de> for DimensionVisitor {
-            type Value = DimensionValue;
+        impl<'de> Visitor<'de> for BackgroundVisitor {
+            type Value = BackgroundValue;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a number or a string like '100%' or 'auto'")
+                formatter.write_str("CSS background text or a linear-gradient object")
             }
 
-            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(DimensionValue::Pixels(v))
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<BackgroundValue, E> {
+                Ok(BackgroundValue::Text(value.to_owned()))
             }
 
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(DimensionValue::Pixels(v as f64))
+            fn visit_string<E: de::Error>(self, value: String) -> Result<BackgroundValue, E> {
+                Ok(BackgroundValue::Text(value))
             }
 
-            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(DimensionValue::Pixels(v as f64))
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if v == "auto" {
-                    Ok(DimensionValue::Auto)
-                } else if v.ends_with('%') {
-                    let num_str = v.trim_end_matches('%');
-                    match num_str.parse::<f64>() {
-                        Ok(n) => Ok(DimensionValue::Percentage(n / 100.0)),
-                        Err(_) => Err(de::Error::custom(format!("invalid percentage: {}", v))),
-                    }
-                } else {
-                    // Try to parse as a number
-                    match v.parse::<f64>() {
-                        Ok(n) => Ok(DimensionValue::Pixels(n)),
-                        Err(_) => Err(de::Error::custom(format!("invalid dimension: {}", v))),
-                    }
-                }
+            fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<BackgroundValue, M::Error> {
+                LinearGradientValue::deserialize(de::value::MapAccessDeserializer::new(map))
+                    .map(BackgroundValue::Gradient)
             }
         }
 
-        deserializer.deserialize_any(DimensionVisitor)
+        deserializer.deserialize_any(BackgroundVisitor)
     }
 }
 
-/// Style description that can be serialized from JS
-/// Note: This is only used for JSON deserialization, not direct napi binding
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StyleDesc {
+impl BackgroundValue {
+    /// Whether the value paints anything, read without variables or the
+    /// window. Text that does not read counts as painted, because a blocked
+    /// click is the smaller mistake.
+    fn paints(&self) -> bool {
+        match self {
+            BackgroundValue::Text(text) => text_paints(text),
+            BackgroundValue::Gradient(gradient) => gradient.stops.iter().any(|stop| {
+                gpuix_css::color::read(&stop.color, &gpuix_css::color::ColorContext::default())
+                    .map_or(true, |reading| reading.color.a > 0.0)
+            }),
+        }
+    }
+}
+
+fn text_paints(text: &str) -> bool {
+    use gpuix_css::background::Fill;
+    match gpuix_css::background::read(text, &gpuix_css::color::ColorContext::default()) {
+        Ok(Some(reading)) => match reading.fill {
+            Fill::Color(color) => color.a > 0.0,
+            Fill::LinearGradient(gradient) => gradient.stops.iter().any(|stop| stop.color.a > 0.0),
+        },
+        Ok(None) => false,
+        Err(_) => true,
+    }
+}
+
+/// What a sizing property resolves to.
+///
+/// `width` and its family take `auto` and resolve a percentage against the
+/// parent, which the other length properties do not, so they have their own
+/// resolved type. `Scope::dimension` is the only thing that builds one.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum DimensionValue {
+    Pixels(f64),
+    /// A share of the parent, where `1.0` is the whole of it.
+    Percentage(f64),
+    #[default]
+    Auto,
+}
+
+/// Declares `StyleDesc` and its `Deserialize` from one field list.
+///
+/// The wire name beside each field drives both directions, so what JS writes
+/// and what Rust reads cannot drift apart.
+///
+/// The `Deserialize` is hand written to keep `#[serde(flatten)]` off the read
+/// path. Flatten makes serde buffer the whole object into an intermediate value
+/// before it reads one field, and every `setStyle` call pays for that. Measured
+/// on a small style, buffering was 246 ns of a 320 ns parse.
+macro_rules! style_desc {
+    ($( $(#[$meta:meta])* $field:ident : $ty:ty = $name:literal ),* $(,)?) => {
+        /// Style description that can be serialized from JS
+        /// Note: This is only used for JSON deserialization, not direct napi binding
+        #[derive(Debug, Clone, Default, PartialEq, Serialize)]
+        pub struct StyleDesc {
+            $(
+                $(#[$meta])*
+                #[serde(rename = $name)]
+                pub $field: $ty,
+            )*
+
+            /// Custom property declarations on this element, such as `--pad: 8px`.
+            ///
+            /// Only the keys starting with `--` land here. Anything else is a
+            /// typo or a field a newer client knows about, and both are
+            /// ignored, which is what happened to them before this field
+            /// existed.
+            #[serde(flatten)]
+            pub custom: std::collections::HashMap<String, serde_json::Value>,
+        }
+
+        /// Every wire name the reader knows, in declaration order.
+        ///
+        /// One test reads this against what `Serialize` writes, which proves
+        /// the two halves of the macro agree.
+        #[cfg(test)]
+        const FIELDS: &[&str] = &[$( $name, )*];
+
+        impl StyleDesc {
+            /// Reads a style from JSON straight into a box.
+            ///
+            /// `StyleDesc` is over 1,700 bytes and every element in the tree
+            /// holds one, so the tree keeps a pointer rather than the struct.
+            /// Reading into the box means the value is never built on the stack
+            /// and then copied there.
+            pub fn from_json_boxed(text: &str) -> serde_json::Result<Box<StyleDesc>> {
+                let mut json = serde_json::Deserializer::from_str(text);
+                let style = Self::deserialize_boxed(&mut json)?;
+                json.end()?;
+                Ok(style)
+            }
+
+            /// The same read, from any deserializer.
+            ///
+            /// The batch path already holds a `serde_json::Value`, so it needs
+            /// this rather than the text above.
+            pub fn deserialize_boxed<'de, D>(deserializer: D) -> Result<Box<StyleDesc>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer.deserialize_map(read::Boxed)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for StyleDesc {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer.deserialize_map(read::Owned)
+            }
+        }
+
+        /// The reader for `StyleDesc`.
+        ///
+        /// Two visitors over one `fill`, so a style read into a box is never
+        /// built on the stack first, and a nested `hover` still reads through
+        /// the ordinary `Deserialize`.
+        mod read {
+            use super::StyleDesc;
+            use serde::de::{Deserializer, Error, IgnoredAny, MapAccess, Visitor};
+
+            /// One key of a style object, matched without allocating.
+            ///
+            /// Only a custom property keeps its name, because that name is the
+            /// map key. Every other key is either a known field, which the
+            /// variant already names, or ignored.
+            #[allow(non_camel_case_types)]
+            enum Key {
+                $( $field, )*
+                Custom(String),
+                Ignore,
+            }
+
+            struct KeyVisitor;
+
+            impl Visitor<'_> for KeyVisitor {
+                type Value = Key;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    formatter.write_str("a style property name")
+                }
+
+                fn visit_str<E: Error>(self, value: &str) -> Result<Key, E> {
+                    Ok(match value {
+                        $( $name => Key::$field, )*
+                        name if name.starts_with("--") => Key::Custom(name.to_owned()),
+                        _ => Key::Ignore,
+                    })
+                }
+            }
+
+            impl<'de> serde::Deserialize<'de> for Key {
+                fn deserialize<D>(deserializer: D) -> Result<Key, D::Error>
+                where
+                    D: Deserializer<'de>,
+                {
+                    deserializer.deserialize_str(KeyVisitor)
+                }
+            }
+
+            /// Writes every key of `map` into `style`.
+            ///
+            /// A repeated key takes the later value, the way a repeated
+            /// declaration does in a CSS rule.
+            fn fill<'de, M>(style: &mut StyleDesc, map: &mut M) -> Result<(), M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                while let Some(key) = map.next_key::<Key>()? {
+                    match key {
+                        $( Key::$field => style.$field = map.next_value()?, )*
+                        Key::Custom(name) => {
+                            let value: serde_json::Value = map.next_value()?;
+                            style.custom.insert(name, value);
+                        }
+                        Key::Ignore => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+
+            pub struct Owned;
+
+            impl<'de> Visitor<'de> for Owned {
+                type Value = StyleDesc;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    formatter.write_str("a style object")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> Result<StyleDesc, M::Error>
+                where
+                    M: MapAccess<'de>,
+                {
+                    let mut style = StyleDesc::default();
+                    fill(&mut style, &mut map)?;
+                    Ok(style)
+                }
+            }
+
+            pub struct Boxed;
+
+            impl<'de> Visitor<'de> for Boxed {
+                type Value = Box<StyleDesc>;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    formatter.write_str("a style object")
+                }
+
+                fn visit_map<M>(self, mut map: M) -> Result<Box<StyleDesc>, M::Error>
+                where
+                    M: MapAccess<'de>,
+                {
+                    let mut style = Box::<StyleDesc>::default();
+                    fill(&mut style, &mut map)?;
+                    Ok(style)
+                }
+            }
+        }
+    };
+}
+
+style_desc! {
     // Display
-    pub display: Option<String>,
-    pub visibility: Option<String>,
+    display: Option<String> = "display",
+    visibility: Option<String> = "visibility",
 
     // Flexbox
-    pub flex_direction: Option<String>,
-    pub flex_wrap: Option<String>,
-    pub flex_grow: Option<f64>,
-    pub flex_shrink: Option<f64>,
-    pub flex_basis: Option<f64>,
-    pub align_items: Option<String>,
-    pub align_self: Option<String>,
-    pub align_content: Option<String>,
-    pub justify_content: Option<String>,
-    pub gap: Option<f64>,
-    pub row_gap: Option<f64>,
-    pub column_gap: Option<f64>,
-    pub grid_template_columns: Option<f64>,
-    pub grid_template_rows: Option<f64>,
-    pub grid_column_min: Option<String>,
-    pub grid_row_min: Option<String>,
+    flex_direction: Option<String> = "flexDirection",
+    flex_wrap: Option<String> = "flexWrap",
+    flex_grow: Option<Numeric> = "flexGrow",
+    flex_shrink: Option<Numeric> = "flexShrink",
+    flex_basis: Option<Numeric> = "flexBasis",
+    align_items: Option<String> = "alignItems",
+    align_self: Option<String> = "alignSelf",
+    align_content: Option<String> = "alignContent",
+    justify_content: Option<String> = "justifyContent",
+    gap: Option<Numeric> = "gap",
+    row_gap: Option<Numeric> = "rowGap",
+    column_gap: Option<Numeric> = "columnGap",
+    grid_template_columns: Option<Numeric> = "gridTemplateColumns",
+    grid_template_rows: Option<Numeric> = "gridTemplateRows",
+    grid_column_min: Option<String> = "gridColumnMin",
+    grid_row_min: Option<String> = "gridRowMin",
 
-    // Sizing - now supports both numbers and strings like "100%" or "auto"
-    pub width: Option<DimensionValue>,
-    pub height: Option<DimensionValue>,
-    pub min_width: Option<DimensionValue>,
-    pub min_height: Option<DimensionValue>,
-    pub max_width: Option<DimensionValue>,
-    pub max_height: Option<DimensionValue>,
+    // Sizing. These read the same CSS lengths as every other length property,
+    // and `auto` and a percentage on top of them.
+    width: Option<Numeric> = "width",
+    height: Option<Numeric> = "height",
+    min_width: Option<Numeric> = "minWidth",
+    min_height: Option<Numeric> = "minHeight",
+    max_width: Option<Numeric> = "maxWidth",
+    max_height: Option<Numeric> = "maxHeight",
 
     // Spacing (padding)
-    pub padding: Option<f64>,
-    pub padding_top: Option<f64>,
-    pub padding_right: Option<f64>,
-    pub padding_bottom: Option<f64>,
-    pub padding_left: Option<f64>,
+    padding: Option<Numeric> = "padding",
+    padding_top: Option<Numeric> = "paddingTop",
+    padding_right: Option<Numeric> = "paddingRight",
+    padding_bottom: Option<Numeric> = "paddingBottom",
+    padding_left: Option<Numeric> = "paddingLeft",
 
     // Spacing (margin)
-    pub margin: Option<f64>,
-    pub margin_top: Option<f64>,
-    pub margin_right: Option<f64>,
-    pub margin_bottom: Option<f64>,
-    pub margin_left: Option<f64>,
+    margin: Option<Numeric> = "margin",
+    margin_top: Option<Numeric> = "marginTop",
+    margin_right: Option<Numeric> = "marginRight",
+    margin_bottom: Option<Numeric> = "marginBottom",
+    margin_left: Option<Numeric> = "marginLeft",
 
     // Position
-    pub position: Option<String>,
-    pub top: Option<f64>,
-    pub right: Option<f64>,
-    pub bottom: Option<f64>,
-    pub left: Option<f64>,
+    position: Option<String> = "position",
+    top: Option<Numeric> = "top",
+    right: Option<Numeric> = "right",
+    bottom: Option<Numeric> = "bottom",
+    left: Option<Numeric> = "left",
 
     // Background & Colors
-    pub background: Option<BackgroundValue>,
-    pub background_color: Option<String>,
-    pub color: Option<String>,
-    pub opacity: Option<f64>,
+    background: Option<BackgroundValue> = "background",
+    background_color: Option<String> = "backgroundColor",
+    background_image: Option<String> = "backgroundImage",
+    /// How `backgroundImage` mixes with `backgroundColor`, a `<blend-mode>`.
+    background_blend_mode: Option<String> = "backgroundBlendMode",
+    /// How the element mixes with what is under it, a `<blend-mode>`.
+    mix_blend_mode: Option<String> = "mixBlendMode",
+    /// A CSS filter list on the element and its children, or `none`.
+    filter: Option<String> = "filter",
+    /// A CSS filter list on what is under the element, or `none`.
+    backdrop_filter: Option<String> = "backdropFilter",
+    /// A gradient whose alpha keeps or drops each pixel, or `none`.
+    mask_image: Option<String> = "maskImage",
+    color: Option<String> = "color",
+    opacity: Option<Numeric> = "opacity",
 
     // Border
-    pub border_width: Option<f64>,
-    pub border_top_width: Option<f64>,
-    pub border_right_width: Option<f64>,
-    pub border_bottom_width: Option<f64>,
-    pub border_left_width: Option<f64>,
-    pub border_color: Option<String>,
-    pub border_radius: Option<f64>,
-    pub border_top_left_radius: Option<f64>,
-    pub border_top_right_radius: Option<f64>,
-    pub border_bottom_left_radius: Option<f64>,
-    pub border_bottom_right_radius: Option<f64>,
-    pub box_shadow: Option<BoxShadowValue>,
+    border_width: Option<Numeric> = "borderWidth",
+    border_top_width: Option<Numeric> = "borderTopWidth",
+    border_right_width: Option<Numeric> = "borderRightWidth",
+    border_bottom_width: Option<Numeric> = "borderBottomWidth",
+    border_left_width: Option<Numeric> = "borderLeftWidth",
+    border_color: Option<String> = "borderColor",
+    border_radius: Option<Numeric> = "borderRadius",
+    border_top_left_radius: Option<Numeric> = "borderTopLeftRadius",
+    border_top_right_radius: Option<Numeric> = "borderTopRightRadius",
+    border_bottom_left_radius: Option<Numeric> = "borderBottomLeftRadius",
+    border_bottom_right_radius: Option<Numeric> = "borderBottomRightRadius",
+    border_start_start_radius: Option<Numeric> = "borderStartStartRadius",
+    border_start_end_radius: Option<Numeric> = "borderStartEndRadius",
+    border_end_start_radius: Option<Numeric> = "borderEndStartRadius",
+    border_end_end_radius: Option<Numeric> = "borderEndEndRadius",
+
+    // Corner shape (CSS Borders 4, section 3.9). `corner*` shorthands take a
+    // radius list and a shape list in either order; `*Shape` takes shapes only.
+    corner_shape: Option<String> = "cornerShape",
+    corner_top_left_shape: Option<String> = "cornerTopLeftShape",
+    corner_top_right_shape: Option<String> = "cornerTopRightShape",
+    corner_bottom_right_shape: Option<String> = "cornerBottomRightShape",
+    corner_bottom_left_shape: Option<String> = "cornerBottomLeftShape",
+    corner_start_start_shape: Option<String> = "cornerStartStartShape",
+    corner_start_end_shape: Option<String> = "cornerStartEndShape",
+    corner_end_start_shape: Option<String> = "cornerEndStartShape",
+    corner_end_end_shape: Option<String> = "cornerEndEndShape",
+    corner_top_shape: Option<String> = "cornerTopShape",
+    corner_right_shape: Option<String> = "cornerRightShape",
+    corner_bottom_shape: Option<String> = "cornerBottomShape",
+    corner_left_shape: Option<String> = "cornerLeftShape",
+    corner_block_start_shape: Option<String> = "cornerBlockStartShape",
+    corner_block_end_shape: Option<String> = "cornerBlockEndShape",
+    corner_inline_start_shape: Option<String> = "cornerInlineStartShape",
+    corner_inline_end_shape: Option<String> = "cornerInlineEndShape",
+    corner: Option<String> = "corner",
+    corner_top_left: Option<String> = "cornerTopLeft",
+    corner_top_right: Option<String> = "cornerTopRight",
+    corner_bottom_right: Option<String> = "cornerBottomRight",
+    corner_bottom_left: Option<String> = "cornerBottomLeft",
+    corner_start_start: Option<String> = "cornerStartStart",
+    corner_start_end: Option<String> = "cornerStartEnd",
+    corner_end_start: Option<String> = "cornerEndStart",
+    corner_end_end: Option<String> = "cornerEndEnd",
+    corner_top: Option<String> = "cornerTop",
+    corner_right: Option<String> = "cornerRight",
+    corner_bottom: Option<String> = "cornerBottom",
+    corner_left: Option<String> = "cornerLeft",
+    corner_block_start: Option<String> = "cornerBlockStart",
+    corner_block_end: Option<String> = "cornerBlockEnd",
+    corner_inline_start: Option<String> = "cornerInlineStart",
+    corner_inline_end: Option<String> = "cornerInlineEnd",
+    box_shadow: Option<BoxShadowValue> = "boxShadow",
 
     // Text
-    pub font_size: Option<f64>,
-    pub font_family: Option<String>,
-    pub font_weight: Option<FontWeightValue>,
-    pub text_align: Option<String>,
-    pub line_height: Option<f64>,
-    pub white_space: Option<String>,
-    pub text_overflow: Option<String>,
-    pub line_clamp: Option<f64>,
+    font_size: Option<Numeric> = "fontSize",
+    font_family: Option<String> = "fontFamily",
+    font_weight: Option<FontWeightValue> = "fontWeight",
+    text_align: Option<String> = "textAlign",
+    line_height: Option<Numeric> = "lineHeight",
+    white_space: Option<String> = "whiteSpace",
+    text_overflow: Option<String> = "textOverflow",
+    line_clamp: Option<Numeric> = "lineClamp",
 
     // Overflow
-    pub overflow: Option<String>,
-    pub overflow_x: Option<String>,
-    pub overflow_y: Option<String>,
+    overflow: Option<String> = "overflow",
+    overflow_x: Option<String> = "overflowX",
+    overflow_y: Option<String> = "overflowY",
+    /// `auto`, `contain` or `none`, one for both axes or one per axis.
+    overscroll_behavior: Option<String> = "overscrollBehavior",
+    overscroll_behavior_x: Option<String> = "overscrollBehaviorX",
+    overscroll_behavior_y: Option<String> = "overscrollBehaviorY",
+    /// `auto`, `thin` or `none`.
+    scrollbar_width: Option<String> = "scrollbarWidth",
+    /// `auto`, or a thumb colour and a track colour.
+    scrollbar_color: Option<String> = "scrollbarColor",
+    /// `auto`, `stable` or `stable both-edges`.
+    scrollbar_gutter: Option<String> = "scrollbarGutter",
+    /// Space `scrollIntoView` keeps around the element, a number of
+    /// pixels or `"Npx"`, alone or as the one-to-four shorthand.
+    scroll_margin: Option<Numeric> = "scrollMargin",
+    scroll_margin_top: Option<Numeric> = "scrollMarginTop",
+    scroll_margin_right: Option<Numeric> = "scrollMarginRight",
+    scroll_margin_bottom: Option<Numeric> = "scrollMarginBottom",
+    scroll_margin_left: Option<Numeric> = "scrollMarginLeft",
+    /// Space `scrollIntoView` keeps inside this scroll box.
+    scroll_padding: Option<Numeric> = "scrollPadding",
+    scroll_padding_top: Option<Numeric> = "scrollPaddingTop",
+    scroll_padding_right: Option<Numeric> = "scrollPaddingRight",
+    scroll_padding_bottom: Option<Numeric> = "scrollPaddingBottom",
+    scroll_padding_left: Option<Numeric> = "scrollPaddingLeft",
 
     // Cursor
-    pub cursor: Option<String>,
+    cursor: Option<String> = "cursor",
     /// `"auto"` blocks mouse hits behind this element. `"none"` never does.
     /// Unset: block when this element paints a fill or is absolutely positioned.
-    pub pointer_events: Option<String>,
+    pointer_events: Option<String> = "pointerEvents",
 
     // Text selection. "none" opts an element and its subtree out of the
     // selection registry, so buttons and toolbars never start a drag.
     // Inherited down the tree like the CSS property of the same name.
-    pub user_select: Option<String>,
+    user_select: Option<String> = "userSelect",
     /// Selection wash colour for this subtree. Defaults to the theme accent at
     /// 35% opacity, the same tone Comet uses.
-    pub selection_color: Option<String>,
+    selection_color: Option<String> = "selectionColor",
 
-    // Pseudo-selector styles — applied by GPUI natively (no JS round-trip).
+    // Pseudo-selector styles, applied by GPUI natively (no JS round-trip).
     // Uses Box to avoid infinite-size struct (StyleDesc contains StyleDesc).
-    pub hover: Option<Box<StyleDesc>>,
-    pub active: Option<Box<StyleDesc>>,
+    //
+    // These two named fields are here for history. A CSS `style` attribute
+    // holds declarations, not selectors, so the style prop gets no further
+    // condition. A class resolver sends every other condition through
+    // `selectors` below.
+    hover: Option<Box<StyleDesc>> = "hover",
+    active: Option<Box<StyleDesc>> = "active",
+
+    // Conditioned blocks from a class resolver. The `style` prop type does
+    // not carry this field, because a style attribute cannot hold a selector.
+    selectors: Option<Vec<SelectorRule>> = "selectors",
 }
 
 pub use crate::color::{parse_color, parse_color_hex};
 
-impl BackgroundValue {
-    fn resolve(&self) -> Option<gpui::Background> {
-        match self {
-            Self::Color(value) => crate::color::parse_color_rgba(value).map(Into::into),
-            Self::Gradient(gradient) => {
-                let GradientValue::LinearGradient {
-                    angle,
-                    stops,
-                    color_space,
-                } = gradient.as_ref();
-                let angle = *angle as f32;
-                let [from, to] = stops;
-                let from_position = from.position as f32;
-                let to_position = to.position as f32;
-                if !angle.is_finite()
-                    || !(0.0..=1.0).contains(&from_position)
-                    || !(0.0..=1.0).contains(&to_position)
-                {
-                    return None;
-                }
-
-                let color_space = match color_space.as_deref() {
-                    None | Some("srgb") => gpui::ColorSpace::Srgb,
-                    Some("oklab") => gpui::ColorSpace::Oklab,
-                    _ => return None,
-                };
-                Some(
-                    gpui::linear_gradient(
-                        angle,
-                        gpui::linear_color_stop(
-                            crate::color::parse_color_rgba(&from.color)?,
-                            from_position,
-                        ),
-                        gpui::linear_color_stop(
-                            crate::color::parse_color_rgba(&to.color)?,
-                            to_position,
-                        ),
-                    )
-                    .color_space(color_space),
-                )
-            }
-        }
-    }
+/// One conditioned block from a class resolver.
+///
+/// `on` is a canonical selector spelling, and `Selector::parse` names the
+/// closed set. An entry with a spelling outside it warns once and drops.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SelectorRule {
+    pub on: String,
+    pub style: Box<StyleDesc>,
 }
 
 impl StyleDesc {
-    pub(crate) fn has_background(&self) -> bool {
-        self.background_color.is_some() || self.background.is_some()
-    }
-
-    pub(crate) fn resolved_background(&self) -> Option<gpui::Background> {
-        if let Some(value) = self.background_color.as_deref() {
-            return crate::color::parse_color_rgba(value).map(Into::into);
-        }
-        self.background.as_ref()?.resolve()
+    /// The state blocks this style declares, in specification order.
+    ///
+    /// This is the one place that knows the `style` prop spells its states as
+    /// named fields. The class channel sends states as parsed selectors in
+    /// `selectors`, and those follow the named fields here.
+    pub(crate) fn states(
+        &self,
+    ) -> impl Iterator<Item = (crate::style::resolve::State, &StyleDesc)> {
+        use crate::style::resolve::{Selector, State};
+        [
+            (State::Hover, self.hover.as_deref()),
+            (State::Active, self.active.as_deref()),
+        ]
+        .into_iter()
+        .filter_map(|(state, declared)| declared.map(|declared| (state, declared)))
+        .chain(self.selectors.iter().flatten().filter_map(|rule| {
+            match Selector::parse(&rule.on) {
+                Some(Selector::State(state)) => Some((state, rule.style.as_ref())),
+                _ => None,
+            }
+        }))
     }
 }
 
@@ -312,13 +690,15 @@ pub fn should_occlude(style: &StyleDesc) -> bool {
     if matches!(style.position.as_deref(), Some("absolute") | Some("fixed")) {
         return true;
     }
-    if !style.has_background() {
+    let Some(painted) = style
+        .background_color
+        .as_deref()
+        .map(text_paints)
+        .or_else(|| style.background.as_ref().map(BackgroundValue::paints))
+    else {
         return false;
-    }
-    match style.resolved_background() {
-        Some(background) => !background.is_transparent(),
-        None => true,
-    }
+    };
+    painted
 }
 
 /// Map a CSS `cursor` keyword onto a GPUI cursor. Unknown keywords return
@@ -379,19 +759,124 @@ mod tests {
     }
 
     #[test]
-    fn resolves_a_two_stop_linear_gradient() {
+    fn selectors_read_from_json() {
+        let json = r#"{ "selectors": [{ "on": ":first-child", "style": { "color": "red" } }] }"#;
+        let style: StyleDesc = serde_json::from_str(json).unwrap();
+        let rules = style.selectors.unwrap();
+        assert_eq!(rules[0].on, ":first-child");
+        assert_eq!(rules[0].style.color.as_deref(), Some("red"));
+    }
+
+    #[test]
+    fn every_name_the_writer_uses_is_a_name_the_reader_knows() {
+        let written = serde_json::to_value(StyleDesc::default()).unwrap();
+        let written = written.as_object().unwrap();
+        for name in written.keys() {
+            assert!(FIELDS.contains(&name.as_str()), "`{name}` is written but never read");
+        }
+        assert_eq!(written.len(), FIELDS.len());
+    }
+
+    #[test]
+    fn a_style_reads_the_same_shapes_it_always_did() {
+        let style: StyleDesc = serde_json::from_str(
+            r#"{
+                "paddingTop": 8,
+                "gap": "var(--gap)",
+                "width": "100%",
+                "height": "auto",
+                "fontWeight": "bold",
+                "lineClamp": null,
+                "hover": { "color": "red" }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(style.padding_top, Some(Numeric::Number(8.0)));
+        assert_eq!(style.gap, Some(Numeric::Text("var(--gap)".to_owned())));
+        assert_eq!(style.width, Some(Numeric::Text("100%".to_owned())));
+        assert_eq!(style.height, Some(Numeric::Text("auto".to_owned())));
+        assert_eq!(style.font_weight, Some(FontWeightValue::Str("bold".to_owned())));
+        assert_eq!(style.line_clamp, None);
+        assert_eq!(style.hover.unwrap().color.as_deref(), Some("red"));
+    }
+
+    #[test]
+    fn a_custom_property_is_kept_and_any_other_unknown_key_is_dropped() {
+        let style: StyleDesc = serde_json::from_str(
+            r#"{ "--pad": "8px", "--depth": 3, "paddingg": 8, "somethingNew": true }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            declared_variables(&style),
+            vec![
+                ("--depth".to_owned(), "3".to_owned()),
+                ("--pad".to_owned(), "8px".to_owned()),
+            ]
+        );
+        assert_eq!(style.custom.len(), 2);
+    }
+
+    #[test]
+    fn a_repeated_key_takes_the_later_value() {
+        let style: StyleDesc =
+            serde_json::from_str(r#"{ "gap": 4, "gap": 8, "--pad": 1, "--pad": 2 }"#).unwrap();
+        assert_eq!(style.gap, Some(Numeric::Number(8.0)));
+        assert_eq!(declared_variables(&style), vec![("--pad".to_owned(), "2".to_owned())]);
+    }
+
+    #[test]
+    fn the_boxed_read_and_the_ordinary_read_agree() {
+        let json = r#"{ "gap": 8, "color": "red", "--pad": "4px", "hover": { "gap": 2 }, "nope": 1 }"#;
+        assert_eq!(
+            *StyleDesc::from_json_boxed(json).unwrap(),
+            serde_json::from_str::<StyleDesc>(json).unwrap()
+        );
+    }
+
+    #[test]
+    fn the_boxed_read_rejects_trailing_text() {
+        assert!(StyleDesc::from_json_boxed(r#"{ "gap": 8 } and then some"#).is_err());
+    }
+
+    #[test]
+    fn a_style_survives_a_round_trip_through_json() {
+        let style = StyleDesc {
+            gap: Some(Numeric::Text("calc(1rem + 2px)".to_owned())),
+            font_size: Some(Numeric::Number(14.0)),
+            max_width: Some(Numeric::Number(320.0)),
+            user_select: Some("none".to_owned()),
+            custom: [("--pad".to_owned(), serde_json::json!("8px"))].into_iter().collect(),
+            hover: Some(Box::new(StyleDesc {
+                background_color: Some("#fff".to_owned()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let text = serde_json::to_string(&style).unwrap();
+        assert_eq!(serde_json::from_str::<StyleDesc>(&text).unwrap(), style);
+    }
+
+    #[test]
+    fn the_object_form_of_a_gradient_reads_its_stops_and_colour_space() {
         let style: StyleDesc = serde_json::from_str(
             r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"#ff0000","position":0},{"color":"#0000ff","position":1}],"colorSpace":"oklab"}}"##,
         )
         .unwrap();
-        let expected = gpui::linear_gradient(
-            90.0,
-            gpui::linear_color_stop(crate::color::parse_color_rgba("#ff0000").unwrap(), 0.0),
-            gpui::linear_color_stop(crate::color::parse_color_rgba("#0000ff").unwrap(), 1.0),
-        )
-        .color_space(gpui::ColorSpace::Oklab);
+        let Some(BackgroundValue::Gradient(gradient)) = style.background else {
+            panic!("expected the object form to read as a gradient");
+        };
+        assert_eq!(gradient.angle, 90.0);
+        assert_eq!(gradient.stops.len(), 2);
+        assert_eq!(gradient.stops[1].color, "#0000ff");
+        assert_eq!(gradient.color_space.as_deref(), Some("oklab"));
+    }
 
-        assert_eq!(style.resolved_background(), Some(expected));
+    #[test]
+    fn an_object_of_another_type_is_not_a_background() {
+        let result = serde_json::from_str::<StyleDesc>(
+            r##"{"background":{"type":"radial-gradient","angle":0,"stops":[]}}"##,
+        );
+        assert!(result.is_err());
     }
 
     #[test]
@@ -400,8 +885,15 @@ mod tests {
             r##"{"background":{"type":"linear-gradient","angle":0,"stops":[{"color":"transparent","position":0},{"color":"#00000000","position":1}]}}"##,
         )
         .unwrap();
-
         assert!(!should_occlude(&style));
+
+        let text: StyleDesc =
+            serde_json::from_str(r##"{"background":"linear-gradient(transparent, #00000000)"}"##)
+                .unwrap();
+        assert!(!should_occlude(&text));
+        let painted: StyleDesc =
+            serde_json::from_str(r##"{"background":"linear-gradient(transparent, red)"}"##).unwrap();
+        assert!(should_occlude(&painted));
     }
 
     #[test]
@@ -427,4 +919,32 @@ mod tests {
         assert_eq!(parse_cursor("zoom-in"), None);
         assert_eq!(parse_cursor("POINTER"), None);
     }
+}
+
+/// The custom properties an element declares, as declared text.
+///
+/// A number becomes a plain string, so `{ "--pad": 8 }` and `{ "--pad": "8" }`
+/// mean the same thing. That matches the `style` prop, where a bare number is
+/// already how a length is written.
+pub fn declared_variables(style: &StyleDesc) -> Vec<(String, String)> {
+    let mut declared: Vec<(String, String)> = style
+        .custom
+        .iter()
+        .filter(|(name, _)| name.starts_with("--"))
+        .filter_map(|(name, value)| {
+            let text = match value {
+                serde_json::Value::String(text) => text.clone(),
+                serde_json::Value::Number(number) => number.to_string(),
+                // `undefined` reaches Rust as null. CSS has no way to write an
+                // undeclared value, so treat it as absent.
+                _ => return None,
+            };
+            Some((name.clone(), text))
+        })
+        .collect();
+    // A HashMap has no order, and the cascade compares these to decide whether
+    // a subtree re-resolves. Without a sort the same declarations could compare
+    // unequal from one frame to the next.
+    declared.sort_by(|a, b| a.0.cmp(&b.0));
+    declared
 }

@@ -18,7 +18,7 @@ import type {
   DebugFrameOverlayStats,
   HighlightMatch,
   NativeRenderer,
-  WindowKeyEventHandlers,
+  RootOptions,
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
@@ -69,6 +69,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
+  scrollIntoView(elementId: number, block?: string, inline?: string): void
   getScrollOffset(elementId: number): number[] | null
   getListScrollTop(elementId: number): number[] | null
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
@@ -76,13 +77,17 @@ interface NativeTestRendererApi extends NativeRenderer {
   cycleDebugFrameOverlay(): string
   resetDebugFrameOverlayStats(): void
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  styleResolutions(): number
+  resetStyleResolutions(): void
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
+  readClipboardText(): string | null
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
+  pixelAt(x: number, y: number): number[]
 }
 
 interface NativeTestRendererConstructor {
@@ -95,7 +100,7 @@ export interface TestRendererOptions {
   height?: number
 }
 
-export type TestWindowOptions = TestRendererOptions & WindowKeyEventHandlers
+export type TestWindowOptions = TestRendererOptions & RootOptions
 
 // The class is always exported. hasTestGpuixRenderer is the real GPU impl.
 //
@@ -488,6 +493,14 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
+  /** Scroll ancestors until the element is in view, as web scrollIntoView. */
+  scrollIntoView(elementId: number, block?: string, inline?: string): void {
+    this.native.flush()
+    this.native.scrollIntoView(elementId, block, inline)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
   /** Get the current scroll offset [x, y] or null if element is not scrollable. */
   getScrollOffset(elementId: number): [number, number] | null {
     this.native.flush()
@@ -523,6 +536,11 @@ export class TestRenderer implements NativeRenderer {
   /** The current selection joined in document order, or null. */
   getSelectedText(): string | null {
     return this.native.getSelectedText()
+  }
+
+  /// The text on the clipboard after a copy, or null when the clipboard has no text.
+  readClipboardText(): string | null {
+    return this.native.readClipboardText()
   }
 
   /** Every string painted in the last frame, in paint order.
@@ -573,10 +591,27 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getDebugFrameOverlayStats()
   }
 
+  /** How many styles the renderer resolved since the last reset.
+   *  A frame that changes nothing must not raise this. */
+  styleResolutions(): number {
+    return this.native.styleResolutions()
+  }
+
+  resetStyleResolutions(): void {
+    this.native.resetStyleResolutions()
+  }
+
   /** Capture the current Metal or DirectX frame and save it as a PNG. */
   captureScreenshot(path: string): void {
     this.native.flush()
     this.native.captureScreenshot(path)
+  }
+
+  /** The painted colour at a logical pixel, as `[r, g, b, a]` from 0 to 255. */
+  pixelAt(x: number, y: number): [number, number, number, number] {
+    this.native.flush()
+    const [r, g, b, a] = this.native.pixelAt(x, y)
+    return [r, g, b, a]
   }
 
   /** Whether the native GPUI test renderer is available. Always true. */
@@ -606,10 +641,7 @@ export interface TestRoot {
  */
 export function createTestRoot(options: TestWindowOptions = {}): TestRoot {
   const renderer = new TestRenderer(options)
-  const root = createRoot(renderer, {
-    onKeyDown: options.onKeyDown,
-    onKeyUp: options.onKeyUp,
-  })
+  const root = createRoot(renderer, options)
 
   const render = (node: ReactNode): void => {
     flushSync(() => root.render(node))

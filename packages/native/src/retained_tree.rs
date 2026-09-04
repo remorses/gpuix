@@ -6,6 +6,7 @@
 ///
 /// All IDs are u64 — JS generates them with an incrementing counter,
 /// passes them as numbers across napi (no string allocation).
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -49,6 +50,22 @@ pub struct RetainedElement {
     pub search_revision: u64,
     /// Stable locator id from the React `testId` prop.
     pub test_id: Option<String>,
+    /// The style of this element after resolution, kept until the style changes.
+    ///
+    /// GPUI rebuilds its element tree every frame, so without this the renderer
+    /// resolves the same unchanged style again on every frame. The render walk
+    /// holds a shared borrow of the tree, so the cell fills the cache in place.
+    pub(crate) resolved: RefCell<Option<Arc<crate::style::resolve::Resolved>>>,
+    /// The cascade this element hands its children, with the cascade it came
+    /// from.
+    ///
+    /// `Inherited::descend` builds a fresh `Arc` whenever the element declares
+    /// something inheritable, and the render walk calls it on every frame. Two
+    /// equal cascades built on two frames are different pointers, and the
+    /// resolved-style cache compares pointers, so without this the whole
+    /// subtree below a declaration re-resolves on every frame. Keeping the
+    /// result turns that back into one pointer test.
+    pub(crate) descended: RefCell<Option<(crate::inheritance::Inherited, crate::inheritance::Inherited)>>,
 }
 
 impl RetainedElement {
@@ -66,7 +83,46 @@ impl RetainedElement {
             search_revision: revision,
             test_id: None,
             custom_props: HashMap::new(),
+            resolved: RefCell::new(None),
+            descended: RefCell::new(None),
         }
+    }
+
+    /// The resolved style for this element, computed on first use and kept
+    /// until `set_style` replaces the style.
+    ///
+    /// Returns `None` when the element has no style of its own. Callers that
+    /// build a style for one frame, such as motion, must not use this.
+    pub(crate) fn resolved_style(
+        &self,
+        cascade: &crate::inheritance::Inherited,
+    ) -> Option<Arc<crate::style::resolve::Resolved>> {
+        let style = self.style.as_ref()?;
+        let mut slot = self.resolved.borrow_mut();
+        if let Some(cached) = slot.as_ref() {
+            // A resolution that read nothing inherited holds under every
+            // cascade, so most elements never fail this test.
+            if cached.valid_under(cascade) {
+                return Some(cached.clone());
+            }
+        }
+        let built = Arc::new(crate::style::resolve::Resolved::build(style, cascade));
+        *slot = Some(built.clone());
+        Some(built)
+    }
+
+    /// The cascade for this element's children, reusing the last one when the
+    /// parent cascade has not changed.
+    pub(crate) fn descend(&self, parent: &crate::inheritance::Inherited) -> crate::inheritance::Inherited {
+        let mut slot = self.descended.borrow_mut();
+        if let Some((from, child)) = slot.as_ref() {
+            if from.same(parent) {
+                return child.clone();
+            }
+        }
+        let child = parent.descend(self.style.as_deref());
+        *slot = Some((parent.clone(), child.clone()));
+        child
     }
 }
 
@@ -327,14 +383,28 @@ impl RetainedTree {
     /// are two `Arc`s holding the same style. Only a pointer miss pays for the
     /// ~80-field compare, which is what decides whether this repaints.
     pub fn set_style(&mut self, id: u64, style: Arc<StyleDesc>) {
+        // An element that declares nothing and an element with no `style` prop
+        // are the same element, so both hold `None`. React skips the call at
+        // mount for an empty style but sends `{}` on every update, and without
+        // this the first update on an unstyled element would read as a change
+        // and resolve a style with nothing in it.
+        //
+        // The empty style is built once. Building one per call cost more than
+        // reading the style did.
+        static EMPTY: std::sync::LazyLock<StyleDesc> = std::sync::LazyLock::new(StyleDesc::default);
+        let style = (*style != *EMPTY).then_some(style);
         let mut changed = false;
         if let Some(element) = self.elements.get_mut(&id) {
-            let same = element
-                .style
-                .as_ref()
-                .is_some_and(|current| Arc::ptr_eq(current, &style) || **current == *style);
+            let same = match (&element.style, &style) {
+                (None, None) => true,
+                (Some(current), Some(next)) => Arc::ptr_eq(current, next) || **current == **next,
+                _ => false,
+            };
             if !same {
-                element.style = Some(style);
+                element.style = style;
+                // Both caches belong to the old style. Drop them.
+                *element.resolved.get_mut() = None;
+                *element.descended.get_mut() = None;
                 changed = true;
             }
         }

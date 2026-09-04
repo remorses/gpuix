@@ -403,9 +403,7 @@ impl CustomElement for TextEditorElement {
             .w_full()
             .track_focus(&focus_handle)
             .child(state);
-        if let Some(style) = ctx.style {
-            editor = crate::renderer::apply_interactive_styles(editor, style);
-        }
+        editor = ctx.styled_interactive(editor);
         if ctx
             .style
             .and_then(|style| style.position.as_deref())
@@ -421,7 +419,7 @@ impl CustomElement for TextEditorElement {
         // `Some(false)` also claims the same box as a non-selectable
         // selection-start region: a drag inside an editor must move the caret,
         // not start a document selection.
-        editor = editor.child(crate::automation::bounds_tracker(ctx.id, Some(false)));
+        editor = editor.child(crate::automation::bounds_tracker(ctx.id, Some(false), None));
         if ctx.events.contains("click") {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;

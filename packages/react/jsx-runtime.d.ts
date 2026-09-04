@@ -1,10 +1,6 @@
-/// GPUIX JSX runtime types — maps intrinsic elements to GPUIX Props
-/// instead of DOM types. Activated via "jsxImportSource": "@gpuix/react".
-///
-/// `key` is declared on `Props`, not on `IntrinsicAttributes` below.
-/// TypeScript 5 ignores `IntrinsicAttributes` for intrinsic elements.
+/// GPUIX JSX runtime types. Maps intrinsic elements to GPUIX Props instead of
+/// DOM types. Turned on with "jsxImportSource": "@gpuix/react".
 
-import type * as React from "react"
 import type {
   AnchoredProps,
   CodeProps,
@@ -16,7 +12,7 @@ import type {
   SvgProps,
   TextareaProps,
   VirtualListProps,
-} from "./dist/types/host"
+} from "./dist/types/host.js"
 
 export { jsx, jsxs, Fragment } from "react/jsx-runtime"
 
@@ -29,18 +25,25 @@ export namespace JSX {
   type IntrinsicAttributes = React.JSX.IntrinsicAttributes
   type IntrinsicClassAttributes<T> = React.JSX.IntrinsicClassAttributes<T>
 
+  /// The props one built-in tag takes.
+  ///
+  /// TypeScript reads `IntrinsicAttributes` for a component tag but not for a
+  /// built-in one, so `key` has to sit in the props of each tag. React does the
+  /// same for every DOM tag through `ClassAttributes`.
+  type Tag<P> = P & IntrinsicAttributes
+
   interface IntrinsicElements {
-    div: Props
-    text: Props
-    img: ImgProps
-    svg: SvgProps
-    canvas: Props
-    input: InputProps
-    textarea: TextareaProps
-    anchored: AnchoredProps
-    code: CodeProps
-    diff: DiffProps
-    markdown: MarkdownProps
-    "virtual-list": VirtualListProps
+    div: Tag<Props>
+    text: Tag<Props>
+    img: Tag<ImgProps>
+    svg: Tag<SvgProps>
+    canvas: Tag<Props>
+    input: Tag<InputProps>
+    textarea: Tag<TextareaProps>
+    anchored: Tag<AnchoredProps>
+    code: Tag<CodeProps>
+    diff: Tag<DiffProps>
+    markdown: Tag<MarkdownProps>
+    "virtual-list": Tag<VirtualListProps>
   }
 }

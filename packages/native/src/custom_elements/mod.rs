@@ -45,6 +45,9 @@ pub struct CustomRenderContext<'a> {
     pub selectable: bool,
     /// Inherited selection wash colour.
     pub selection_wash: gpui::Hsla,
+    /// Everything this element inherits, so `var()` and `currentColor` in its
+    /// style resolve the same way they do on a plain div.
+    pub cascade: crate::inheritance::Inherited,
     /// `highlight` declared by the nearest ancestor, unresolved.
     ///
     /// A native element generates its text during `render()`, so the retained
@@ -55,6 +58,19 @@ pub struct CustomRenderContext<'a> {
 }
 
 impl CustomRenderContext<'_> {
+    /// Apply this element's `style` prop with its `hover` and `active`
+    /// refinements. gpui keeps that state behind the element id, so the caller
+    /// must have set `.id(..)`.
+    pub fn styled_interactive<E>(&self, el: E) -> E
+    where
+        E: gpui::Styled + gpui::StatefulInteractiveElement,
+    {
+        let Some(style) = self.style else {
+            return el;
+        };
+        crate::renderer::apply_interactive_styles(el, style, &self.cascade.scope())
+    }
+
     /// Build a selectable text run for this element. `sub` distinguishes
     /// multiple runs painted by the same element, such as code-block lines, and
     /// must be stable across frames or the selection flickers.
@@ -111,9 +127,7 @@ pub(crate) fn custom_surface(
 ) -> gpui::Stateful<gpui::Div> {
     use gpui::prelude::*;
 
-    if let Some(style) = ctx.style {
-        el = crate::renderer::apply_interactive_styles(el, style);
-    }
+    el = ctx.styled_interactive(el);
     // `bounds_tracker` is `absolute().size_full()`, so it needs a positioned
     // parent to measure.
     if ctx
@@ -123,7 +137,7 @@ pub(crate) fn custom_surface(
     {
         el = el.relative();
     }
-    el = el.child(crate::automation::bounds_tracker(ctx.id, None));
+    el = el.child(crate::automation::bounds_tracker(ctx.id, None, None));
     wire_standard_events(el, ctx)
 }
 

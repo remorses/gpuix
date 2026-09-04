@@ -278,7 +278,7 @@ impl CustomElement for DiffElement {
         let wants_show_more = ctx.events.contains("showMore");
         let radius = ctx
             .style
-            .and_then(|style| style.border_radius)
+            .and_then(|style| ctx.cascade.scope().number(&style.border_radius))
             .unwrap_or(0.0) as f32;
         let row_theme = theme.clone();
 

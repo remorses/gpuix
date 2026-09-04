@@ -84,11 +84,26 @@ pub fn all_bounds() -> HashMap<u64, ElementBounds> {
     BOUNDS.with(|cell| cell.borrow().clone())
 }
 
-pub fn bounds_tracker(id: u64, selection_start: Option<bool>) -> impl IntoElement {
+pub fn bounds_tracker(
+    id: u64,
+    selection_start: Option<bool>,
+    scroll: Option<gpui::ScrollHandle>,
+) -> impl IntoElement {
     canvas(
         |bounds, _, _| bounds,
         move |bounds, _, _, _| {
-            record_bounds(id, bounds);
+            // A scroll box paints its children moved by its own offset, and
+            // this tracker is one of them. Take the offset back out, so the
+            // recorded rectangle is the box in the window, not the box in
+            // its own content. The selection region stays at the painted
+            // place, because a selection starts from the glyphs on screen.
+            let mut recorded = bounds;
+            if let Some(handle) = &scroll {
+                let offset = handle.offset();
+                recorded.origin.x -= offset.x;
+                recorded.origin.y -= offset.y;
+            }
+            record_bounds(id, recorded);
             if let Some(selectable) = selection_start {
                 crate::text::record_start_region(bounds, selectable);
             }

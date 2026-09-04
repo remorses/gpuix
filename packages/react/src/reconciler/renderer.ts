@@ -2,11 +2,7 @@ import type { ReactNode } from "react"
 import { GpuixRenderer } from "@gpuix/native"
 import type { EventPayload, WindowOptions } from "@gpuix/native"
 import { createRoot, flushSync, type Root } from "./reconciler.js"
-import type {
-  DebugFrameOverlayMode,
-  NativeRenderer,
-  WindowKeyEventHandlers,
-} from "../types/host.js"
+import type { DebugFrameOverlayMode, NativeRenderer, RootOptions } from "../types/host.js"
 import { handleGpuixEvent } from "./event-registry.js"
 import {
   App as AutomationApp,
@@ -178,7 +174,7 @@ function renderSlot(): RenderSlot {
   return created
 }
 
-export interface RenderOptions extends WindowOptions, WindowKeyEventHandlers {
+export interface RenderOptions extends WindowOptions, RootOptions {
   onEvent?: (event: EventPayload) => void
   renderer?: NativeRenderer
   /** GPUI scene overlay. Does not go through React or layout. */
@@ -203,6 +199,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     onKeyUp,
     renderer: injected,
     debugFrameOverlay,
+  resolveClassName,
     ...windowOptions
   } = options
   const slot = renderSlot()
@@ -245,7 +242,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     console.log("[gpuix] remount: unmount previous tree")
     slot.root.unmount()
   }
-  const root = createRoot(host, { onEvent, onKeyDown, onKeyUp })
+  const root = createRoot(host, { onEvent, onKeyDown, onKeyUp, resolveClassName })
   slot.root = root
   flushSync(() => {
     root.render(node)
