@@ -169,6 +169,19 @@ describeNative("native text editors", () => {
     expect(testRoot.renderer.getAllText()).toContain("Value: abc")
   })
 
+  it("copies its own selection with cmd-c, not the document selection", () => {
+    testRoot.render(
+      <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
+        <text style={{ fontSize: 20 }}>hello world</text>
+        <input value="typed" style={{ width: 300, height: 40 }} />
+      </div>
+    )
+    expect(testRoot.renderer.dragSelect(21, 30, 900, 30)).toBe("hello world")
+    const input = testRoot.renderer.findByType("input")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "cmd-a cmd-c")
+    expect(testRoot.renderer.readClipboardText()).toBe("typed")
+  })
+
   it("undoes a contiguous typing run as one edit", () => {
     function TextInput() {
       const [text, setText] = useState("")

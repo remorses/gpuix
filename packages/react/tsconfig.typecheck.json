@@ -1,0 +1,21 @@
+{
+  // `tsc` never sees `src/__tests__`: the build config excludes it, and the
+  // test files there carry type errors that predate this config. `files`
+  // survives `exclude`, so this config adds back the files whose whole purpose
+  // is to be typechecked.
+  //
+  // The `typecheck` script cleans and builds first, because the check needs
+  // `dist` and the build refuses one. `jsx-runtime.d.ts` imports the tag
+  // props from `./dist/types/host.js`. With no `dist` that import resolves
+  // to `any` under `skipLibCheck`, and every `@ts-expect-error` on a
+  // rejected prop fails with TS2578. With a `dist` already present, `tsc`
+  // sees `dist/types/host.d.ts` as an input and fails with TS5055.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "files": [
+    "src/__tests__/style-types.check.ts",
+    "src/__tests__/jsx-types.check.tsx"
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "src/__tests__"]
+}

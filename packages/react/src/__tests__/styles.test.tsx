@@ -1750,6 +1750,414 @@ describeNative("motion", () => {
     `)
   })
 
+  it("paints the animated width, not the declared one", () => {
+    const { render, renderer } = createTestRoot()
+
+    renderer.clockPause()
+    render(
+      <motion.div
+        initial={{ width: 40 }}
+        animate={{ width: 240 }}
+        transition={{ duration: 1 }}
+        style={{ height: 20, backgroundColor: "#ff0000" }}
+      />
+    )
+
+    const id = renderer.findByType("div")[0]!.id
+    const width = () => renderer.getElementBounds(id)?.[2] ?? 0
+
+    const start = width()
+    renderer.clockFastForward(500)
+    const middle = width()
+    renderer.clockFastForward(1000)
+    const end = width()
+    renderer.clockResume()
+
+    expect(start).toBeCloseTo(40, 0)
+    expect(middle).toBeGreaterThan(start)
+    expect(middle).toBeLessThan(240)
+    expect(end).toBeCloseTo(240, 0)
+  })
+
+  it("animates height to the height the content takes", () => {
+    const { render, renderer } = createTestRoot()
+
+    renderer.clockPause()
+    render(
+      <motion.div
+        initial={{ height: 0 }}
+        animate={{ height: "auto" }}
+        transition={{ duration: 1, ease: "linear" }}
+        style={{ width: 200 }}
+      >
+        <div style={{ width: 200, height: 60 }} />
+        <div style={{ width: 200, height: 40 }} />
+      </motion.div>
+    )
+
+    const id = renderer.findByType("div")[0]!.id
+    const height = () => renderer.getElementBounds(id)?.[3] ?? -1
+
+    const start = height()
+    renderer.clockFastForward(500)
+    const middle = height()
+    renderer.clockFastForward(1000)
+    const end = height()
+    renderer.clockResume()
+
+    expect(start).toBeCloseTo(0, 0)
+    // Two children of 60 and 40 stack to 100, and nothing declares that number.
+    expect(end).toBeCloseTo(100, 0)
+    expect(middle).toBeCloseTo(50, 0)
+  })
+
+  it("measures the content at the width the parent gives it", () => {
+    const { render, renderer } = createTestRoot()
+    renderer.clockPause()
+    render(
+      <div style={{ width: 200, display: "flex", flexDirection: "column" }}>
+        <motion.div
+          initial={{ height: 0 }}
+          animate={{ height: "auto" }}
+          transition={{ duration: 1, ease: "linear" }}
+          style={{ display: "flex", flexDirection: "row", flexWrap: "wrap" }}
+        >
+          <div style={{ width: 120, height: 30 }} />
+          <div style={{ width: 120, height: 30 }} />
+        </motion.div>
+      </div>
+    )
+    const id = renderer.findByType("div")[1]!.id
+    renderer.clockFastForward(2000)
+    const end = renderer.getElementBounds(id)?.[3] ?? -1
+    renderer.clockResume()
+    // Nothing declares a width here. The width is the 200 the parent stretches
+    // the box to, and taffy hands that number to the measurement. Two children
+    // of 120 wrap into two rows of 30. Measured at max-content instead they
+    // would sit on one row and the box would stop at 30.
+    expect(end).toBeCloseTo(60, 0)
+  })
+
+  it("follows content that grows while the animation runs", () => {
+    const { render, renderer } = createTestRoot()
+
+    const tree = (rows: number) => (
+      <motion.div
+        initial={{ height: 0 }}
+        animate={{ height: "auto" }}
+        transition={{ duration: 1, ease: "linear" }}
+        style={{ width: 200 }}
+      >
+        {Array.from({ length: rows }, (_, row) => (
+          <div key={row} style={{ width: 200, height: 50 }} />
+        ))}
+      </motion.div>
+    )
+
+    renderer.clockPause()
+    render(tree(2))
+    const id = renderer.findByType("div")[0]!.id
+    const height = () => renderer.getElementBounds(id)?.[3] ?? -1
+
+    renderer.clockFastForward(2000)
+    expect(height()).toBeCloseTo(100, 0)
+
+    // A third row lands after the animation finished. `auto` is measured every
+    // frame, so the box grows with it rather than holding the old number.
+    render(tree(3))
+    expect(height()).toBeCloseTo(150, 0)
+    renderer.clockResume()
+  })
+
+  /// A box that opens from 0 to `auto` over one second, holding 100 pixels of
+  /// content, on a paused clock.
+  function openingToAuto() {
+    const { render, renderer } = createTestRoot()
+    const tree = (open: boolean) => (
+      <motion.div
+        initial={{ height: 0 }}
+        animate={{ height: open ? "auto" : 0 }}
+        transition={{ duration: 1, ease: "linear" }}
+        style={{ width: 200 }}
+      >
+        <div style={{ width: 200, height: 100 }} />
+      </motion.div>
+    )
+    renderer.clockPause()
+    render(tree(true))
+    const id = renderer.findByType("div")[0]!.id
+    return {
+      open: () => render(tree(true)),
+      close: () => render(tree(false)),
+      after: (ms: number) => renderer.clockFastForward(ms),
+      height: () => renderer.getElementBounds(id)?.[3] ?? -1,
+      done: () => renderer.clockResume(),
+    }
+  }
+
+  it("collapses from the height auto reached", () => {
+    const box = openingToAuto()
+    box.after(2000)
+    expect(box.height()).toBeCloseTo(100, 0)
+
+    // Going back to a length used to lose the height `auto` had, so the box
+    // snapped shut on the first frame of the collapse.
+    box.close()
+    expect(box.height()).toBeCloseTo(100, 0)
+    box.after(500)
+    expect(box.height()).toBeCloseTo(50, 0)
+    box.after(500)
+    expect(box.height()).toBeCloseTo(0, 0)
+    box.done()
+  })
+
+  it("reverses part way open without jumping", () => {
+    const box = openingToAuto()
+    box.after(500)
+    expect(box.height()).toBeCloseTo(50, 0)
+
+    // Half way to `auto` is half the content, and the collapse starts there.
+    box.close()
+    expect(box.height()).toBeCloseTo(50, 0)
+    box.after(500)
+    expect(box.height()).toBeCloseTo(25, 0)
+    box.done()
+  })
+
+  it("paints a linear gradient across the box", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 10 }}>
+        <div style={{ width: 200, height: 40, backgroundImage: "linear-gradient(to right, #ff0000, #0000ff)" }} />
+        <div style={{ width: 200, height: 40, background: "linear-gradient(#ff0000 50%, #0000ff 50%)" }} />
+        <div style={{ width: 200, height: 40, backgroundColor: "#ff0000", backgroundImage: "none" }} />
+      </div>
+    )
+    // Left edge red, right edge blue, middle a mix of both.
+    const [leftR, , leftB] = renderer.pixelAt(12, 30)
+    const [rightR, , rightB] = renderer.pixelAt(208, 30)
+    const [midR, , midB] = renderer.pixelAt(110, 30)
+    expect(leftR).toBeGreaterThan(220)
+    expect(leftB).toBeLessThan(40)
+    expect(rightB).toBeGreaterThan(220)
+    expect(rightR).toBeLessThan(40)
+    expect(midR).toBeGreaterThan(80)
+    expect(midB).toBeGreaterThan(80)
+
+    // Two stops in one place make a hard edge, and the shorthand takes a gradient.
+    const [topR] = renderer.pixelAt(110, 65)
+    const [, , bottomB] = renderer.pixelAt(110, 95)
+    expect(topR).toBeGreaterThan(220)
+    expect(bottomB).toBeGreaterThan(220)
+
+    // `none` leaves the colour to paint.
+    const [plainR, , plainB] = renderer.pixelAt(110, 130)
+    expect(plainR).toBeGreaterThan(220)
+    expect(plainB).toBeLessThan(40)
+  })
+
+  it("eases the mix between two gradient stops", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 10 }}>
+        <div style={{ width: 200, height: 40, backgroundImage: "linear-gradient(to right, #ff0000, #0000ff)" }} />
+        <div style={{ width: 200, height: 40, backgroundImage: "linear-gradient(to right, #ff0000, ease-in, #0000ff)" }} />
+        <div style={{ width: 200, height: 40, backgroundImage: "linear-gradient(to right, #ff0000, cubic-bezier(0, 1, 0, 1), #0000ff)" }} />
+      </div>
+    )
+    // A quarter of the way along, ease-in is still mostly red, while the
+    // straight mix has given up a quarter of it. cubic-bezier(0, 1, 0, 1)
+    // jumps toward blue at once.
+    const [straightR] = renderer.pixelAt(60, 30)
+    const [easedR] = renderer.pixelAt(60, 80)
+    const [jumpedR] = renderer.pixelAt(60, 130)
+    expect(straightR).toBeGreaterThan(160)
+    expect(straightR).toBeLessThan(220)
+    expect(easedR).toBeGreaterThan(straightR + 20)
+    expect(jumpedR).toBeLessThan(straightR - 40)
+    // Both ends still land on the stops.
+    expect(renderer.pixelAt(12, 80)[0]).toBeGreaterThan(220)
+    expect(renderer.pixelAt(208, 80)[2]).toBeGreaterThan(220)
+  })
+
+  it("blurs the picture of an element", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "row", gap: 40, padding: 40, backgroundColor: "#000000" }}>
+        <div style={{ width: 100, height: 100, backgroundColor: "#ff0000" }} />
+        <div style={{ width: 100, height: 100, backgroundColor: "#ff0000", filter: "blur(8px)" }} />
+      </div>
+    )
+    // The sharp box ends at x = 140. The blurred one starts at x = 180: its
+    // edge is half red and it bleeds red past the box, while its middle
+    // stays fully red.
+    expect(renderer.pixelAt(139, 90)[0]).toBeGreaterThan(240)
+    expect(renderer.pixelAt(146, 90)[0]).toBeLessThan(15)
+    const [edgeR] = renderer.pixelAt(180, 90)
+    expect(edgeR).toBeGreaterThan(80)
+    expect(edgeR).toBeLessThan(180)
+    expect(renderer.pixelAt(172, 90)[0]).toBeGreaterThan(15)
+    expect(renderer.pixelAt(230, 90)[0]).toBeGreaterThan(240)
+  })
+
+  it("runs the picture of an element through the filter functions", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "row", gap: 10, padding: 10 }}>
+        <div style={{ width: 60, height: 60, backgroundColor: "#ff0000", filter: "grayscale(1)" }} />
+        <div style={{ width: 60, height: 60, backgroundColor: "#ffffff", filter: "invert(1)" }} />
+        <div style={{ width: 60, height: 60, backgroundColor: "#ff0000", filter: "hue-rotate(120deg)" }} />
+      </div>
+    )
+    const [gr, gg, gb] = renderer.pixelAt(40, 40)
+    expect(Math.abs(gr - gg)).toBeLessThan(6)
+    expect(Math.abs(gg - gb)).toBeLessThan(6)
+    expect(renderer.pixelAt(110, 40)[0]).toBeLessThan(15)
+    const [hr, hg] = renderer.pixelAt(180, 40)
+    expect(hg).toBeGreaterThan(hr + 100)
+  })
+
+  it("masks an element with a gradient", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ padding: 10, backgroundColor: "#000000" }}>
+        <div style={{ width: 200, height: 40, backgroundColor: "#ff0000", maskImage: "linear-gradient(to right, black, transparent)" }} />
+      </div>
+    )
+    expect(renderer.pixelAt(12, 30)[0]).toBeGreaterThan(240)
+    const [midR] = renderer.pixelAt(110, 30)
+    expect(midR).toBeGreaterThan(90)
+    expect(midR).toBeLessThan(170)
+    expect(renderer.pixelAt(208, 30)[0]).toBeLessThan(20)
+  })
+
+  it("blends an element with what is under it", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "row", gap: 10, padding: 10 }}>
+        <div style={{ width: 60, height: 60, backgroundColor: "#00ffff" }}>
+          <div style={{ width: 60, height: 60, backgroundColor: "#ffff00", mixBlendMode: "multiply" }} />
+        </div>
+        <div style={{ width: 60, height: 60, backgroundColor: "#00ffff" }}>
+          <div style={{ width: 60, height: 60, backgroundColor: "#ffff00" }} />
+        </div>
+        <div style={{ width: 60, height: 60, backgroundColor: "#00ffff", backgroundImage: "linear-gradient(#ffff00, #ffff00)", backgroundBlendMode: "multiply" }} />
+      </div>
+    )
+    // Yellow times cyan is green. Without the mode, yellow covers cyan.
+    const [r, g, b] = renderer.pixelAt(40, 40)
+    expect(r).toBeLessThan(15)
+    expect(g).toBeGreaterThan(240)
+    expect(b).toBeLessThan(15)
+    const [plainR, plainG] = renderer.pixelAt(110, 40)
+    expect(plainR).toBeGreaterThan(240)
+    expect(plainG).toBeGreaterThan(240)
+    const [bgR, bgG, bgB] = renderer.pixelAt(180, 40)
+    expect(bgR).toBeLessThan(15)
+    expect(bgG).toBeGreaterThan(240)
+    expect(bgB).toBeLessThan(15)
+  })
+
+  it("paints the background image over the background colour", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ padding: 10 }}>
+        <div style={{ width: 200, height: 40, backgroundColor: "#0000ff", backgroundImage: "linear-gradient(to right, #ff0000, transparent)" }} />
+      </div>
+    )
+    // Red at the left, and the blue shows through where the gradient clears.
+    expect(renderer.pixelAt(12, 30)[0]).toBeGreaterThan(240)
+    expect(renderer.pixelAt(208, 30)[2]).toBeGreaterThan(240)
+  })
+
+  it("blurs what is under an element", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ position: "relative", width: 300, height: 200, backgroundColor: "#000000" }}>
+        <div style={{ position: "absolute", left: 100, top: 0, width: 100, height: 200, backgroundColor: "#ff0000" }} />
+        <div style={{ position: "absolute", left: 0, top: 100, width: 300, height: 100, backdropFilter: "blur(12px)" }} />
+      </div>
+    )
+    // Above the glass the red edge at x = 100 is sharp. Under it the edge
+    // spreads over the black on both sides.
+    expect(renderer.pixelAt(96, 50)[0]).toBeLessThan(15)
+    expect(renderer.pixelAt(104, 50)[0]).toBeGreaterThan(240)
+    expect(renderer.pixelAt(92, 150)[0]).toBeGreaterThan(20)
+    const [underEdgeR] = renderer.pixelAt(100, 150)
+    expect(underEdgeR).toBeGreaterThan(70)
+    expect(underEdgeR).toBeLessThan(190)
+    expect(renderer.pixelAt(150, 150)[0]).toBeGreaterThan(240)
+  })
+
+  it("cuts corners to the declared shape", () => {
+    const { render, renderer } = createTestRoot()
+    const box = { width: 100, height: 100, backgroundColor: "#ff0000" }
+    render(
+      <div style={{ display: "flex", flexDirection: "row", gap: 10, padding: 10 }}>
+        <div style={{ ...box, borderRadius: 40 }} />
+        <div style={{ ...box, borderRadius: 40, cornerShape: "bevel" }} />
+        <div style={{ ...box, borderRadius: 40, cornerShape: "square" }} />
+        <div style={{ ...box, corner: "40px notch" }} />
+        <div style={{ ...box, corner: "40px scoop bevel", cornerTopLeftShape: "oval" }} />
+      </div>
+    )
+    // Boxes sit at x = 10, 120, 230, 340, 450. The window is opaque, so the
+    // colour tells the fill from the background, not the alpha.
+    const red = (x: number, y: number) => {
+      const [r, g, b] = renderer.pixelAt(x, y)
+      return r > 200 && g < 60 && b < 60
+    }
+    // (8, 8) from the corner: outside a 40px circle, a bevel, a scoop and a
+    // notch, inside a square.
+    expect(red(18, 18)).toBe(false)
+    expect(red(128, 18)).toBe(false)
+    expect(red(238, 18)).toBe(true)
+    expect(red(348, 18)).toBe(false)
+    expect(red(458, 18)).toBe(false)
+    // (14, 14): inside the circle, still cut by the bevel line x + y = 40.
+    expect(red(24, 24)).toBe(true)
+    expect(red(134, 24)).toBe(false)
+    // (35, 35): the notch removes the whole 40px square.
+    expect(red(375, 45)).toBe(false)
+    // (20, 20): 28px from the corner, inside the scoop's 40px cut-out. The
+    // invalid `oval` longhand drops itself, so the shorthand's scoop stays.
+    expect(red(470, 30)).toBe(false)
+    // The centre of every box is filled.
+    for (const left of [10, 120, 230, 340, 450]) expect(red(left + 50, 60)).toBe(true)
+  })
+
+  it("bends toward content that grows while it opens", () => {
+    const { render, renderer } = createTestRoot()
+    const tree = (rows: number) => (
+      <motion.div
+        initial={{ height: 0 }}
+        animate={{ height: "auto" }}
+        transition={{ duration: 1, ease: "linear" }}
+        style={{ width: 200 }}
+      >
+        {Array.from({ length: rows }, (_, index) => (
+          <div key={index} style={{ width: 200, height: 100 }} />
+        ))}
+      </motion.div>
+    )
+    renderer.clockPause()
+    render(tree(1))
+    const id = renderer.findByType("div")[0]!.id
+    const height = () => renderer.getElementBounds(id)?.[3] ?? -1
+
+    renderer.clockFastForward(500)
+    expect(height()).toBeCloseTo(50, 0)
+
+    // A second row doubles the content half way through. The box used to
+    // jump to half of the new content on the next frame.
+    render(tree(2))
+    renderer.clockFastForward(16)
+    expect(height()).toBeLessThan(60)
+    renderer.clockFastForward(484)
+    expect(height()).toBeCloseTo(200, 0)
+    renderer.clockResume()
+  })
+
   it("renders the normal element when an internal motion payload is invalid", () => {
     const { render, renderer } = createTestRoot()
 

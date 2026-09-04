@@ -215,4 +215,34 @@ describe("standard events on native elements", () => {
     renderer.nativeSimulateClick(200, 18)
     expect(onClick).toHaveBeenCalled()
   })
+
+  it("washes the first glyph of a wrapped row", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ width: 100, backgroundColor: "#000000" }}>
+        <text style={{ fontSize: 20, lineHeight: "40px", color: "#ffffff" }}>
+          OOOOO OOOOO
+        </text>
+      </div>
+    )
+
+    // The 100px box wraps the text after the space, so the second word
+    // starts a new visual row at the left edge. Sample a strip through the
+    // middle of that row's first glyph cell before and after the drag. The
+    // wash on a continuation row started one glyph late, so nothing under
+    // the first glyph changed.
+    const strip = () =>
+      Array.from({ length: 12 }, (_, x) => renderer.pixelAt(x + 1, 60))
+    const before = strip()
+    const black = ([r, g, b]: number[]) => r < 30 && g < 30 && b < 30
+
+    const selected = renderer.dragSelect(1, 20, 99, 60)
+    expect(selected).toBe("OOOOO OOOOO")
+
+    const after = strip()
+    const washed = before.some(
+      (pixel, index) => black(pixel) && !black(after[index]!)
+    )
+    expect(washed).toBe(true)
+  })
 })

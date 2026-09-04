@@ -111,11 +111,16 @@ describe("automation stdio", () => {
         closes += 1
       }
     )
-    const pending = backend.call("blur", {})
-    const rejection = expect(pending).rejects.toMatchObject({ code: "Closed" })
+    // Convert the rejection into a value before the assertion. Bun's test
+    // runner stalls on a `rejects` matcher that it gets while the promise
+    // is still pending.
+    const pending = backend.call("blur", {}).then(
+      () => undefined,
+      (error: unknown) => error
+    )
 
     await backend.close()
-    await rejection
+    await expect(pending).resolves.toMatchObject({ code: "Closed" })
     await backend.close()
 
     expect(closes).toBe(1)

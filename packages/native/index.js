@@ -579,3 +579,4 @@ module.exports = nativeBinding
 module.exports.GpuixRenderer = nativeBinding.GpuixRenderer
 module.exports.TestGpuixRenderer = nativeBinding.TestGpuixRenderer
 module.exports.hasTestGpuixRenderer = nativeBinding.hasTestGpuixRenderer
+module.exports.syncEnvVar = nativeBinding.syncEnvVar
