@@ -410,6 +410,13 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
+    GetNativeWindowHandle {
+        response: SyncSender<Option<crate::embedding::NativeWindowHandle>>,
+    },
+    GetElementPaintState {
+        id: u64,
+        response: SyncSender<Option<crate::automation::ElementPaintState>>,
+    },
     FocusElement(u64),
     FocusNext,
     FocusPrevious,
@@ -602,6 +609,20 @@ async fn run_ui_commands(
                     window.on_next_frame(move |_window, _cx| {
                         response.send(crate::automation::get_bounds(id)).ok();
                     });
+                })
+            }
+            UiCommand::GetNativeWindowHandle { response } => {
+                window.update(cx, move |_view, window, _cx| {
+                    response
+                        .send(crate::embedding::native_window_handle(window))
+                        .ok();
+                })
+            }
+            UiCommand::GetElementPaintState { id, response } => {
+                window.update(cx, move |view, _window, _cx| {
+                    response
+                        .send(crate::automation::get_paint_state(id, &view.tree))
+                        .ok();
                 })
             }
             UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
@@ -1810,6 +1831,66 @@ impl GpuixRenderer {
         Ok(self
             .element_bounds(id)?
             .map(|bounds| vec![bounds.x, bounds.y, bounds.width, bounds.height]))
+    }
+
+    /// Borrowed native identifiers in Buffers, or null if GPUI cannot supply
+    /// a supported window/display pair. This does not retain the window.
+    #[napi]
+    pub fn get_native_window_handle(&self) -> Result<Option<crate::embedding::NativeWindowHandle>> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, _cx| {
+            if !Arc::ptr_eq(&view.tree, &self.tree) {
+                return Err(Error::from_reason("Renderer does not own the GPUI window"));
+            }
+            Ok(crate::embedding::native_window_handle(window))
+        })?;
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetNativeWindowHandle { response })?;
+            return recv_ui_response(receiver, "the native window handle query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Ok(None)
+    }
+
+    /// Last-painted geometry, or null when this element had no paint record.
+    /// Does not flush, request a frame, or synchronize native child lifetimes.
+    #[napi]
+    pub fn get_element_paint_state(
+        &self,
+        id: f64,
+    ) -> Result<Option<crate::automation::ElementPaintState>> {
+        let id = to_element_id(id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(|view, _window, _cx| {
+            if !Arc::ptr_eq(&view.tree, &self.tree) {
+                return Err(Error::from_reason("Renderer does not own the GPUI window"));
+            }
+            Ok(crate::automation::get_paint_state(id, &self.tree))
+        })?;
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetElementPaintState { id, response })?;
+            return recv_ui_response(receiver, "the element paint state query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Ok(None)
     }
 
     #[napi]
@@ -3946,7 +4027,7 @@ impl gpui::Render for GpuixView {
                             .ok();
                     },
                 ))
-                .child(crate::automation::bounds_frame_reset())
+                .child(crate::automation::bounds_frame_reset(&self.tree))
                 .child(result)
                 .into_any_element()
         };

@@ -108,6 +108,10 @@ export type {
   EventModifiers,
   WindowOptions,
   WindowSize as NativeWindowSize,
+  NativeWindowHandle,
+  NativeWindowHandleKind,
+  ElementPaintState,
+  PaintBounds,
 } from "@gpuix/native"
 
 export { GpuixRenderer } from "@gpuix/native"

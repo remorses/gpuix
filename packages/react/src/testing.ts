@@ -12,7 +12,7 @@
 import { createRequire } from "node:module"
 
 import type { ReactNode } from "react"
-import type { EventPayload } from "@gpuix/native"
+import type { ElementPaintState, EventPayload, NativeWindowHandle } from "@gpuix/native"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
@@ -60,6 +60,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getAutomationTree(): string
   getRetainedElementCount(): number
   getElementBounds(elementId: number): number[] | null
+  getNativeWindowHandle(): NativeWindowHandle | null
+  getElementPaintState(elementId: number): ElementPaintState | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -453,6 +455,14 @@ export class TestRenderer implements NativeRenderer {
 
   getElementBounds(elementId: number): number[] | null {
     return this.native.getElementBounds(elementId)
+  }
+
+  getNativeWindowHandle(): NativeWindowHandle | null {
+    return this.native.getNativeWindowHandle()
+  }
+
+  getElementPaintState(elementId: number): ElementPaintState | null {
+    return this.native.getElementPaintState(elementId)
   }
 
   clockPause(): number {

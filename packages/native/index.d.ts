@@ -103,6 +103,16 @@ export declare class GpuixRenderer {
   getScrollOffset(elementId: number): Array<number> | null
   getAutomationTree(): string
   getElementBounds(id: number): Array<number> | null
+  /**
+   * Borrowed native identifiers in Buffers, or null if GPUI cannot supply
+   * a supported window/display pair. This does not retain the window.
+   */
+  getNativeWindowHandle(): NativeWindowHandle | null
+  /**
+   * Last-painted geometry, or null when this element had no paint record.
+   * Does not flush, request a frame, or synchronize native child lifetimes.
+   */
+  getElementPaintState(id: number): ElementPaintState | null
   getAllText(): Array<string>
   getPaintedText(): Array<string>
   /**
@@ -328,6 +338,13 @@ export declare class TestGpuixRenderer {
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */
   getElementBounds(id: number): Array<number> | null
+  /**
+   * Borrowed identifiers for GPU-backed offscreen windows, or null on
+   * headless platforms that cannot supply a raw handle.
+   */
+  getNativeWindowHandle(): NativeWindowHandle | null
+  /** Same non-flushing last-paint query as the live renderer. */
+  getElementPaintState(id: number): ElementPaintState | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -358,6 +375,13 @@ export interface EdgeInsets {
   right: number
   bottom: number
   left: number
+}
+
+/** Geometry observed during paint, not a layout or visibility guarantee. */
+export interface ElementPaintState {
+  bounds: PaintBounds
+  clipBounds: PaintBounds
+  scaleFactor: number
 }
 
 export interface EventModifiers {
@@ -492,6 +516,32 @@ export interface HighlightMatch {
 }
 
 export interface HighlightRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * Borrowed native identifiers, encoded in native byte order. No ownership or
+ * lifetime is transferred. See README Native integration snapshots before FFI use.
+ */
+export interface NativeWindowHandle {
+  kind: NativeWindowHandleKind
+  handle: Buffer
+  display?: Buffer
+  screen?: number
+}
+
+export declare const enum NativeWindowHandleKind {
+  AppKit = 'AppKit',
+  Win32 = 'Win32',
+  Xlib = 'Xlib',
+  Xcb = 'Xcb',
+  Wayland = 'Wayland'
+}
+
+export interface PaintBounds {
   x: number
   y: number
   width: number

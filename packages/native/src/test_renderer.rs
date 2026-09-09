@@ -929,6 +929,35 @@ impl TestGpuixRenderer {
             .map(|bounds| vec![bounds.x, bounds.y, bounds.width, bounds.height]))
     }
 
+    /// Borrowed identifiers for GPU-backed offscreen windows, or null on
+    /// headless platforms that cannot supply a raw handle.
+    #[napi]
+    pub fn get_native_window_handle(&self) -> Result<Option<crate::embedding::NativeWindowHandle>> {
+        with_test_state(|cx, window, view| {
+            if !cx.update(|cx| Arc::ptr_eq(&view.read(cx).tree, &self.tree)) {
+                return Err(Error::from_reason(
+                    "Renderer does not own the GPUI test window",
+                ));
+            }
+            cx.update_window(window, |_, window, _| {
+                crate::embedding::native_window_handle(window)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
+    /// Same non-flushing last-paint query as the live renderer.
+    #[napi]
+    pub fn get_element_paint_state(
+        &self,
+        id: f64,
+    ) -> Result<Option<crate::automation::ElementPaintState>> {
+        Ok(crate::automation::get_paint_state(
+            to_element_id(id)?,
+            &self.tree,
+        ))
+    }
+
     #[napi]
     pub fn clock_pause(&self) -> Result<f64> {
         with_test_state(|cx, window, view| {

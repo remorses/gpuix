@@ -9,7 +9,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use gpui::{
@@ -18,15 +18,21 @@ use gpui::{
 };
 use web_time::Instant;
 
-#[derive(Clone, Copy, Debug)]
-pub struct ElementBounds {
+#[cfg_attr(
+    not(all(target_arch = "wasm32", target_os = "unknown")),
+    napi_derive::napi(object)
+)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaintBounds {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
 }
 
-impl ElementBounds {
+pub type ElementBounds = PaintBounds;
+
+impl PaintBounds {
     fn from_gpui(bounds: Bounds<Pixels>) -> Self {
         Self {
             x: f64::from(f32::from(bounds.origin.x)),
@@ -37,8 +43,26 @@ impl ElementBounds {
     }
 }
 
+/// Geometry observed during paint, not a layout or visibility guarantee.
+#[cfg_attr(
+    not(all(target_arch = "wasm32", target_os = "unknown")),
+    napi_derive::napi(object)
+)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElementPaintState {
+    pub bounds: PaintBounds,
+    pub clip_bounds: PaintBounds,
+    pub scale_factor: f64,
+}
+
+#[derive(Default)]
+struct PaintFrame {
+    owner: Weak<Mutex<crate::retained_tree::RetainedTree>>,
+    elements: HashMap<u64, ElementPaintState>,
+}
+
 thread_local! {
-    static BOUNDS: RefCell<HashMap<u64, ElementBounds>> = RefCell::new(HashMap::new());
+    static BOUNDS: RefCell<PaintFrame> = RefCell::new(PaintFrame::default());
 }
 
 /// Zero-size canvas. Keep it ahead of the app subtree under the root.
@@ -47,11 +71,18 @@ thread_local! {
 /// `List::prepaint` speculatively prepaints a row range and can roll the window
 /// back and prepaint a different one, so a prepaint-recorded box can belong to a
 /// row that never reached the screen.
-pub fn bounds_frame_reset() -> impl IntoElement {
+pub fn bounds_frame_reset(
+    tree: &Arc<Mutex<crate::retained_tree::RetainedTree>>,
+) -> impl IntoElement {
+    let owner = Arc::downgrade(tree);
     canvas(
         |_, _, _| (),
         move |_, _, _, _| {
-            BOUNDS.with(|cell| cell.borrow_mut().clear());
+            BOUNDS.with(|cell| {
+                let mut frame = cell.borrow_mut();
+                frame.owner = owner.clone();
+                frame.elements.clear();
+            });
         },
     )
     .absolute()
@@ -66,29 +97,52 @@ pub fn bounds_frame_reset() -> impl IntoElement {
 /// move the layout box: the wrapper would become the flex item and the image
 /// would lose intrinsic sizing and corner clipping.
 pub fn track_own_bounds<E: gpui::InteractiveElement>(el: E, id: u64) -> E {
-    el.on_painted(move |bounds, _, _| record_bounds(id, bounds))
+    el.on_painted(move |bounds, window, _| record_bounds(id, bounds, window))
 }
 
-pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
+pub fn record_bounds(id: u64, bounds: Bounds<Pixels>, window: &Window) {
+    let state = ElementPaintState {
+        bounds: PaintBounds::from_gpui(bounds),
+        clip_bounds: PaintBounds::from_gpui(bounds.intersect(&window.content_mask().bounds)),
+        scale_factor: f64::from(window.scale_factor()),
+    };
     BOUNDS.with(|cell| {
-        cell.borrow_mut()
-            .insert(id, ElementBounds::from_gpui(bounds));
+        cell.borrow_mut().elements.insert(id, state);
     });
 }
 
 pub fn get_bounds(id: u64) -> Option<ElementBounds> {
-    BOUNDS.with(|cell| cell.borrow().get(&id).copied())
+    BOUNDS.with(|cell| cell.borrow().elements.get(&id).map(|state| state.bounds))
 }
 
 pub fn all_bounds() -> HashMap<u64, ElementBounds> {
-    BOUNDS.with(|cell| cell.borrow().clone())
+    BOUNDS.with(|cell| {
+        cell.borrow()
+            .elements
+            .iter()
+            .map(|(&id, state)| (id, state.bounds))
+            .collect()
+    })
+}
+
+pub fn get_paint_state(
+    id: u64,
+    tree: &Arc<Mutex<crate::retained_tree::RetainedTree>>,
+) -> Option<ElementPaintState> {
+    BOUNDS.with(|cell| {
+        let frame = cell.borrow();
+        if !frame.owner.ptr_eq(&Arc::downgrade(tree)) {
+            return None;
+        }
+        frame.elements.get(&id).copied()
+    })
 }
 
 pub fn bounds_tracker(id: u64, selection_start: Option<bool>) -> impl IntoElement {
     canvas(
         |bounds, _, _| bounds,
-        move |bounds, _, _, _| {
-            record_bounds(id, bounds);
+        move |bounds, _, window, _| {
+            record_bounds(id, bounds, window);
             if let Some(selectable) = selection_start {
                 crate::text::record_start_region(bounds, selectable);
             }

@@ -1,4 +1,4 @@
-import type { EventPayload } from "@gpuix/native"
+import type { ElementPaintState, EventPayload, NativeWindowHandle } from "@gpuix/native"
 
 export type DimensionValue = number | string
 
@@ -645,6 +645,11 @@ export interface NativeRenderer {
   // ── Window API ─────────────────────────────────────────────────
   getWindowSize?(): { width: number; height: number }
   getWindowInsets?(): NativeWindowInsets
+  /** Borrowed native identifiers, not retained resources. Desktop only.
+   * Read README Native integration snapshots before passing these bytes to FFI. */
+  getNativeWindowHandle?(): NativeWindowHandle | null
+  /** Non-flushing last-paint geometry. Null is not an unmount notification. */
+  getElementPaintState?(elementId: number): ElementPaintState | null
   setWindowTitle?(title: string): void
   /** Bring the window forward and focus it. Reveals a `show: false` window. */
   activateWindow?(): void

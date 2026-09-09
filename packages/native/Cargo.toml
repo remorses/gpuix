@@ -52,6 +52,7 @@ reqwest_client = { path = "../../zed/crates/reqwest_client" }
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 napi = { version = "3", features = ["napi8", "serde-json"] }
 napi-derive = "3"
+raw-window-handle = "0.6"
 
 # The slow half of the engine split above. fancy-regex is pure Rust, so it is
 # the only Syntect engine that builds here, and the browser still pays ~133ms on

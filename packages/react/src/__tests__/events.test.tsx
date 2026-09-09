@@ -12,6 +12,7 @@
 
 import fs from "fs"
 import { spawnSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import { describe, it, expect, beforeEach } from "vitest"
 import React, { useState, useRef } from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
@@ -173,8 +174,7 @@ describe("frame loop", () => {
   })
 
   it("keeps the process alive after an uncaught exception", () => {
-    const rendererPath = new URL("../reconciler/renderer.ts", import.meta.url)
-      .pathname
+    const rendererPath = fileURLToPath(new URL("../reconciler/renderer.ts", import.meta.url))
     const script = [
       `import { installRuntimeErrorHandlers, startFrameLoop } from ${JSON.stringify(rendererPath)}`,
       "installRuntimeErrorHandlers()",
