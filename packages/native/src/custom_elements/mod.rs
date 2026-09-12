@@ -54,6 +54,8 @@ pub struct CustomRenderContext<'a> {
     pub highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
     /// Retained custom props, including `role` and `aria-*`.
     pub props: &'a HashMap<String, serde_json::Value>,
+    /// Direct pixel override for an img, never serialized through custom props.
+    pub image: Option<std::sync::Arc<gpui::RenderImage>>,
 }
 
 impl CustomRenderContext<'_> {

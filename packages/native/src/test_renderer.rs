@@ -27,6 +27,10 @@ use crate::renderer::{
 };
 use crate::retained_tree::RetainedTree;
 
+#[cfg(test)]
+#[path = "dynamic_image_tests.rs"]
+mod dynamic_image_tests;
+
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
 /// Bundles VisualTestAppContext + window handle + view entity.
@@ -64,6 +68,7 @@ impl Drop for VisualTestState {
             view.update(cx, |view, cx| {
                 if let Ok(mut tree) = view.tree.lock() {
                     tree.root_id = None;
+                    tree.images.clear();
                 }
                 view.custom_registry.destroy_all();
                 view.focus_subscriptions.clear();
@@ -260,6 +265,44 @@ impl TestGpuixRenderer {
             events,
             selection,
         })
+    }
+
+    fn check_image_owner(&self) -> Result<()> {
+        with_test_state(|cx, _, view| {
+            let owned = cx.update(|cx| Arc::ptr_eq(&view.read(cx).tree, &self.tree));
+            if !owned {
+                return Err(Error::from_reason("Renderer no longer owns this window"));
+            }
+            Ok(())
+        })
+    }
+
+    /// Copy tightly packed BGRA pixels into an existing img. Call flush to paint.
+    #[napi]
+    pub fn update_image(
+        &self,
+        element_id: f64,
+        width: f64,
+        height: f64,
+        bgra: Uint8Array,
+    ) -> Result<()> {
+        self.check_image_owner()?;
+        crate::dynamic_image::update(
+            &mut self.tree.lock().unwrap(),
+            element_id,
+            width,
+            height,
+            bgra.as_ref(),
+        )
+        .map_err(Error::from_reason)
+    }
+
+    /// Release an img's pixel override on the next flush and return to its src.
+    #[napi]
+    pub fn clear_image(&self, element_id: f64) -> Result<()> {
+        self.check_image_owner()?;
+        crate::dynamic_image::clear(&mut self.tree.lock().unwrap(), element_id)
+            .map_err(Error::from_reason)
     }
 
     /// How many elements the retained tree holds, reachable from the root or

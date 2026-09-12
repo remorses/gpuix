@@ -317,6 +317,7 @@ gpuix completions install
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **mail** | `bun --hot mail.tsx` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
+| **dynamic-image** | `bun --hot dynamic-image.tsx` | Animated BGRA pixels in one ordinary `<img>`, without React commits per frame |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
@@ -2342,6 +2343,61 @@ child. Put the radius on the image.
   style={{ width: 32, height: 32, borderRadius: 16 }}
 />
 ```
+
+### Dynamic pixels (desktop)
+
+Use the renderer from `useGpuixRequired()` (or `useGpuix().renderer`) to update
+an existing `<img>` without a React render or a JSON/base64 pixel payload:
+
+```tsx
+const renderer = useGpuixRequired()
+const image = useRef<{ id: number }>(null)
+
+useLayoutEffect(() => {
+  const bgra = new Uint8Array([0, 0, 255, 255]) // one opaque red pixel
+  renderer.updateImage!(image.current!.id, 1, 1, bgra)
+}, [renderer])
+
+return <img ref={image} style={{ width: 128, height: 128 }} />
+```
+
+- `updateImage(elementId, width, height, bgra: Uint8Array): void` copies the
+  supplied view before returning. Reuse or modify it afterwards; native retains
+  no JS pointer. `Buffer` and offset `Uint8Array` views also work.
+- Pixels are **8-bit BGRA, straight (unpremultiplied) alpha**, matching GPUI's
+  decoded raster images. Rows run top to bottom, pixels left to right, with
+  exactly `width * 4` bytes per row and no padding. Alpha `0` is transparent;
+  alpha `255` is opaque. There is no stride, partial-update, or format option.
+- Width and height must be positive integers no larger than **4096** each
+  (at most **64 MiB** per image). This ingress limit is checked before copying
+  pixels; it is not a guarantee that GPU memory is available. The view length
+  must equal **exactly `width * height * 4`**. Invalid dimensions, overflow,
+  lengths, or IDs throw without replacing the current pixels. An ID must be a
+  non-negative safe integer identifying a live `<img>` in this renderer.
+- Call after React commits, for example from `useLayoutEffect`, `useEffect`, or
+  an event handler. Earlier React mutations are committed before effects run.
+  Updates schedule the next native frame; multiple calls before that frame
+  keep only the latest pixels. The test renderer requires `flush()` to paint.
+- Same-size updates keep native image identity and use GPUI's atlas update.
+  A size change creates a new identity and retires the old atlas entry. GPUI
+  still performs its normal repaint; no cached-frame presentation is exposed.
+- Pixels override `src`. An actual subsequent `src` change (including removing
+  it) clears the override. Rerendering with the same `src` preserves the pixels.
+  `clearImage(elementId): void` returns to the current `src`, or the usual
+  placeholder if absent. Clearing a live img twice is safe; a destroyed ID throws.
+- Clear, src changes, resize, and unmount release obsolete atlas entries on the
+  next native frame. The window owns uploaded images; nothing is shared across
+  renderers. Unmount needs no manual cleanup beyond stopping your producer.
+- This is ordinary `<img>` rendering: `objectFit`, intrinsic sizing, styles,
+  corner clipping, accessibility, and events still apply. Sampling is currently
+  **linear only**; nearest-neighbor awaits a GPUI Img builder API.
+- A GPU upload failure is logged once for that submitted version and falls
+  back to `src` (or an empty image). Other images continue uploading. Unrelated
+  frames do not retry it; a new `updateImage` call allows another attempt.
+- These two methods are desktop-only, and absent on the browser renderer.
+
+See [`examples/dynamic-image.tsx`](./examples/dynamic-image.tsx) for a small
+animated color field that reuses one buffer and never commits React per frame.
 
 ### `<svg>`
 

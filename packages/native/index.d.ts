@@ -49,6 +49,10 @@ export declare class GpuixRenderer {
    * Acquires the tree mutex ONCE for the entire batch.
    */
   applyBatch(json: string): Array<number>
+  /** Copy tightly packed BGRA pixels into an existing img. Paints on the next frame. */
+  updateImage(elementId: number, width: number, height: number, bgra: Uint8Array): void
+  /** Release an img's pixel override on the next frame and return to its src. */
+  clearImage(elementId: number): void
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
@@ -178,6 +182,10 @@ export declare class GpuixRenderer {
  */
 export declare class TestGpuixRenderer {
   constructor(width?: number | undefined | null, height?: number | undefined | null)
+  /** Copy tightly packed BGRA pixels into an existing img. Call flush to paint. */
+  updateImage(elementId: number, width: number, height: number, bgra: Uint8Array): void
+  /** Release an img's pixel override on the next flush and return to its src. */
+  clearImage(elementId: number): void
   /**
    * How many elements the retained tree holds, reachable from the root or
    * not. `getTreeJson` walks from the root, so it cannot see a node that was

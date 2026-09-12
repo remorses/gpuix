@@ -184,12 +184,16 @@ impl CustomElement for ImgElement {
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
-        let el = match &self.source {
-            ImgSource::Path(path) => gpui::img(path.clone()),
-            ImgSource::Uri(uri) => gpui::img(uri.clone()),
-            ImgSource::Data(image) => gpui::img(image.clone()),
-            ImgSource::Empty => return img_fallback(&ctx, &self.alt, "img: no src"),
-            ImgSource::Invalid => return img_fallback(&ctx, &self.alt, "img: load failed"),
+        let el = if let Some(image) = &ctx.image {
+            gpui::img(image.clone())
+        } else {
+            match &self.source {
+                ImgSource::Path(path) => gpui::img(path.clone()),
+                ImgSource::Uri(uri) => gpui::img(uri.clone()),
+                ImgSource::Data(image) => gpui::img(image.clone()),
+                ImgSource::Empty => return img_fallback(&ctx, &self.alt, "img: no src"),
+                ImgSource::Invalid => return img_fallback(&ctx, &self.alt, "img: load failed"),
+            }
         };
         // The id is what makes gpui's `ImgState` persist. Without it `Img` has no
         // `GlobalElementId`, so the animated-GIF frame index and the delayed

@@ -31,6 +31,8 @@ export {
 export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
+  updateImage(elementId: number, width: number, height: number, bgra: Uint8Array): void
+  clearImage(elementId: number): void
   flush(): void
   drainEvents(): EventPayload[]
   simulateKeystrokes(keystrokes: string): void
@@ -194,6 +196,16 @@ export class TestRenderer implements NativeRenderer {
    *  build_element() → apply_styles() → layout). */
   flush(): void {
     this.native.flush()
+  }
+
+  /** Copy a pixel override; flush() paints it through ordinary GPUI img. */
+  updateImage(elementId: number, width: number, height: number, bgra: Uint8Array): void {
+    this.native.updateImage(elementId, width, height, bgra)
+  }
+
+  /** Remove a pixel override; flush() releases its atlas entry. */
+  clearImage(elementId: number): void {
+    this.native.clearImage(elementId)
   }
 
   /** Drain events collected by the native GPUI event handlers. */
