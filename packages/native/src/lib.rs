@@ -18,6 +18,7 @@ mod automation;
 mod color;
 mod custom_elements;
 mod diff;
+mod dynamic_image;
 mod element_tree;
 mod markdown;
 mod motion;

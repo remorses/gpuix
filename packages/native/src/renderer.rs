@@ -1238,6 +1238,53 @@ impl GpuixRenderer {
         Ok(destroyed)
     }
 
+    fn check_image_owner(&self) -> Result<()> {
+        if !*self.initialized.lock().unwrap() {
+            return Err(Error::from_reason(
+                "Renderer not initialized. Call init() first.",
+            ));
+        }
+        #[cfg(target_os = "macos")]
+        if !update_window(|view, _, _| Arc::ptr_eq(&view.tree, &self.tree))? {
+            return Err(Error::from_reason("Renderer no longer owns this window"));
+        }
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        if !self.ui_running.load(Ordering::SeqCst) {
+            return Err(Error::from_reason("The GPUI UI thread is not running"));
+        }
+        Ok(())
+    }
+
+    /// Copy tightly packed BGRA pixels into an existing img. Paints on the next frame.
+    #[napi]
+    pub fn update_image(
+        &self,
+        element_id: f64,
+        width: f64,
+        height: f64,
+        bgra: Uint8Array,
+    ) -> Result<()> {
+        self.check_image_owner()?;
+        crate::dynamic_image::update(
+            &mut self.tree.lock().unwrap(),
+            element_id,
+            width,
+            height,
+            bgra.as_ref(),
+        )
+        .map_err(Error::from_reason)?;
+        self.request_invalidate()
+    }
+
+    /// Release an img's pixel override on the next frame and return to its src.
+    #[napi]
+    pub fn clear_image(&self, element_id: f64) -> Result<()> {
+        self.check_image_owner()?;
+        crate::dynamic_image::clear(&mut self.tree.lock().unwrap(), element_id)
+            .map_err(Error::from_reason)?;
+        self.request_invalidate()
+    }
+
     // ── Frame loop ───────────────────────────────────────────────────
 
     /// Pump the native event loop. Returns false after the last window closes.
@@ -2964,6 +3011,9 @@ pub(crate) struct GpuixView {
     /// Registry for custom element types (input, editor, diff, etc.).
     /// Stores factories (one per type) and live instances (one per element ID).
     pub(crate) custom_registry: CustomElementRegistry,
+    /// Atlas entries uploaded for this window, released on override removal.
+    images: crate::dynamic_image::Images,
+    failed_images: crate::dynamic_image::Images,
     /// Persistent ScrollHandles keyed by element ID.
     /// Created lazily for elements with overflow: "scroll" (or per-axis scroll).
     /// Handles persist across renders so GPUI maintains scroll offset state.
@@ -3163,6 +3213,8 @@ impl GpuixView {
             focus_handles: HashMap::new(),
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
+            images: crate::dynamic_image::Images::new(),
+            failed_images: crate::dynamic_image::Images::new(),
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
@@ -3250,6 +3302,7 @@ impl GpuixView {
 
         let mut build_ctx = BuildCtx {
             tree: &tree,
+            images: &self.images,
             event_callback: &callback,
             focus_handles: &self.focus_handles,
             scroll_handles: &mut self.scroll_handles,
@@ -3374,6 +3427,9 @@ impl GpuixView {
 /// `cx` stay separate parameters: they are `&mut` and gpui reborrows them.
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
+    /// Uploaded at root render. Deferred rows must use this frame's images,
+    /// not newer JS writes that could introduce untracked atlas entries mid-frame.
+    images: &'a crate::dynamic_image::Images,
     pub event_callback: &'a Option<EventCallback>,
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
@@ -4025,6 +4081,13 @@ impl gpui::Render for GpuixView {
         let tree = tree_arc.lock().unwrap();
         let callback = self.event_callback.clone();
 
+        crate::dynamic_image::sync(
+            &tree.images,
+            &mut self.images,
+            &mut self.failed_images,
+            window,
+        );
+
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
 
@@ -4060,6 +4123,7 @@ impl gpui::Render for GpuixView {
             Some(root_id) => {
                 let mut ctx = BuildCtx {
                     tree: &tree,
+                    images: &self.images,
                     event_callback: &callback,
                     focus_handles: &self.focus_handles,
                     scroll_handles: &mut self.scroll_handles,
@@ -4257,6 +4321,7 @@ pub(crate) fn build_element(
                 selection_wash: inherited.selection_wash,
                 highlight_set: inherited.highlight.clone(),
                 props: &element.custom_props,
+                image: ctx.images.get(&id).cloned(),
             };
             ctx.custom_registry
                 .render(custom_type, &element.custom_props, render_ctx, window, cx)

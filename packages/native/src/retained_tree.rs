@@ -185,6 +185,8 @@ impl StyleTable {
 pub struct RetainedTree {
     pub elements: ElementMap,
     pub styles: StyleTable,
+    /// Copied pixel overrides, owned by their retained img nodes.
+    pub(crate) images: crate::dynamic_image::Images,
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
     next_revision: u64,
@@ -195,12 +197,14 @@ impl RetainedTree {
         Self {
             elements: ElementMap::default(),
             styles: StyleTable::default(),
+            images: crate::dynamic_image::Images::new(),
             root_id: None,
             next_revision: 1,
         }
     }
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
+        self.images.remove(&id);
         let revision = self.take_revision();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
@@ -220,7 +224,7 @@ impl RetainedTree {
     /// Invalidate for rendering only. Use for changes that cannot move a glyph
     /// into or out of the searchable text: style, and a native element's own
     /// props, whose text is matched at paint and never enters a `GroupList`.
-    fn mark_render_changed(&mut self, id: u64) {
+    pub(crate) fn mark_render_changed(&mut self, id: u64) {
         self.mark_changed_detail(id, false);
     }
 
@@ -263,6 +267,7 @@ impl RetainedTree {
     }
 
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
+        self.images.remove(&id);
         if let Some(element) = self.elements.remove(&id) {
             destroyed.push(id);
             for child_id in element.children {
@@ -375,6 +380,7 @@ impl RetainedTree {
     pub fn set_custom_prop(&mut self, id: u64, key: String, value: serde_json::Value) {
         let mut changed = false;
         let is_highlight = key == "highlight";
+        let is_src = key == "src";
         let was_declaration = self
             .elements
             .get(&id)
@@ -401,6 +407,9 @@ impl RetainedTree {
         }
         if !changed {
             return;
+        }
+        if is_src {
+            self.images.remove(&id);
         }
         self.mark_render_changed(id);
         let is_declaration = self

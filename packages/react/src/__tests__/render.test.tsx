@@ -219,9 +219,8 @@ describeNative("render()", () => {
     })
 
     it("shows a process-level unhandled rejection on the overlay", () => {
-      const testingPath = new URL("../testing.ts", import.meta.url).pathname
-      const rendererPath = new URL("../reconciler/renderer.ts", import.meta.url)
-        .pathname
+      const testingPath = fileURLToPath(new URL("../testing.ts", import.meta.url))
+      const rendererPath = fileURLToPath(new URL("../reconciler/renderer.ts", import.meta.url))
       const script = [
         'import React from "react"',
         `import { TestRenderer } from ${JSON.stringify(testingPath)}`,

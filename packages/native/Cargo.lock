@@ -2617,6 +2617,7 @@ dependencies = [
  "core-graphics 0.24.0",
  "core-text",
  "csscolorparser",
+ "ctor 0.6.3",
  "env_logger",
  "flate2",
  "futures",

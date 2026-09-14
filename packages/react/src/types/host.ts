@@ -618,6 +618,16 @@ export interface NativeRenderer {
   /** Apply one React commit. Returns every element id destroyed by the batch. */
   applyBatch(json: string): Array<number>
 
+  /** Desktop only. Copy exactly width * height * 4 tightly packed, top-to-bottom
+   * BGRA bytes into an existing img (1–4096 pixels per axis, at most 64 MiB).
+   * Call after commit (for example in an effect).
+   * Pixels override src until clearImage, an actual src change, or unmount.
+   * The input view may be reused after return; painting happens on the next frame. */
+  updateImage?(elementId: number, width: number, height: number, bgra: Uint8Array): void
+  /** Desktop only. Release the pixel override on the next frame and return to src.
+   * Idempotent for a live img; unknown, destroyed, or non-img IDs throw. */
+  clearImage?(elementId: number): void
+
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
   focusNext?(): void
