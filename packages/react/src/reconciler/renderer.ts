@@ -7,6 +7,7 @@ import type {
   NativeRenderer,
   WindowKeyEventHandlers,
 } from "../types/host.js"
+import { pumpFrames } from "../motion-spring.js"
 import { handleGpuixEvent } from "./event-registry.js"
 import {
   App as AutomationApp,
@@ -142,9 +143,12 @@ export function startFrameLoop(
     timer = null
   }
 
+  let lastFrame = performance.now()
   const loop = (): void => {
     if (stopped) return
     const started = performance.now()
+    pumpFrames(Math.min((started - lastFrame) / 1000, 0.032), started)
+    lastFrame = started
     let running = true
     try {
       running = renderer.tick()

@@ -1,4 +1,5 @@
 //! Native motion tracks resolved during GPUI rendering, outside React.
+//! Tween (duration/ease) plus spring (stiffness/damping/mass/velocity) integrators.
 
 use std::time::Duration;
 
@@ -35,6 +36,33 @@ impl MotionStyle {
             bottom: value(self.bottom, target.bottom, progress),
             left: value(self.left, target.left, progress),
             border_radius: value(self.border_radius, target.border_radius, progress),
+        }
+    }
+
+    fn channels(self) -> [( &'static str, Option<f64>); 8] {
+        [
+            ("width", self.width),
+            ("height", self.height),
+            ("opacity", self.opacity),
+            ("top", self.top),
+            ("right", self.right),
+            ("bottom", self.bottom),
+            ("left", self.left),
+            ("borderRadius", self.border_radius),
+        ]
+    }
+
+    fn set(&mut self, name: &str, value: f64) {
+        match name {
+            "width" => self.width = Some(value),
+            "height" => self.height = Some(value),
+            "opacity" => self.opacity = Some(value),
+            "top" => self.top = Some(value),
+            "right" => self.right = Some(value),
+            "bottom" => self.bottom = Some(value),
+            "left" => self.left = Some(value),
+            "borderRadius" => self.border_radius = Some(value),
+            _ => {}
         }
     }
 
@@ -82,7 +110,7 @@ enum MotionEase {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct MotionTransition {
+struct TweenTransition {
     #[serde(default = "default_duration")]
     duration: f64,
     #[serde(default)]
@@ -91,13 +119,37 @@ struct MotionTransition {
     ease: MotionEase,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct SpringTransition {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default = "default_stiffness")]
+    stiffness: f64,
+    #[serde(default = "default_damping")]
+    damping: f64,
+    #[serde(default = "default_mass")]
+    mass: f64,
+    #[serde(default)]
+    velocity: f64,
+    #[serde(default)]
+    delay: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+enum MotionTransition {
+    Spring(SpringTransition),
+    Tween(TweenTransition),
+}
+
 impl Default for MotionTransition {
     fn default() -> Self {
-        Self {
+        Self::Tween(TweenTransition {
             duration: default_duration(),
             delay: 0.0,
             ease: default_ease(),
-        }
+        })
     }
 }
 
@@ -107,6 +159,18 @@ fn default_duration() -> f64 {
 
 fn default_ease() -> MotionEase {
     MotionEase::Name("easeOut".to_string())
+}
+
+fn default_stiffness() -> f64 {
+    36.0
+}
+
+fn default_damping() -> f64 {
+    8.0
+}
+
+fn default_mass() -> f64 {
+    1.2
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -124,14 +188,34 @@ pub(crate) struct MotionFrame {
     pub active: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct SpringTrack {
+    pos: f64,
+    vel: f64,
+}
+
 pub(crate) struct MotionState {
     source: serde_json::Value,
     from: MotionStyle,
     target: MotionStyle,
+    current: MotionStyle,
     transition: MotionTransition,
     started: Instant,
+    last: Instant,
+    springs: [SpringTrack; 8],
     valid: bool,
 }
+
+const CHANNELS: [&str; 8] = [
+    "width",
+    "height",
+    "opacity",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "borderRadius",
+];
 
 impl MotionState {
     pub(crate) fn new(source: &serde_json::Value, now: Instant) -> Result<Self, String> {
@@ -141,13 +225,16 @@ impl MotionState {
             Some(MotionInitial::Disabled(false)) | None => description.animate,
             Some(MotionInitial::Disabled(true)) => unreachable!("validated above"),
         };
-
+        let kick = spring_kick(&description.transition);
         Ok(Self {
             source: source.clone(),
             from,
             target: description.animate,
+            current: from,
             transition: description.transition,
             started: now,
+            last: now,
+            springs: seed_springs(from, description.animate, kick),
             valid: true,
         })
     }
@@ -157,8 +244,11 @@ impl MotionState {
             source: source.clone(),
             from: MotionStyle::default(),
             target: MotionStyle::default(),
+            current: MotionStyle::default(),
             transition: MotionTransition::default(),
             started: now,
+            last: now,
+            springs: [SpringTrack::default(); 8],
             valid: false,
         }
     }
@@ -180,7 +270,7 @@ impl MotionState {
                 return Err(error);
             }
         };
-        self.from = if self.valid {
+        let visible = if self.valid {
             self.frame(now).style
         } else {
             match description.initial {
@@ -189,17 +279,40 @@ impl MotionState {
                 Some(MotionInitial::Disabled(true)) => unreachable!("validated above"),
             }
         };
+        self.from = visible;
+        self.current = visible;
         self.target = description.animate;
+        let kick = spring_kick(&description.transition);
+        if matches!(description.transition, MotionTransition::Spring(_)) {
+            // Keep velocity; retarget in place so overshoot carries.
+            for (index, name) in CHANNELS.iter().enumerate() {
+                let pos = channel(visible, name).unwrap_or_else(|| channel(description.animate, name).unwrap_or(0.0));
+                self.springs[index].pos = pos;
+                if self.springs[index].vel.abs() < f64::EPSILON {
+                    self.springs[index].vel = kick;
+                }
+            }
+        } else {
+            self.springs = seed_springs(visible, description.animate, kick);
+        }
         self.transition = description.transition;
         self.started = now;
+        self.last = now;
         self.source = source.clone();
         self.valid = true;
         Ok(())
     }
 
-    pub(crate) fn frame(&self, now: Instant) -> MotionFrame {
-        let delay = seconds(self.transition.delay);
-        let duration = seconds(self.transition.duration);
+    pub(crate) fn frame(&mut self, now: Instant) -> MotionFrame {
+        match &self.transition {
+            MotionTransition::Spring(spring) => self.spring_frame(now, spring.clone()),
+            MotionTransition::Tween(tween) => self.tween_frame(now, tween.clone()),
+        }
+    }
+
+    fn tween_frame(&self, now: Instant, tween: TweenTransition) -> MotionFrame {
+        let delay = seconds(tween.delay);
+        let duration = seconds(tween.duration);
         let elapsed = now.saturating_duration_since(self.started);
         let raw = if elapsed <= delay {
             0.0
@@ -209,12 +322,102 @@ impl MotionState {
             elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
         };
         let active = self.from != self.target && raw < 1.0;
-        let progress = ease(raw.clamp(0.0, 1.0), &self.transition.ease);
-
+        let progress = ease(raw.clamp(0.0, 1.0), &tween.ease);
         MotionFrame {
             style: self.from.interpolate(self.target, progress),
             active,
         }
+    }
+
+    fn spring_frame(&mut self, now: Instant, spring: SpringTransition) -> MotionFrame {
+        let delay = seconds(spring.delay);
+        if now.saturating_duration_since(self.started) < delay {
+            self.last = now;
+            return MotionFrame {
+                style: self.current,
+                active: self.from != self.target,
+            };
+        }
+        let mut dt = now.saturating_duration_since(self.last).as_secs_f64();
+        self.last = now;
+        if dt <= 0.0 {
+            return MotionFrame {
+                style: self.current,
+                active: !settled(&self.springs, self.target),
+            };
+        }
+        dt = dt.min(0.032);
+        let mut style = self.current;
+        let mut active = false;
+        for (index, name) in CHANNELS.iter().enumerate() {
+            let Some(target) = channel(self.target, name) else {
+                continue;
+            };
+            let rest = if *name == "opacity" { 0.002 } else { 0.05 };
+            let next = step_spring(self.springs[index], target, dt, spring.stiffness, spring.damping, spring.mass, rest);
+            self.springs[index] = next;
+            style.set(name, next.pos);
+            if (next.pos - target).abs() > rest || next.vel.abs() > rest {
+                active = true;
+            }
+        }
+        self.current = style;
+        MotionFrame { style, active }
+    }
+}
+
+fn channel(style: MotionStyle, name: &str) -> Option<f64> {
+    match name {
+        "width" => style.width,
+        "height" => style.height,
+        "opacity" => style.opacity,
+        "top" => style.top,
+        "right" => style.right,
+        "bottom" => style.bottom,
+        "left" => style.left,
+        "borderRadius" => style.border_radius,
+        _ => None,
+    }
+}
+
+fn spring_kick(transition: &MotionTransition) -> f64 {
+    match transition {
+        MotionTransition::Spring(spring) => spring.velocity,
+        MotionTransition::Tween(_) => 0.0,
+    }
+}
+
+fn seed_springs(from: MotionStyle, target: MotionStyle, kick: f64) -> [SpringTrack; 8] {
+    let mut tracks = [SpringTrack::default(); 8];
+    for (index, name) in CHANNELS.iter().enumerate() {
+        let pos = channel(from, name).or_else(|| channel(target, name)).unwrap_or(0.0);
+        tracks[index] = SpringTrack { pos, vel: kick };
+    }
+    tracks
+}
+
+fn settled(tracks: &[SpringTrack; 8], target: MotionStyle) -> bool {
+    for (index, name) in CHANNELS.iter().enumerate() {
+        let Some(to) = channel(target, name) else {
+            continue;
+        };
+        if (tracks[index].pos - to).abs() > 0.05 || tracks[index].vel.abs() > 0.05 {
+            return false;
+        }
+    }
+    true
+}
+
+fn step_spring(track: SpringTrack, target: f64, dt: f64, stiffness: f64, damping: f64, mass: f64, rest: f64) -> SpringTrack {
+    let mass = mass.max(0.001);
+    let x = track.pos - target;
+    let accel = (-stiffness * x - damping * track.vel) / mass;
+    let vel = track.vel + accel * dt;
+    let pos = track.pos + vel * dt;
+    if (pos - target).abs() < rest && vel.abs() < rest {
+        SpringTrack { pos: target, vel: 0.0 }
+    } else {
+        SpringTrack { pos, vel }
     }
 }
 
@@ -229,23 +432,30 @@ fn parse_description(source: &serde_json::Value) -> Result<MotionDescription, St
     if let Some(MotionInitial::Style(initial)) = &description.initial {
         validate_style(initial)?;
     }
-    validate_seconds(description.transition.duration, "duration")?;
-    validate_seconds(description.transition.delay, "delay")?;
-    validate_ease(&description.transition.ease)?;
+    match &description.transition {
+        MotionTransition::Tween(tween) => {
+            validate_seconds(tween.duration, "duration")?;
+            validate_seconds(tween.delay, "delay")?;
+            validate_ease(&tween.ease)?;
+        }
+        MotionTransition::Spring(spring) => {
+            if spring.kind != "spring" {
+                return Err(format!("unknown motion type: {}", spring.kind));
+            }
+            validate_positive(spring.stiffness, "stiffness")?;
+            validate_positive(spring.damping, "damping")?;
+            validate_positive(spring.mass, "mass")?;
+            validate_seconds(spring.delay, "delay")?;
+            if !spring.velocity.is_finite() {
+                return Err("motion velocity must be finite".to_string());
+            }
+        }
+    }
     Ok(description)
 }
 
 fn validate_style(style: &MotionStyle) -> Result<(), String> {
-    for (name, value) in [
-        ("width", style.width),
-        ("height", style.height),
-        ("opacity", style.opacity),
-        ("top", style.top),
-        ("right", style.right),
-        ("bottom", style.bottom),
-        ("left", style.left),
-        ("borderRadius", style.border_radius),
-    ] {
+    for (name, value) in style.channels() {
         if value.is_some_and(|value| !value.is_finite() || value.abs() > f32::MAX as f64) {
             return Err(format!("motion {name} must fit a finite 32-bit float"));
         }
@@ -270,6 +480,13 @@ fn validate_seconds(value: f64, name: &str) -> Result<(), String> {
         return Err(format!(
             "motion {name} must be a supported finite non-negative number"
         ));
+    }
+    Ok(())
+}
+
+fn validate_positive(value: f64, name: &str) -> Result<(), String> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(format!("motion {name} must be a finite number greater than 0"));
     }
     Ok(())
 }
@@ -406,10 +623,32 @@ mod tests {
             "animate": { "width": 100.0 },
             "transition": { "duration": 0.2, "ease": "linear" }
         });
-        let state = MotionState::new(&description, started).unwrap();
+        let mut state = MotionState::new(&description, started).unwrap();
         let frame = state.frame(started + Duration::from_millis(200));
 
         assert_eq!(frame.style.width, Some(100.0));
         assert!(!frame.active);
+    }
+
+    #[test]
+    fn spring_overshoots_then_settles() {
+        let started = Instant::now();
+        let description = serde_json::json!({
+            "initial": { "width": 0.0 },
+            "animate": { "width": 100.0 },
+            "transition": { "type": "spring", "stiffness": 40.0, "damping": 6.0, "mass": 1.0 }
+        });
+        let mut state = MotionState::new(&description, started).unwrap();
+        let mut max_width = 0.0;
+        let mut now = started;
+        for _ in 0..120 {
+            now += Duration::from_millis(8);
+            let frame = state.frame(now);
+            max_width = max_width.max(frame.style.width.unwrap_or(0.0));
+        }
+        assert!(max_width > 100.0, "gelatinous spring must overshoot, got {max_width}");
+        let settled = state.frame(now);
+        assert!((settled.style.width.unwrap_or(0.0) - 100.0).abs() < 1.0);
+        assert!(!settled.active);
     }
 }
