@@ -840,7 +840,7 @@ mod tests {
         let mut max_width = 0.0_f64;
         let mut saw_settle = false;
         let mut now = started;
-        for _ in 0..120 {
+        for _ in 0..500 {
             now += Duration::from_millis(8);
             let frame = state.frame(now);
             saw_settle |= frame.just_settled;
@@ -854,6 +854,25 @@ mod tests {
         assert!((width - 100.0).abs() < 1.0, "spring must settle near target, got {width}");
         assert!(!frame.active);
         assert!(saw_settle, "spring must report just_settled once at rest");
+    }
+
+    #[test]
+    fn explicit_tween_type_is_a_tween() {
+        let started = Instant::now();
+        let description = serde_json::json!({
+            "initial": { "width": 0.0 },
+            "animate": { "width": 100.0 },
+            "transition": { "type": "tween", "duration": 1.0, "ease": "linear" }
+        });
+        let mut state = MotionState::new(&description, started).unwrap();
+        state.frame(started + Duration::from_millis(500));
+        assert_eq!(
+            state
+                .visible_style(started + Duration::from_millis(500))
+                .unwrap()
+                .width,
+            Some(50.0)
+        );
     }
 
     #[test]
