@@ -324,6 +324,8 @@ gpuix completions install
 | **disktree** | `npx disktree [dir]`, source in [`disktree/`](https://github.com/remorses/gpuix/tree/main/disktree) | A port of [tobi/disktree](https://github.com/tobi/disktree) published to npm: scans a folder or the whole disk on worker threads, draws a translucent treemap on a frosted window, and ranks what could go |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
+| **chat (ilha)** | `bun run chat-ilha` | The chat example written in [ilha](./website/src/guides/ilha.mdx), the counterpart of `solid/chat.tsx`: atoms read in the smallest component that paints them, `Select` pickers, `Dialog` overlays, a `motion.div` sidebar, a keyed 1,000-row `<virtual-list>`. Checked with `bun run chat-ilha:check` |
+| **counter (ilha)** | `bun run counter-ilha` | The same counter written in [ilha](./website/src/guides/ilha.mdx): atoms, lowercase events, a keyed history list, native `hover` styles. Checked with `bun run counter-ilha:check` |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
@@ -520,6 +522,7 @@ Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)
 - **`@gpuix/native/automation`**: the shared automation protocol, client, locators, and process launcher.
 - **`@gpuix/react`**: the React reconciler and React components. It preserves its existing exports and re-exports shared testing, automation, search, and observer APIs.
 - **`@gpuix/solid`**: the Solid 1 universal renderer, Solid primitives, motion, Select, Combobox, Tooltip, Bun preload, and build plugin.
+- **`@gpuix/ilha`**: the [ilha](https://ilha.build) renderer. ilha atoms, streams, generators, contexts and error boundaries run unchanged on the GPUIX host.
 - **`@gpuix/cli`** — `gpuix new` downloads `example-app/`, sets its published React dependency, and installs it as a standalone project.
 
 Pin the selected adapter and `@gpuix/native` to the **same exact version**.
@@ -597,6 +600,163 @@ await Bun.build({
 `@gpuix/solid` targets stable Solid 1.9. Its peer range is `>=1.9 <2`.
 
 The full Solid adapter API is in the [Solid guide](./website/src/guides/solid.mdx).
+
+### ilha quick start
+
+Install ilha and its adapter. `effect` is ilha's peer dependency.
+
+```bash
+bun add --exact @gpuix/ilha @gpuix/native ilha effect
+```
+
+Point `jsxImportSource` at the adapter. It re-exports ilha's JSX factory, so a
+component still returns ilha vnodes; only the element and prop types are GPUIX's.
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@gpuix/ilha",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  }
+}
+```
+
+```tsx
+import { atom } from 'ilha'
+import { render } from '@gpuix/ilha'
+
+const Counter = () => {
+  const count = atom(0)
+  return (
+    <div style={{ display: 'flex', gap: 8, padding: 12, height: '100%' }}>
+      <text style={{ color: '#e2e2e2' }}>Count: {count}</text>
+      <div
+        testId="increment"
+        style={{ backgroundColor: '#2a2a2a', borderRadius: 6, padding: 8 }}
+        onclick={() => count.update((n: number) => n + 1)}
+      >
+        <text>+</text>
+      </div>
+    </div>
+  )
+}
+
+render(Counter, { title: 'ilha GPUIX', width: 800, height: 600 })
+```
+
+Run it directly, exactly like the other adapters.
+
+```bash
+bun app.tsx
+bun --hot app.tsx
+```
+
+Bun takes the JSX runtime from the `tsconfig.json` of the directory it is
+started in. Started from another folder, the file compiles with React's runtime
+and the window paints `[object Object]`. Run from the project root, or put
+`/** @jsxImportSource @gpuix/ilha */` at the top of the entry file.
+
+The adapter drives ilha's own painter, so `atom`, `watch`, `when`, generators,
+streams, `resource`, `createContext` / `context`, `ErrorBoundary` and keyed lists
+all behave as they do on the web. State primitives (`atom`, `watch`, `when`,
+`context` and the rest) stay in `ilha`; `@gpuix/ilha` exports the renderer, the
+host and the window primitives.
+
+| Export | Purpose |
+|---|---|
+| `render(component, options?)` | Open the window and mount. Same options as the other adapters |
+| `createRoot(renderer, handlers?)` | Mount into an existing renderer |
+| `useGpuix()` / `useGpuixRequired()` | The native renderer, from any component |
+| `windowSize(options?)` | `AtomHandle<WindowSize>`, sampled every 100ms |
+| `windowInsets(options?)` | `AtomHandle<WindowInsets>`: safe area and keyboard geometry |
+| `selectedText()` | `AtomHandle<string \| null>`, the window's text selection |
+| `textSearch(options)` | `{ props, total, active, next, previous, goTo }`, like `useTextSearch` |
+
+**Events.** ilha lowercases event props, so every GPUIX event works under its
+own name in either case: `onclick` / `onClick`, `onLinkClick`,
+`onMouseDownOutside`, `onHighlight`, `onVisibleRange`, `onMotionComplete`.
+`oninput` is `change`, `oncontextmenu` is a right-button `auxClick`, and
+`ondrop` is `fileDrop`. The handler receives the GPUIX `EventPayload` plus
+`type`, `target` and `currentTarget`; on `onkeydown`, `preventDefault()` and
+`stopPropagation()` are the GPUIX `KeyEvent` ones, so they cancel Tab focus
+movement and ancestor handlers.
+
+**Refs.** `ref` receives the `HostElement`: `id`, `scrollIntoView()`, and on
+`<img>` `setImage(bytes)` / `setImagePixels(width, height, pixels, options?)`.
+
+What differs from the DOM:
+
+- **No CSS classes.** `class` / `className` are ignored; use `style` with a
+  `StyleDesc` object or a CSS declaration string.
+- **Elements keep their identity across a repaint.** A focused `<input>` keeps
+  its native element, caret and scroll offset while its component rerenders.
+  Only the props and styles that changed are sent.
+- **A skipped view paints nothing.** `{cond && <text>…</text>}` adds no native
+  element while `cond` is false, so it takes no `gap` in a flex parent.
+- **A nested component adds no wrapper box.** Its output is spliced into the
+  parent, the way ilha's DOM slot host uses `display: contents`.
+- **One GPUIX root.** GPUIX paints a single root element, so the app tree sits
+  inside a full-size flex-column container. A component may return a fragment.
+- **`unsafe()` is not supported.** Raw HTML has no GPUIX equivalent; render the
+  content with GPUIX elements, or use `<markdown>`.
+- **Object props are passed through.** `highlight`, `motion`, `theme` and
+  `anchored` position objects reach GPUIX as they are.
+
+**Controls.** `Button`, `Select`, `Combobox`, `Dialog`, `Tooltip`,
+`AnimatePresence` and `motion.div` are the same headless Base UI-shaped parts
+as in React and Solid, with the same props:
+`style` takes a `StyleDesc` or a function of the part's state, `asChild` renders
+the part onto its single child element, and `SelectItem` accepts a render
+function as its child. Event props work in either case (`onClick` / `onclick`).
+`ComboboxList` and `ComboboxValue` take one too. They are also importable from
+`@gpuix/ilha/button`, `/select`, `/combobox`, `/dialog`, `/tooltip` and
+`/floating`.
+
+Children of `AnimatePresence` are matched by `key`. A `motion.div` with an
+`exit` target animates out by itself; any other component can call
+`usePresence()`, which returns `[isPresent, safeToRemove]` as plain values,
+because an ilha component reruns when its presence changes.
+
+```tsx
+import { atom } from 'ilha'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@gpuix/ilha'
+
+const Picker = () => {
+  const model = atom('fast')
+  return (
+    <Select
+      items={[{ value: 'fast', label: 'Fast' }, { value: 'deep', label: 'Deep' }]}
+      value={model()}
+      onValueChange={model.set}
+    >
+      <SelectTrigger style={(state) => ({ opacity: state.open ? 0.7 : 1 })}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent side="top" sideOffset={4}>
+        <SelectItem value="fast"><text>Fast</text></SelectItem>
+        <SelectItem value="deep">
+          {(state) => <text>{state.selected ? 'Deep ✓' : 'Deep'}</text>}
+        </SelectItem>
+      </SelectContent>
+    </Select>
+  )
+}
+```
+
+`onUncaughtError` receives a failing root component, a failing nested
+component that no ilha `ErrorBoundary` caught, and a failing commit.
+
+`@gpuix/ilha` requires `ilha@^0.15.1`. 0.15 exposes the `ilha/renderer` host
+entry point, and 0.15.1 fixes keyed components and repaints that the controls
+rely on.
+
+`createTestRoot()` from `@gpuix/ilha/testing` mounts against the GPU-backed test
+renderer, and `@gpuix/ilha/automation` is the shared automation client.
+
+The full ilha adapter API is in the [ilha guide](./website/src/guides/ilha.mdx).
 
 ## Building
 

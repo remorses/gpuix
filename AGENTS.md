@@ -35,7 +35,7 @@ other framework's behaviour.
 
 ## Built-in components follow Base UI
 
-Headless controls in `@gpuix/react` and `@gpuix/solid` (`select`, `combobox`,
+Headless controls in `@gpuix/react`, `@gpuix/solid` and `@gpuix/ilha` (`select`, `combobox`,
 `tooltip`, and any new primitive) should match [Base UI](https://base-ui.com/react/components/select)
 first: same split between Root data and children.
 
@@ -198,6 +198,10 @@ gpuix/
 │       └── package.json
 │   └── solid/                  # Solid 1 universal renderer
 │       ├── src/                # Host tree, roots, primitives, controls
+│       └── package.json
+│   └── ilha/                   # ilha renderer
+│       ├── src/                # GPUIX PaintOps host tree, root, renderer
+│       ├── jsx-runtime.d.ts    # GPUIX JSX types for jsxImportSource
 │       └── package.json
 │
 ├── examples/
@@ -1246,6 +1250,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] Cross-element text selection
 - [x] `highlight` prop: search matches and explicit ranges
 - [x] Headless Select, Combobox, Tooltip
+- [x] ilha renderer (`@gpuix/ilha`) over the `ilha/renderer` host entry point
 - [x] `setWindowTitle`
 - [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)

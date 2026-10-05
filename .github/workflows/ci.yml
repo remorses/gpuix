@@ -136,6 +136,11 @@ jobs:
         shell: bash
         run: bun run build
 
+      - name: Build ilha package
+        working-directory: packages/ilha
+        shell: bash
+        run: bun run build
+
       - name: Compile chat example
         working-directory: examples
         shell: bash
@@ -212,6 +217,21 @@ jobs:
       - name: Build Solid package
         run: bun run build
         working-directory: packages/solid
+
+      - name: Run ilha tests
+        run: bun run test
+        working-directory: packages/ilha
+
+      - name: Build ilha package
+        run: bun run build
+        working-directory: packages/ilha
+
+      # Bun never typechecks. This is what catches a broken JSX or prop type.
+      # It runs after the build: `jsx-runtime.d.ts` imports the event and host
+      # types from `dist`, and without them every handler argument is `any`.
+      - name: Typecheck ilha package
+        run: bun run typecheck
+        working-directory: packages/ilha
 
       - name: Install browser Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -306,6 +326,14 @@ jobs:
       - name: Build Solid package
         run: bun run build
         working-directory: packages/solid
+
+      - name: Run ilha tests
+        run: bun run test
+        working-directory: packages/ilha
+
+      - name: Build ilha package
+        run: bun run build
+        working-directory: packages/ilha
 
       - name: Run example tests
         run: bun run test
