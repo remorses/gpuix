@@ -135,7 +135,7 @@ our ported subprocess tests already — `events.test.tsx` and
 `runtime-error-overlay.test.tsx` have used `fileURLToPath` from the start.
 `9362f04` only regenerates the native declaration; this round regenerated it from the Rust API.
 
-**Last inventoried upstream head:** `4ecca30` (checked again 2026-10-01; no new commits)
+**Last inventoried upstream head:** `4ecca30` (checked again 2026-10-06; no new commits. git-over-SSH to github.com worked this round — the `upstream` remote was missing from this checkout and was re-added as `git@github.com:remorses/gpuix.git`)
 
 ### Fork-local desktop follow-ups
 
