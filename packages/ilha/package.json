@@ -1,0 +1,110 @@
+{
+  "name": "@gpuix/ilha",
+  "version": "0.10.0",
+  "description": "ilha renderer for GPUIX",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./host": {
+      "types": "./dist/host.d.ts",
+      "import": "./dist/host.js",
+      "default": "./dist/host.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    },
+    "./automation": {
+      "types": "./dist/automation.d.ts",
+      "import": "./dist/automation.js",
+      "default": "./dist/automation.js"
+    },
+    "./select": {
+      "types": "./dist/components/select.d.ts",
+      "import": "./dist/components/select.js",
+      "default": "./dist/components/select.js"
+    },
+    "./combobox": {
+      "types": "./dist/components/combobox.d.ts",
+      "import": "./dist/components/combobox.js",
+      "default": "./dist/components/combobox.js"
+    },
+    "./tooltip": {
+      "types": "./dist/components/tooltip.d.ts",
+      "import": "./dist/components/tooltip.js",
+      "default": "./dist/components/tooltip.js"
+    },
+    "./button": {
+      "types": "./dist/components/button.d.ts",
+      "import": "./dist/components/button.js",
+      "default": "./dist/components/button.js"
+    },
+    "./dialog": {
+      "types": "./dist/components/dialog.d.ts",
+      "import": "./dist/components/dialog.js",
+      "default": "./dist/components/dialog.js"
+    },
+    "./floating": {
+      "types": "./dist/components/floating.d.ts",
+      "import": "./dist/components/floating.js",
+      "default": "./dist/components/floating.js"
+    },
+    "./jsx-runtime": {
+      "types": "./jsx-runtime.d.ts",
+      "import": "./jsx-runtime.js",
+      "default": "./jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./jsx-dev-runtime.d.ts",
+      "import": "./jsx-dev-runtime.js",
+      "default": "./jsx-dev-runtime.js"
+    }
+  },
+  "files": [
+    "dist",
+    "jsx-runtime.js",
+    "jsx-runtime.d.ts",
+    "jsx-dev-runtime.js",
+    "jsx-dev-runtime.d.ts",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/remorses/gpuix",
+    "directory": "packages/ilha"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/ilha locally. CI is the only release path.'); process.exit(1) }\"",
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "vitest run src/__tests__",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@gpuix/native": "workspace:^"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0",
+    "ilha": "^0.15.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "@types/node": "^25.3.3",
+    "effect": "^4.0.0",
+    "ilha": "^0.15.1",
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.18"
+  }
+}
