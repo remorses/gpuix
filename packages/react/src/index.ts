@@ -105,6 +105,7 @@ export {
   usePresence,
 } from "./components/index.js"
 export type { AnimatePresenceProps } from "./components/index.js"
+export { onFrame, stepSpring, GELATIN } from "./motion-spring.js"
 export type { Root, FrameLoop, RenderOptions } from "./reconciler/renderer.js"
 export type {
   WindowInsets,
@@ -141,6 +142,8 @@ export type {
   MotionProps,
   MotionStyle,
   MotionTransition,
+  MotionSpringTransition,
+  MotionTweenTransition,
   MutationHost,
   NativeRenderer,
   NativeWindowInsets,

@@ -15,6 +15,7 @@ import type {
   WindowKeyEventHandlers,
 } from "../types/host.js"
 import type { LiveAutomationRenderer } from "@gpuix/native/automation"
+import { pumpFrames } from "../motion-spring.js"
 
 export { createRoot, flushSync, reconciler } from "./reconciler.js"
 export type { Root } from "./reconciler.js"
@@ -108,7 +109,22 @@ export function startFrameLoop(
   renderer: Pick<GpuixRenderer, "requiresTick" | "tick">,
   options: { frameMs?: number; onTerminated?: () => void } = {}
 ): FrameLoop {
-  return startNativeFrameLoop(renderer, {
+  // Spring motion.div leases step on the same loop, just before each tick.
+  let lastFrame = performance.now()
+  const pumped: Pick<GpuixRenderer, "requiresTick" | "tick"> = {
+    requiresTick: () => renderer.requiresTick(),
+    tick: () => {
+      const started = performance.now()
+      try {
+        pumpFrames(Math.min((started - lastFrame) / 1000, 0.032), started)
+      } catch (error) {
+        scheduleRuntimeError(thrownToError(error))
+      }
+      lastFrame = started
+      return renderer.tick()
+    },
+  }
+  return startNativeFrameLoop(pumped, {
     ...options,
     onError: (error) => scheduleRuntimeError(thrownToError(error)),
   })
