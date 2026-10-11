@@ -56,6 +56,30 @@ describe("collectGarbageWhenIdle", () => {
     expect(collect).not.toHaveBeenCalled()
   })
 
+  it("collects under Bun with a full collection and then a shrink, which releases the freed pages", () => {
+    const calls: string[] = []
+    vi.stubGlobal("Bun", { gc: (force: boolean) => calls.push(`gc:${force}`), shrink: () => calls.push("shrink") })
+    try {
+      collectGarbageWhenIdle({ activity: () => 0, checkMs: 1000, quietChecks: 1 })
+      vi.advanceTimersByTime(1000)
+      expect(calls).toEqual(["gc:true", "shrink"])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("still collects under a Bun that has no shrink", () => {
+    const calls: string[] = []
+    vi.stubGlobal("Bun", { gc: (force: boolean) => calls.push(`gc:${force}`) })
+    try {
+      collectGarbageWhenIdle({ activity: () => 0, checkMs: 1000, quietChecks: 1 })
+      vi.advanceTimersByTime(1000)
+      expect(calls).toEqual(["gc:true"])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("counts applied mutation batches by default", () => {
     const renderer = { applyBatch: () => [] as number[] }
     const queue = createMutationQueue(renderer)
