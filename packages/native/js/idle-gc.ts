@@ -7,7 +7,10 @@ export interface IdleGcOptions {
    * moves on every commit, scroll-driven render and typed character.
    */
   activity?: () => number
-  /** Runs the collection. Defaults to `Bun.gc(true)`, then `globalThis.gc` (Node's `--expose-gc`). */
+  /**
+   * Runs the collection. Defaults to `Bun.gc(true)` followed by `Bun.shrink()`, or else
+   * `globalThis.gc` (Node's `--expose-gc`).
+   */
   collect?: () => void
   /** How often to look, in ms. Default 5000. */
   checkMs?: number
@@ -28,10 +31,18 @@ function cpuMs(): number {
 
 function defaultCollector(): Collector | undefined {
   const runtime = globalThis as unknown as {
-    Bun?: { gc(force: boolean): void }
+    Bun?: { gc(force: boolean): void; shrink?(): void }
     gc?: () => void
   }
-  if (runtime.Bun) return () => runtime.Bun!.gc(true)
+  if (runtime.Bun) {
+    const bun = runtime.Bun
+    // A collection alone leaves the freed pages and the caches the engine rebuilds on demand
+    // in place; shrinking releases them (about 45 MB on a long chat thread).
+    return () => {
+      bun.gc(true)
+      bun.shrink?.()
+    }
+  }
   if (runtime.gc) return () => runtime.gc!()
   return undefined
 }

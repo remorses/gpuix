@@ -1848,9 +1848,11 @@ import { collectGarbageWhenIdle } from '@gpuix/react'
 const stop = collectGarbageWhenIdle() // checks every 5s, collects after two quiet checks
 ```
 
-It uses `Bun.gc(true)`, or `gc()` where Node runs with `--expose-gc`, and does
-nothing in a runtime that has neither. Quiet means no mutation batch reached a
-renderer and the process is under half a core. The batch count decides, not CPU
+It uses `Bun.gc(true)` followed by `Bun.shrink()`, which also hands the freed pages
+and rebuildable engine caches back (about 45 MB on a long chat thread), or `gc()`
+where Node runs with `--expose-gc`, and does nothing in a runtime that has neither.
+Quiet means no mutation batch reached a renderer and the process is under half a
+core. The batch count decides, not CPU
 alone, because a focused text field blinks its caret in native code and redraws
 twice a second. Pass `activity`, `collect`, `checkMs`, `quietChecks` or
 `busyCpu` to change what it watches or how often.
