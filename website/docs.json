@@ -36,7 +36,7 @@
           {
             "group": "Guides",
             "icon": "lucide:map",
-            "pages": ["guides/solid", "guides/hermes"]
+            "pages": ["guides/solid", "guides/ilha", "guides/hermes"]
           }
         ]
       },

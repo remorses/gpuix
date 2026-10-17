@@ -15,17 +15,25 @@
     "timeline": "bun --hot timeline.tsx",
     "mail": "bun --hot mail.tsx",
     "compile": "bun compile-chat.ts",
-    "bench:serde": "bun bench-serialization.ts"
+    "bench:serde": "bun bench-serialization.ts",
+    "chat-ilha": "bun --hot ilha/chat.tsx",
+    "chat-ilha:check": "cd ilha && bun chat.automation.ts",
+    "chat-ilha:bench": "cd ilha && bun chat.bench.ts",
+    "counter-ilha": "bun --hot ilha/counter.tsx",
+    "counter-ilha:check": "cd ilha && bun counter.automation.ts"
   },
   "dependencies": {
+    "@gpuix/ilha": "workspace:^",
     "@gpuix/react": "workspace:^",
     "@gpuix/solid": "workspace:^",
-    "solid-js": "1.9.15",
     "@kmamal/sdl": "^0.11.12",
     "diff": "^7.0.0",
+    "effect": "^4.0.0",
+    "ilha": "^0.15.1",
     "react": "^19.2.4",
     "safe-mdx": "1.14.0",
     "shiki": "^3.0.0",
+    "solid-js": "1.9.15",
     "string-dedent": "^3.0.2"
   },
   "devDependencies": {
