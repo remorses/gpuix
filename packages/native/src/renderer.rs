@@ -532,7 +532,7 @@ enum UiCommand {
         input: KeyInput,
         response: SyncSender<std::result::Result<(), String>>,
     },
-    #[cfg(all(target_os = "windows", feature = "test-support"))]
+    #[cfg(all(any(target_os = "windows", target_os = "linux"), feature = "test-support"))]
     CaptureScreenshot {
         path: String,
         response: SyncSender<std::result::Result<(), String>>,
@@ -900,7 +900,7 @@ async fn run_ui_commands(
                     .ok();
                 result
             }
-            #[cfg(all(target_os = "windows", feature = "test-support"))]
+            #[cfg(all(any(target_os = "windows", target_os = "linux"), feature = "test-support"))]
             UiCommand::CaptureScreenshot { path, response } => {
                 let error_response = response.clone();
                 let result = window.update(cx, move |_view, window, cx| {
@@ -2902,14 +2902,21 @@ impl GpuixRenderer {
             return recv_ui_response(receiver, "screenshot capture")?.map_err(Error::from_reason);
         }
 
+        #[cfg(all(target_os = "linux", feature = "test-support"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::CaptureScreenshot { path, response })?;
+            return recv_ui_response(receiver, "screenshot capture")?.map_err(Error::from_reason);
+        }
+
         #[cfg(not(all(
             feature = "test-support",
-            any(target_os = "macos", target_os = "windows")
+            any(target_os = "macos", target_os = "windows", target_os = "linux")
         )))]
         {
             let _ = path;
             Err(Error::from_reason(
-                "captureScreenshot needs a test-support build on macOS or Windows",
+                "captureScreenshot needs a test-support build on macOS, Windows, or Linux",
             ))
         }
     }

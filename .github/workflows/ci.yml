@@ -32,11 +32,13 @@ jobs:
             bunTarget: bun-darwin-arm64
             build: bun run build
           # ── Linux (Vulkan/wgpu) ────────────────────────────────────
-          # build:release disables test-support until wgpu image readback lands.
+          # test-support (TestGpuixRenderer + render_to_image) is on by
+          # default; the wgpu offscreen image readback it relies on has
+          # landed, so Linux ships the same test renderer as macOS/Windows.
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             bunTarget: bun-linux-x64
-            build: bun run build:release
+            build: bun run build
           # ── Windows (Direct3D) ─────────────────────────────────────
           # Test support includes TestGpuixRenderer and render_to_image.
           - host: windows-latest
@@ -333,6 +335,74 @@ jobs:
         run: bun run test
         working-directory: examples
 
+  test-linux:
+    name: test-linux
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # wgpu (Vulkan) needs an ICD on a headless runner; the test renderer
+      # renders offscreen through the same wgpu path as production.
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            libvulkan1 \
+            vulkan-validationlayers \
+            libfontconfig1 \
+            libwayland-client0 \
+            libx11-6
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: packages/native/
+
+      - name: Load native binding with Bun
+        run: bun -e "import('./packages/native/index.js').then(() => console.log('Linux native binding OK (bun)'))"
+
+      - name: Load native binding with Node
+        run: node -e "import('./packages/native/index.js').then(() => console.log('Linux native binding OK (node)'))"
+
+      - name: Verify Linux test renderer
+        run: bun -e "import { statSync } from 'node:fs'; const { TestGpuixRenderer } = await import('./packages/native/index.js'); const renderer = new TestGpuixRenderer(320, 200); renderer.applyBatch(JSON.stringify([['createElement',1,'text'],['setText',1,'Linux test renderer'],['setRoot',1]])); renderer.flush(); renderer.captureScreenshot('linux-test-renderer.png'); if (renderer.getAllText()[0] !== 'Linux test renderer' || statSync('linux-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
+
+      - name: Build native shared TypeScript
+        run: bun run build:js
+        working-directory: packages/native
+
+      - name: Run React tests
+        run: bun run test
+        working-directory: packages/react
+
+      - name: Build React package
+        run: bun run build
+        working-directory: packages/react
+
+      - name: Run Solid tests
+        run: bun run test
+        working-directory: packages/solid
+
+      - name: Build Solid package
+        run: bun run build
+        working-directory: packages/solid
+
+      - name: Run example tests
+        run: bun run test
+        working-directory: examples
+
   publish-cli:
     name: publish-cli
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -376,6 +446,7 @@ jobs:
       - build
       - test
       - test-windows
+      - test-linux
     permissions:
       contents: write
       id-token: write

@@ -2,10 +2,7 @@
 
 #[cfg(all(
     not(all(target_arch = "wasm32", target_os = "unknown")),
-    not(all(
-        feature = "test-support",
-        any(target_os = "macos", target_os = "windows")
-    ))
+    not(feature = "test-support")
 ))]
 use napi::bindgen_prelude::*;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -35,7 +32,7 @@ mod updater;
 
 #[cfg(all(
     feature = "test-support",
-    any(target_os = "macos", target_os = "windows")
+    not(all(target_arch = "wasm32", target_os = "unknown"))
 ))]
 mod test_renderer;
 
@@ -45,15 +42,16 @@ pub use style::*;
 
 #[cfg(any(
     test,
-    not(all(
-        feature = "test-support",
-        any(target_os = "macos", target_os = "windows")
-    ))
+    all(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        not(feature = "test-support")
+    )
 ))]
 const TEST_GPUIX_RENDERER_UNAVAILABLE: &str = concat!(
-    "TestGpuixRenderer is macOS and Windows only. ",
-    "Linux builds have no test-support because wgpu cannot read a rendered image back yet. ",
-    "GpuixRenderer still works on Linux."
+    "TestGpuixRenderer requires the `test-support` feature. ",
+    "Rebuild the native package with the `test-support` feature (a default feature) ",
+    "to get the real GPU test renderer. ",
+    "GpuixRenderer works on all desktop platforms including Linux."
 );
 
 /// True only when this binary compiled the real GPU test renderer.
@@ -62,26 +60,20 @@ const TEST_GPUIX_RENDERER_UNAVAILABLE: &str = concat!(
 pub fn has_test_gpuix_renderer() -> bool {
     cfg!(all(
         feature = "test-support",
-        any(target_os = "macos", target_os = "windows")
+        not(all(target_arch = "wasm32", target_os = "unknown"))
     ))
 }
 
 #[cfg(all(
     not(all(target_arch = "wasm32", target_os = "unknown")),
-    not(all(
-        feature = "test-support",
-        any(target_os = "macos", target_os = "windows")
-    ))
+    not(feature = "test-support")
 ))]
 #[napi]
 pub struct TestGpuixRenderer;
 
 #[cfg(all(
     not(all(target_arch = "wasm32", target_os = "unknown")),
-    not(all(
-        feature = "test-support",
-        any(target_os = "macos", target_os = "windows")
-    ))
+    not(feature = "test-support")
 ))]
 #[napi]
 impl TestGpuixRenderer {
@@ -96,12 +88,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unavailable_message_explains_linux() {
-        assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("macOS and Windows only"));
+    fn unavailable_message_explains_test_support() {
         assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains(
-            "Linux builds have no test-support because wgpu cannot read a rendered image back yet"
+            "requires the `test-support` feature"
         ));
-        assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("GpuixRenderer still works on Linux"));
+        assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains(
+            "Rebuild the native package with the `test-support` feature"
+        ));
+        assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains(
+            "GpuixRenderer works on all desktop platforms including Linux"
+        ));
     }
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -111,17 +107,14 @@ mod tests {
             has_test_gpuix_renderer(),
             cfg!(all(
                 feature = "test-support",
-                any(target_os = "macos", target_os = "windows")
+                not(all(target_arch = "wasm32", target_os = "unknown"))
             ))
         );
     }
 
     #[cfg(all(
         not(all(target_arch = "wasm32", target_os = "unknown")),
-        not(all(
-            feature = "test-support",
-            any(target_os = "macos", target_os = "windows")
-        ))
+        not(feature = "test-support")
     ))]
     #[test]
     fn stub_constructor_explains_why() {
