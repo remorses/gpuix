@@ -43,13 +43,27 @@ export type MotionEase =
   | "easeInOut"
   | [number, number, number, number]
 
-export interface MotionTransition {
+export interface MotionTweenTransition {
+  type?: "tween"
   /** Duration in seconds. */
   duration?: number
   /** Delay in seconds. */
   delay?: number
   ease?: MotionEase
 }
+
+/** Critically-underdamped integrator. Defaults are gelatinous, not snappy. */
+export interface MotionSpringTransition {
+  type: "spring"
+  stiffness?: number
+  damping?: number
+  mass?: number
+  velocity?: number
+  /** Delay in seconds. */
+  delay?: number
+}
+
+export type MotionTransition = MotionTweenTransition | MotionSpringTransition
 
 export interface MotionProps {
   initial?: MotionStyle | false

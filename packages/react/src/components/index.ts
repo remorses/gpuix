@@ -1,8 +1,26 @@
 // GPUIX component definitions and native motion wrappers.
 
-import { createElement, forwardRef, useContext, useEffect, useMemo } from "react"
+import { createElement, forwardRef, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactElement, ReactNode } from "react"
-import type { MotionProps, Props, PublicInstance, StyleDesc } from "../types/host.js"
+import type {
+  MotionProps,
+  MotionSpringTransition,
+  MotionStyle,
+  Props,
+  PublicInstance,
+  StyleDesc,
+} from "../types/host.js"
+import {
+  allSpringChannelsRest,
+  animateSignature,
+  GELATIN,
+  seedSpringTrack,
+  SPRING_KEYS,
+  stepSpringLease,
+  subscribeSpringTick,
+  type SpringKey,
+  type SpringTrack,
+} from "../motion-spring.js"
 import { PresenceContext, usePresence } from "./animate-presence.js"
 
 let nextMotionGeneration = 0
@@ -63,28 +81,117 @@ export interface MotionDivProps extends MotionProps {
   autoFocus?: boolean
 }
 
+function isSpringTransition(
+  transition: MotionProps["transition"]
+): transition is MotionSpringTransition {
+  return transition != null && transition.type === "spring"
+}
+
+function readStyle(style: MotionStyle | false | undefined, key: SpringKey): number | undefined {
+  if (style == null || style === false) return undefined
+  return style[key]
+}
+
 const MotionDiv = forwardRef<PublicInstance, MotionDivProps>(function MotionDiv(
-  { initial, animate, exit, transition, onMotionComplete, ...props },
+  { initial, animate, exit, transition, onMotionComplete, style, ...props },
   ref
 ): ReactElement {
   const presence = useContext(PresenceContext)
   const [isPresent, safeToRemove] = usePresence()
   const resolvedInitial = presence?.initial === false ? false : initial
   const resolvedAnimate = !isPresent && exit ? exit : animate
+  const spring = isSpringTransition(transition)
 
   useEffect(() => {
     if (!isPresent && !exit) safeToRemove?.()
   }, [exit, isPresent, safeToRemove])
 
+  const animateRef = useRef(resolvedAnimate)
+  animateRef.current = resolvedAnimate
+  const [current, setCurrent] = useState<MotionStyle>(() => {
+    const seed: MotionStyle = {}
+    for (const key of SPRING_KEYS) {
+      const value = readStyle(resolvedInitial, key) ?? resolvedAnimate[key]
+      if (value != null) seed[key] = value
+    }
+    return seed
+  })
+  const tracks = useRef<Partial<Record<SpringKey, SpringTrack>>>({})
+  const paintedRef = useRef(current)
+  const transitionRef = useRef(transition)
+  transitionRef.current = transition
+  const exitingRef = useRef<(() => void) | null>(null)
+  // Springs are JS-driven, so an exit completes when the lease parks at rest
+  // rather than on a native motionComplete event.
+  exitingRef.current = spring && !isPresent && exit ? (safeToRemove ?? null) : null
+  const targetSignature = spring ? `${isPresent}|${animateSignature(resolvedAnimate)}` : ""
+
+  useEffect(() => {
+    if (!spring) return
+    const spec = transitionRef.current
+    const kick = isSpringTransition(spec) ? (spec.velocity ?? 0) : 0
+    const target = animateRef.current
+    for (const key of SPRING_KEYS) {
+      const to = target[key]
+      if (to == null) continue
+      seedSpringTrack(tracks.current, key, paintedRef.current[key], to, kick)
+    }
+    if (allSpringChannelsRest(tracks.current, target)) {
+      exitingRef.current?.()
+      return
+    }
+
+    let elapsedMs = 0
+    return subscribeSpringTick((dt) => {
+      const live = transitionRef.current
+      if (!isSpringTransition(live)) return false
+      elapsedMs += dt * 1000
+      const result = stepSpringLease({
+        tracks: tracks.current,
+        target: animateRef.current,
+        painted: paintedRef.current,
+        dt,
+        elapsedMs,
+        stiffness: live.stiffness ?? GELATIN.stiffness,
+        damping: live.damping ?? GELATIN.damping,
+        mass: live.mass ?? GELATIN.mass,
+        kick: live.velocity ?? 0,
+      })
+      if (result.publish) {
+        paintedRef.current = result.painted
+        setCurrent(result.painted)
+      }
+      if (!result.moving) exitingRef.current?.()
+      return result.moving
+    })
+  }, [spring, targetSignature])
+
   const motionKey = JSON.stringify([
     isPresent,
     motionStyleKey(resolvedInitial),
     motionStyleKey(resolvedAnimate),
-    transition?.duration,
-    transition?.delay,
-    transition?.ease,
+    transition ?? null,
   ])
   const generation = useMemo(() => ++nextMotionGeneration, [motionKey])
+
+  if (spring) {
+    const hostProps: Props = {
+      ...props,
+      ref,
+      style: {
+        ...(style ?? {}),
+        ...(current.width != null ? { width: current.width } : {}),
+        ...(current.height != null ? { height: current.height } : {}),
+        ...(current.opacity != null ? { opacity: current.opacity } : {}),
+        ...(current.top != null ? { top: current.top } : {}),
+        ...(current.right != null ? { right: current.right } : {}),
+        ...(current.bottom != null ? { bottom: current.bottom } : {}),
+        ...(current.left != null ? { left: current.left } : {}),
+        ...(current.borderRadius != null ? { borderRadius: current.borderRadius } : {}),
+      },
+    }
+    return createElement("div", hostProps)
+  }
 
   const motionDescription = {
     generation,
@@ -96,6 +203,7 @@ const MotionDiv = forwardRef<PublicInstance, MotionDivProps>(function MotionDiv(
   const hostProps: Props = {
     ...props,
     ref,
+    style,
     motion: motionDescription,
   }
   if (!isPresent || onMotionComplete) {
