@@ -1,0 +1,779 @@
+---
+$schema: https://holocron.so/frontmatter.json
+title: "Build native GPUI desktop apps with ilha"
+sidebarTitle: ilha
+description: "Paint an ilha tree with GPUI. Covers render, atoms, events, GPUIX elements and props, components, streams, contexts, window primitives, refs, testing, automation, and every @gpuix/ilha export."
+icon: "lucide:island"
+prompt: |
+  Write the ilha renderer guide from @/packages/ilha/, @/README.md,
+  @/packages/native/js/host.ts, @/packages/native/js/testing.ts, and
+  @/packages/native/js/automation/index.ts.
+
+  Cover install, jsxImportSource, render, atoms, events, elements, styles,
+  components, keyed lists, streams and generators, contexts, error
+  boundaries, useGpuix, testing, and automation, with a usage snippet for
+  every public export. Do not invent APIs. Use ilha names (atom, render).
+---
+
+**`@gpuix/ilha`** paints an [ilha](https://ilha.build) tree with GPUI. Same host elements, styles, events, and native addon as React and Solid. The adapter is ilha. The window is not a web view.
+
+```diagram
+  app.tsx                  ilha painter              @gpuix/native
+  atom() ──────────────►   PaintOps ──────────────►  host mutations ──► GPUI ──► GPU
+       │                        │
+       ▼                        ▼
+  component rerun        GPUIX host tree
+  morphs the view        keeps element identity
+```
+
+<Aside>
+<Note>
+Host elements, styles, events, virtual lists, and native text are the same as React and Solid. This page covers the **ilha adapter**. See the [homepage](../index.mdx) for the shared GPUIX surface.
+</Note>
+</Aside>
+
+## Install
+
+```bash
+bun add --exact @gpuix/ilha @gpuix/native ilha effect
+```
+
+Pin **`@gpuix/ilha`** and **`@gpuix/native`** to the same exact version. GPUIX is still pre-1.0. Upgrade them together.
+
+`effect` is ilha's peer dependency. **`@gpuix/ilha`** requires **`ilha@^0.15.1`**. 0.15 exposes the `ilha/renderer` host entry point the adapter paints through, and 0.15.1 fixes keyed components and repaints that the controls rely on.
+
+### TypeScript
+
+**`jsx: "react-jsx"`** and **`jsxImportSource: "@gpuix/ilha"`** are required. Without them TypeScript uses DOM types, so `<virtual-list>`, `<markdown>`, and `style.hover` fail to typecheck.
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@gpuix/ilha",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  }
+}
+```
+
+The adapter's `jsx-runtime` re-exports ilha's JSX factory, so a component still returns ilha vnodes. Only the element and prop types are GPUIX's.
+
+<Aside>
+<Warning>
+Bun takes the JSX runtime from the `tsconfig.json` of the directory you start it in, not the one next to the file. Started from another folder, the file compiles with React's runtime and the window paints `[object Object]`. Run from the folder that holds this `tsconfig.json`, or put `/** @jsxImportSource @gpuix/ilha */` at the top of the entry file.
+</Warning>
+</Aside>
+
+## First app
+
+End the file with **`render()`**. That call creates the window, mounts the component, and starts the frame loop.
+
+```tsx
+import { atom } from 'ilha'
+import { render } from '@gpuix/ilha'
+
+const Counter = () => {
+  const count = atom(0)
+  return (
+    <div style={{ padding: 24, backgroundColor: '#1a1a1a', height: '100%' }}>
+      <div
+        testId="increment"
+        onclick={() => count.update((n: number) => n + 1)}
+        style={{
+          padding: 12,
+          borderRadius: 8,
+          cursor: 'pointer',
+          backgroundColor: '#232323',
+          hover: { backgroundColor: '#2c2c2c' },
+        }}
+      >
+        <text style={{ color: '#e2e2e2' }}>Count: {count}</text>
+      </div>
+    </div>
+  )
+}
+
+render(Counter, { title: 'ilha GPUIX', width: 800, height: 600 })
+```
+
+Give every **`<text>`** a `color`. GPUI does not inherit color from a parent. Text with no color paints black and disappears on a dark surface.
+
+Read an atom in JS with **`count()`**. Pass the handle in JSX with **`{count}`** so only that node subscribes. Both forms are ilha's, unchanged.
+
+## Run
+
+```bash
+bun app.tsx
+bun --hot app.tsx
+```
+
+Use **`bun --hot`** so a save remounts the component on the same window. `render()` is idempotent. The first call owns the window. Later calls only remount.
+
+Do **not** call `createRenderer()` or `init()` in the app entry. `bun --hot` re-runs the file. A second `init()` would open a second window.
+
+<Aside>
+<Warning>
+Desktop `bun --hot` remounts the tree. It does not keep `atom()` state. That is the same remount path as React and Solid, not Fast Refresh.
+</Warning>
+</Aside>
+
+## Package exports
+
+| Import                        | What it is                                              |
+| ----------------------------- | ------------------------------------------------------- |
+| `@gpuix/ilha`                 | `render`, `createRenderer`, `createRoot`, `useGpuix`, `windowSize`, `windowInsets`, `selectedText`, `textSearch`, the host |
+| `@gpuix/ilha/jsx-runtime`     | ilha's `jsx`, `jsxs`, `Fragment`. Used by `jsxImportSource` |
+| `@gpuix/ilha/jsx-dev-runtime` | `jsxDEV`, `Fragment`                                    |
+| `@gpuix/ilha/button`, `/select`, `/combobox`, `/dialog`, `/tooltip`, `/floating` | The headless controls, one part family each |
+| `@gpuix/ilha/host`            | `HostRoot`, `HostElement`, `HostText`, `gpuixOps`       |
+| `@gpuix/ilha/testing`         | `createTestRoot`, `TestRenderer`                        |
+| `@gpuix/ilha/automation`      | `launch`, `connectTest`                                 |
+
+`@gpuix/ilha` exports the renderer, the host, and the [window primitives](#window-primitives). State primitives — `atom`, `batch`, `untrack`, `watch`, `when`, `resource`, `invalidate`, `fromEventSource`, `createContext`, `context`, `ErrorBoundary` — come from **`ilha`**.
+
+It also re-exports **`@gpuix/native/host`** types (`StyleDesc`, `HostProps`, `HighlightSpec`, `MotionProps`, …) and `GpuixRenderer`.
+
+## `render()`
+
+```ts
+function render(component: Component, options?: RenderOptions): Root
+function createRenderer(onEvent?: (event: EventPayload) => void): GpuixRenderer
+function resetRender(): void
+```
+
+```ts
+interface RenderOptions extends WindowOptions, RootEventHandlers {
+  renderer?: NativeRenderer
+  debugFrameOverlay?: 'hidden' | 'minimal' | 'full'
+}
+```
+
+| Option                            | Purpose                                                    |
+| --------------------------------- | ---------------------------------------------------------- |
+| `title`                           | Window title                                               |
+| `width` / `height`                | Window size                                                |
+| `titlebarTransparent`             | Hide the native titlebar                                   |
+| `windowBackground`                | `"opaque"`, `"transparent"`, `"blurred"`                   |
+| `trafficLightX` / `trafficLightY` | Traffic-light origin                                       |
+| `appName`                         | Name inside macOS Hide and Quit items                      |
+| `focus`                           | `false` opens behind the active app                        |
+| `show`                            | `false` opens hidden. Call `activateWindow()` to reveal it |
+| `debugFrameOverlay`               | `"hidden"`, `"minimal"`, `"full"`                          |
+| `renderer`                        | Inject a `TestRenderer` or custom host                     |
+
+A component may be sync, async, or a generator. `render` returns the `Root`, which owns the tree:
+
+```ts
+interface Root {
+  render(component: Component): void
+  flush(): void
+  flushSync<Value>(fn: () => Value): Value
+  dispatch(event: EventPayload): boolean
+  unmount(): void
+}
+```
+
+## State
+
+Every ilha primitive works. Reads during render subscribe the component; writes rerun it.
+
+```tsx
+import { atom, batch, untrack } from 'ilha'
+import * as Atom from 'effect/reactivity/Atom'
+
+const Cart = () => {
+  const items = atom([{ n: 1 }, { n: 2 }])
+  const total = atom(
+    Atom.map(items.atom, (list) => list.reduce((sum, item) => sum + item.n, 0))
+  )
+
+  const reset = () =>
+    batch(() => {
+      items.set([])
+    })
+
+  const peek = untrack(() => items().length)
+
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <text>Total: {total}</text>
+      <div onclick={reset}>Reset</div>
+      <text>Rows: {peek}</text>
+    </div>
+  )
+}
+```
+
+| Call                         | Meaning                |
+| ---------------------------- | ---------------------- |
+| `count()`                    | Read the current value |
+| `{count}` in JSX             | Read and subscribe     |
+| `count.set(1)`               | Replace                |
+| `count.update((n) => n + 1)` | Patch from previous    |
+| `atom.lazy(() => …)`         | One-time initializer   |
+
+`watch(source, fn)` runs on atom or stream changes; `watch.once(fn)` runs once on mount and may return a cleanup.
+
+```tsx
+import { atom, watch } from 'ilha'
+
+const Profile = () => {
+  const name = atom('john')
+  watch(name, (value) => {
+    console.log('name changed', value)
+  })
+  watch.once(() => {
+    const timer = setInterval(() => console.log('tick'), 1000)
+    return () => clearInterval(timer)
+  })
+  return <text>{name}</text>
+}
+```
+
+## Events
+
+Event props are **lowercase native names**, exactly as in ilha on the web. The handler receives the GPUIX `EventPayload` plus the DOM-shaped fields an ilha handler reads: `type`, `target`, `currentTarget`, `preventDefault()`, `stopPropagation()`.
+
+```tsx
+const Panel = () => {
+  const open = atom(false)
+  return (
+    <div
+      onclick={() => open.update((value) => !value)}
+      onmouseenter={() => undefined}
+    >
+      <text>{open() ? 'Open' : 'Closed'}</text>
+    </div>
+  )
+}
+```
+
+| ilha prop      | GPUIX event  |
+| -------------- | ------------ |
+| `onclick`      | `click`      |
+| `onauxclick`   | `auxClick`   |
+| `oncontextmenu`| `auxClick`   |
+| `onmousedown`  | `mouseDown`  |
+| `onmouseup`    | `mouseUp`    |
+| `onmousemove`  | `mouseMove`  |
+| `onmouseenter` | `mouseEnter` |
+| `onmouseleave` | `mouseLeave` |
+| `oninput`      | `change`     |
+| `onchange`     | `change`     |
+| `onsubmit`     | `submit`     |
+| `onkeydown`    | `keyDown`    |
+| `onkeyup`      | `keyUp`      |
+| `onfocus`      | `focus`      |
+| `onblur`       | `blur`       |
+| `onscroll`     | `scroll`     |
+| `ondrop`       | `fileDrop`   |
+
+`oninput` and `onchange` on one element both fire. `oncontextmenu` fires for the right button only; `onauxclick` fires for every non-primary button.
+
+Every other GPUIX event is reachable through its own name, in camelCase or lowercase. ilha lowercases event props, so `onLinkClick` and `onlinkclick` are the same prop.
+
+| GPUIX prop           | Fires on                                        |
+| -------------------- | ----------------------------------------------- |
+| `onMouseDownOutside` | A press outside the element                     |
+| `onFileDrop`         | A Finder / OS file drop. `ondrop` is an alias   |
+| `onHighlight`        | The match count of the element's `highlight`    |
+| `onMotionComplete`   | A native `motion` track reaching its target     |
+| `onVisibleRange`     | `<virtual-list>` scroll                         |
+| `onLinkClick`        | `<markdown>` link                               |
+| `onToggleFile`, `onShowMore`, `onLineClick` | `<diff>`                 |
+
+A prop with no GPUIX event (`ondblclick`, `onpointerdown`, `ontoggle`) is never registered, and logs one warning naming the prop.
+
+On `onkeydown`, **`event.preventDefault()`** cancels the default action, such as Tab moving focus, and **`event.stopPropagation()`** skips ancestor and window key handlers. They are the flags of the GPUIX `KeyEvent`, shared by every handler of one keystroke.
+
+```tsx
+const Field = () => {
+  const value = atom('')
+  return (
+    <input
+      autoFocus
+      value={value}
+      oninput={(event) => value.set(String(event.value))}
+      style={{ padding: 8, backgroundColor: '#232323', color: '#e2e2e2' }}
+    />
+  )
+}
+```
+
+`event.value` is what a `<input>` or `<textarea>` reports, and `event.currentTarget.value` reads the same string.
+
+## Elements
+
+GPUIX has a fixed element set. A JSX tag without a native counterpart renders as a `<div>`, so markup ports unchanged while styling stays GPUIX's job.
+
+| Tag                                    | GPUIX element  |
+| -------------------------------------- | -------------- |
+| `div`, `span`, `p`, `section`, `main`, `h1`–`h6`, `ul`, `li`, `button`, `a`, `form`, `label`, `table`, `tr`, `td`, … | `div` |
+| `text`                                 | `text`         |
+| `img`                                  | `img`          |
+| `svg`                                  | `svg`          |
+| `canvas`                               | `canvas`       |
+| `input`                                | `input`        |
+| `textarea`                             | `textarea`     |
+| `code`                                 | `code`         |
+| `diff`                                 | `diff`         |
+| `markdown`                             | `markdown`     |
+| `virtual-list`                         | `virtual-list` |
+| `anchored`                             | `anchored`     |
+
+```tsx
+const View = () => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <text style={{ fontSize: 18, color: '#e2e2e2' }}>Report</text>
+    <code language="ts" code="const x = 1" style={{ padding: 12 }} />
+    <markdown source="# Title" style={{ padding: 12 }} />
+    <img src="/tmp/logo.png" alt="logo" objectFit="contain" />
+  </div>
+)
+```
+
+## Props and styles
+
+`style` accepts a **`StyleDesc` object** or a **CSS declaration string**. GPUIX converts the string for you.
+
+```tsx
+<div style={{ display: 'flex', gap: 8, padding: 12, borderRadius: 6 }}>
+<div style="display:flex;gap:8;padding:12;border-radius:6">
+```
+
+Every other prop reaches GPUIX **as it is**, so object-valued props work. A repaint sends only the props and styles that changed, and a prop the next render drops is cleared.
+
+```tsx
+<text highlight={{ query: 'needle', activeIndex: 0 }} testId="body">
+  a needle in the haystack
+</text>
+
+<code theme={{ appearance: 'dark', bg: '#101014' }} code="const x = 1" />
+```
+
+GPUIX reads these props per element: `testId`, `role`, `aria-*`, `tabIndex`, `autoFocus`, `highlight`, `motion`, `src`, `alt`, `objectFit`, `value`, `placeholder`, `readOnly`, `minRows`, `maxRows`, `code`, `language`, `path`, `showLineNumbers`, `patch`, `wordDiff`, `collapsedPaths`, `scroll`, `maxLines`, `source`, `itemCount`, `estimatedItemHeight`, `windowStart`, `alignment`, `followTail`, `overdraw`, `position`, `side`, `align`, `gap`, `anchor`, `offset`, `fit`, `snapMargin`, `deferred`, `priority`, `occlude`, `fill`, `theme`.
+
+<Aside>
+<Warning>
+**GPUIX has no CSS classes.** `class` and `className` are ignored. Every style is a `style` prop.
+</Warning>
+</Aside>
+
+## Components
+
+A nested function shares the parent component, exactly as in ilha. A component adds **no wrapper element**: its output is spliced into the parent, the way ilha's DOM slot host uses `display: contents`. A flex parent sees the component's elements as its own children.
+
+```tsx
+const Badge = ({ label }: { label: string }) => (
+  <text style={{ color: '#8ab4f8' }}>{label}</text>
+)
+
+const Row = () => (
+  <div style={{ display: 'flex', gap: 8 }}>
+    <Badge label="alpha" />
+    <Badge label="beta" />
+  </div>
+)
+```
+
+**Element identity survives a repaint.** The adapter matches the new tree against the live one, so a native element keeps its id across renders — a focused `<input>` keeps focus, caret and scroll offset while its component rerenders.
+
+```tsx
+const Field = () => {
+  const value = atom('')
+  return (
+    <input
+      value={value}
+      oninput={(event) => value.set(String(event.value))}
+      autoFocus
+    />
+  )
+}
+```
+
+### Keyed lists
+
+Give each row a `key`. Rows are matched by key, so sorting or filtering moves elements instead of recreating them. A keyed component whose key leaves the view is unmounted and its native elements are destroyed; the same key later mounts a new one.
+
+```tsx
+const List = () => {
+  const items = atom([
+    { id: 'a', text: 'One' },
+    { id: 'b', text: 'Two' },
+  ])
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {items().map((item) => (
+        <text key={item.id} style={{ color: '#e2e2e2' }}>
+          {item.text}
+        </text>
+      ))}
+    </div>
+  )
+}
+```
+
+## Streams and generators
+
+Generator components and Effect streams paint as they do on the web. Each emission repaints the hole it was yielded into.
+
+```tsx
+import * as Atom from 'effect/reactivity/Atom'
+import * as Stream from 'effect/Stream'
+import { atom, when } from 'ilha'
+
+function* Status() {
+  yield Stream.map(Stream.fromIterable(['idle', 'ready']), (value: string) => (
+    <text style={{ color: '#e2e2e2' }}>{value}</text>
+  ))
+}
+
+function* List() {
+  const items = atom(['a', 'b'])
+  yield Stream.map(Atom.toStream(items.atom), (list: string[]) => (
+    <div>
+      {list.map((item) => (
+        <text key={item}>{item}</text>
+      ))}
+    </div>
+  ))
+}
+```
+
+An async component may return a `Stream` directly. `when(stream, body)` runs a generator body per emission and interrupts the previous one.
+
+## Contexts and error boundaries
+
+```tsx
+import { atom, context, createContext, ErrorBoundary } from 'ilha'
+
+const Theme = createContext('light')
+
+const Label = () => {
+  const theme = context(Theme)
+  return <text style={{ color: theme() === 'dark' ? '#e2e2e2' : '#111' }}>Hi</text>
+}
+
+const App = () => {
+  const mode = atom('dark')
+  return (
+    <Theme.Provider value={mode()}>
+      <div onclick={() => mode.set('light')}>
+        <text>Switch</text>
+      </div>
+      <ErrorBoundary
+        fallback={({ error, reset }) => (
+          <div onclick={reset}>
+            <text>{error.message}</text>
+          </div>
+        )}
+      >
+        <Label />
+      </ErrorBoundary>
+    </Theme.Provider>
+  )
+}
+```
+
+### Refs
+
+`ref` receives the host element on mount and `null` on unmount. ilha calls it again on every repaint, so store the latest value.
+
+```tsx
+import type { HostElement } from '@gpuix/ilha'
+
+const Row = () => (
+  <div ref={(node: HostElement | null) => node?.scrollIntoView()}>
+    <text>Last row</text>
+  </div>
+)
+```
+
+| Method                                             | Element  |
+| -------------------------------------------------- | -------- |
+| `scrollIntoView()`                                 | any      |
+| `setImage(bytes)`                                  | `<img>`  |
+| `setImagePixels(width, height, pixels, options?)`  | `<img>`  |
+
+`node.id` is the native element id, for `renderer.focusElement(id)` and `getElementBounds(id)`.
+
+## Window primitives
+
+Each is called in the component body, like `atom()`, and stops with the component.
+
+```tsx
+import { atom } from 'ilha'
+import { selectedText, textSearch, windowInsets, windowSize } from '@gpuix/ilha'
+
+const Reader = () => {
+  const size = windowSize()
+  const insets = windowInsets()
+  const selection = selectedText()
+  const query = atom('')
+  const search = textSearch({ query: query() })
+
+  return (
+    <div style={{ width: size().width, paddingTop: insets().safeArea.top }}>
+      <input value={query} oninput={(event) => query.set(String(event.value))} />
+      <text>{`${search.total === 0 ? 0 : search.active + 1} of ${search.total}`}</text>
+      <div onclick={search.next}><text>Next</text></div>
+      <div {...search.props}>
+        <text>{selection() ?? 'Select some text'}</text>
+      </div>
+    </div>
+  )
+}
+```
+
+| Primitive                  | Returns                                                         |
+| -------------------------- | --------------------------------------------------------------- |
+| `windowSize(options?)`     | `AtomHandle<WindowSize>`, sampled every 100ms                   |
+| `windowInsets(options?)`   | `AtomHandle<WindowInsets>`: safe area and keyboard geometry     |
+| `selectedText()`           | `AtomHandle<string \| null>`, the window's text selection       |
+| `textSearch(options)`      | `{ props, total, active, next, previous, goTo }`                |
+
+`options.intervalMs` sets the poll interval of `windowSize` and `windowInsets`; `false` reads once. `textSearch` takes the same `TextSearchOptions` as React's `useTextSearch`: spread `props` onto the element to search.
+
+## `useGpuix()`
+
+Read the host renderer from inside a component. The host is found through the active ilha fiber's runtime, so it is the same in a nested, keyed, async or generator component, and no provider wrapper sits between the app and the painter. **`useGpuixRequired()`** returns the renderer or throws outside a GPUIX root.
+
+```tsx
+import { useGpuix } from '@gpuix/ilha'
+
+const Size = () => {
+  const gpuix = useGpuix()
+  return <text>{gpuix?.renderer.getWindowSize?.().width ?? 0}</text>
+}
+```
+
+```ts
+interface GpuixContextValue {
+  renderer: NativeRenderer
+  subscribeSelection: (callback: (text: string | null) => void) => () => void
+}
+```
+
+## Testing
+
+`@gpuix/ilha/testing` mounts against the GPU-backed test renderer, with no window.
+
+```ts
+import { createTestRoot } from '@gpuix/ilha/testing'
+
+const test = createTestRoot()
+test.render(Counter)
+test.renderer.getPaintedText()
+test.renderer.dragSelect(0, 0, 200, 200)
+test.unmount()
+```
+
+`getAllText()` only sees `<text>` nodes. Use **`renderer.getPaintedText()`** for text painted inside `<code>`, `<markdown>`, and `<diff>`, and **`renderer.dragSelect()`** for selection — the selection listeners are registered during paint.
+
+## Automation
+
+`@gpuix/ilha/automation` is the shared client. Mark targets with `testId`, then drive the live window.
+
+```ts
+import { launch } from '@gpuix/ilha/automation'
+
+const app = await launch({
+  command: 'bun',
+  args: ['app.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
+await app.getByTestId('increment').click()
+await app.screenshot({ path: 'tmp/app.png' })
+await app.close()
+```
+
+## What differs from the DOM
+
+- **No CSS classes.** `class` / `className` are ignored; use `style`.
+- **No `unsafe()`.** Raw HTML has no GPUIX equivalent. Render the content with GPUIX elements, or use `<markdown>`.
+- **One GPUIX root.** GPUIX paints a single root element, so the app tree sits inside a full-size flex-column container. A component may return a fragment; every root child is painted inside that container.
+- **`ref` receives a host element, not a DOM node.** See [Refs](#refs).
+- **A skipped view paints nothing.** `{cond && <text>…</text>}` adds no native element while `cond` is false, so it takes no `gap` in a flex parent.
+- **Component keys are per component, not per sibling list.** This is ilha's rule on the web too. Two keyed components with the same key inside one component log a warning, and the duplicate keeps its state by position.
+- **No `document`, `window` events, or `innerHTML`.** Native window controls come from the renderer (`minimizeWindow`, `toggleFullscreen`, `setWindowTitle`).
+
+## Controls
+
+`Button`, `Select`, `Combobox`, `Dialog`, `Tooltip`, `AnimatePresence`, and `motion.div` are the same headless, Base UI-shaped parts as in `@gpuix/react` and `@gpuix/solid`, with the same props. They paint nothing of their own: every part is a `<div>` you style.
+
+| Part | Exports |
+| ---- | ------- |
+| Button | `Button`, `buttonProps` |
+| Select | `Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, `SelectGroup`, `SelectLabel`, `SelectSeparator` |
+| Combobox | `Combobox`, `ComboboxInput`, `ComboboxTrigger`, `ComboboxValue`, `ComboboxContent`, `ComboboxList`, `ComboboxItem`, `ComboboxEmpty`, `ComboboxGroup`, `ComboboxLabel`, `ComboboxSeparator` |
+| Dialog | `Dialog`, `DialogTrigger`, `DialogPortal`, `DialogBackdrop`, `DialogPopup`, `DialogTitle`, `DialogDescription`, `DialogClose` |
+| Tooltip | `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider` |
+| Motion | `motion.div`, `AnimatePresence`, `usePresence`, `useIsPresent` |
+| Building blocks | `FloatingLayer`, `DismissableLayer`, `renderSlot`, `resolveStyle`, `mergeStyles` |
+
+They are also importable from `@gpuix/ilha/button`, `@gpuix/ilha/select`, `@gpuix/ilha/combobox`, `@gpuix/ilha/dialog`, `@gpuix/ilha/tooltip`, and `@gpuix/ilha/floating`.
+
+- **`style`** takes a `StyleDesc` or a function of the part's state: `{ open }` on `SelectTrigger`, `{ selected, highlighted, disabled }` on `SelectItem`, `{ disabled }` on `Button`
+- **`asChild`** renders the part onto its single child element. The child's own handlers run first
+- **Event props** work in either case. `onClick` and `onclick` are one prop
+- **`SelectItem`** and **`ComboboxItem`** accept a render function of their state as the child. **`ComboboxList`** takes one per matching item, and **`ComboboxValue`** one of the value
+
+```tsx
+import { atom } from 'ilha'
+import {
+  Button,
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogPopup,
+  DialogPortal,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  motion,
+} from '@gpuix/ilha'
+
+const Settings = () => {
+  const open = atom(false)
+  const model = atom('fast')
+  return (
+    <motion.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+      <Button onclick={() => open.set(true)}>
+        <text>Settings</text>
+      </Button>
+      <Dialog open={open()} onOpenChange={open.set}>
+        <DialogPortal>
+          <DialogBackdrop style={{ backgroundColor: '#00000066' }} />
+          <DialogPopup style={{ padding: 16, backgroundColor: '#232323' }}>
+            <Select
+              items={[{ value: 'fast', label: 'Fast' }, { value: 'deep', label: 'Deep' }]}
+              value={model()}
+              onValueChange={model.set}
+            >
+              <SelectTrigger style={(state) => ({ opacity: state.open ? 0.7 : 1 })}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fast"><text>Fast</text></SelectItem>
+                <SelectItem value="deep">
+                  {(state) => <text>{state.selected ? 'Deep ✓' : 'Deep'}</text>}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <DialogClose><text>Close</text></DialogClose>
+          </DialogPopup>
+        </DialogPortal>
+      </Dialog>
+    </motion.div>
+  )
+}
+```
+
+`Dialog` owns Escape, the backdrop press, the Tab trap, and moving focus in on open and back out on close. A `Select` inside a `Dialog` opens above it, and Escape closes only the top one.
+
+### Combobox and Tooltip
+
+```tsx
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@gpuix/ilha'
+
+const FRUITS = ['apple', 'apricot', 'banana']
+
+const Search = () => (
+  <TooltipProvider delayDuration={300}>
+    <Combobox items={FRUITS} autoHighlight onValueChange={(value) => console.log(value)}>
+      <ComboboxInput placeholder="Fruit" />
+      <ComboboxContent>
+        <ComboboxList>
+          {(item) => (
+            <ComboboxItem value={item} style={(state) => ({ opacity: state.highlighted ? 1 : 0.6 })}>
+              <text>{item}</text>
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+        <ComboboxEmpty><text>No match</text></ComboboxEmpty>
+      </ComboboxContent>
+    </Combobox>
+    <Tooltip>
+      <TooltipTrigger><text>?</text></TooltipTrigger>
+      <TooltipContent><text>Type to filter</text></TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+)
+```
+
+`Combobox` filters `items` by substring as the user types. Arrow keys move the highlight, Enter selects it, `multiple` toggles each pick and keeps the popup open, and `filter` replaces the match or turns it off with `null`. A `Tooltip` opens on hover and on focus, and closes on leave, press, blur, and Escape.
+
+### AnimatePresence
+
+`AnimatePresence` keeps a child mounted after it leaves the tree, until its exit is done. Children are matched by **`key`**. A `motion.div` with an `exit` target animates out by itself.
+
+```tsx
+import { atom } from 'ilha'
+import { AnimatePresence, motion, usePresence } from '@gpuix/ilha'
+
+const Toasts = () => {
+  const visible = atom(true)
+  return (
+    <AnimatePresence initial={false} onExitComplete={() => console.log('gone')}>
+      {visible() && (
+        <motion.div
+          key="toast"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onclick={() => visible.set(false)}
+        />
+      )}
+    </AnimatePresence>
+  )
+}
+
+const Fading = () => {
+  const [present, safeToRemove] = usePresence()
+  return <text onclick={safeToRemove}>{present ? 'here' : 'leaving, click to remove'}</text>
+}
+```
+
+`usePresence()` returns `[isPresent, safeToRemove]` as plain values, because an ilha component reruns when its presence changes. A child that neither is a `motion.div` nor calls `usePresence()` is removed as soon as it leaves.
+
+A worked chat lives in `examples/ilha/chat.tsx`. Run it with `cd examples && bun --hot ilha/chat.tsx`.
+
+### Where to read an atom
+
+A component repaints when an atom it read changes, and a repaint reruns the components nested in it. Read each atom in the smallest component that paints it. `examples/ilha/chat.tsx` creates its atoms once at the root, hands the handles down, and never reads them there, so a keystroke in the composer repaints the send button and not the transcript.
+
+### Keys on components
+
+A keyed component keeps its state while the view keeps its key, and takes new props on every parent repaint. Keys are scoped to the component that renders them, not to one sibling list.
+
+A component that returns **only** a list of keyed components is reused by key, and a row whose props did not change is not rerun. That is the shape for a long list: appending a row costs that row.
+
+```tsx
+const Rows = ({ items }: { items: AtomHandle<Item[]> }) =>
+  items().map((item) => <Row key={item.id} item={item} />)
+
+const List = ({ items }: { items: AtomHandle<Item[]> }) => (
+  <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+    <Rows items={items} />
+  </virtual-list>
+)
+```

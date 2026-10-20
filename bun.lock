@@ -64,10 +64,13 @@
       "name": "@gpuix/examples",
       "version": "0.1.0",
       "dependencies": {
+        "@gpuix/ilha": "workspace:^",
         "@gpuix/react": "workspace:^",
         "@gpuix/solid": "workspace:^",
         "@kmamal/sdl": "^0.11.12",
         "diff": "^7.0.0",
+        "effect": "^4.0.0",
+        "ilha": "^0.15.1",
         "react": "^19.2.4",
         "safe-mdx": "1.14.0",
         "shiki": "^3.0.0",
@@ -81,6 +84,25 @@
         "msgpackr": "^2.0.6",
         "tsx": "^4.19.0",
         "vitest": "^4.0.18",
+      },
+    },
+    "packages/ilha": {
+      "name": "@gpuix/ilha",
+      "version": "0.10.0",
+      "dependencies": {
+        "@gpuix/native": "workspace:^",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.0",
+        "@types/node": "^25.3.3",
+        "effect": "^4.0.0",
+        "ilha": "^0.15.1",
+        "typescript": "^5.3.0",
+        "vitest": "^4.0.18",
+      },
+      "peerDependencies": {
+        "effect": "^4.0.0",
+        "ilha": "^0.15.1",
       },
     },
     "packages/native": {
@@ -273,6 +295,8 @@
     "@gpuix/example-app": ["@gpuix/example-app@workspace:example-app"],
 
     "@gpuix/examples": ["@gpuix/examples@workspace:examples"],
+
+    "@gpuix/ilha": ["@gpuix/ilha@workspace:packages/ilha"],
 
     "@gpuix/native": ["@gpuix/native@workspace:packages/native"],
 
@@ -692,6 +716,8 @@
 
     "domutils": ["domutils@4.0.2", "", { "dependencies": { "dom-serializer": "^3.0.0", "domelementtype": "^3.0.0", "domhandler": "^6.0.0" } }, "sha512-qI4JLRKnSzqFqr7hAlS5xQDusBCjKSEG4t4+7aNrIQMHBcsC2TGEhuyABJdYkgSewL57PNLYEiibY2iPKhKpaA=="],
 
+    "effect": ["effect@4.0.0", "", {}, "sha512-ooc1TG5t+FfzgYnFz2ff6BBKyZ7EwBRVXC7c4RhQUAD6/TZ2gTXXMeb4WX7a19ozQo4J73/QW+S00YAIresoMQ=="],
+
     "electron-to-chromium": ["electron-to-chromium@1.5.433", "", {}, "sha512-5lCAbyZBjtmUt/RAGHRqrL2q0oEFRThDAsZHHDn9XHa89Qw7gMYOeSicBTy+AHfvo0r6vwsZvqNJTQIQy1BLzA=="],
 
     "entities": ["entities@7.0.1", "", {}, "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA=="],
@@ -757,6 +783,8 @@
     "htmlparser2": ["htmlparser2@10.1.0", "", { "dependencies": { "domelementtype": "^2.3.0", "domhandler": "^5.0.3", "domutils": "^3.2.2", "entities": "^7.0.1" } }, "sha512-VTZkM9GWRAtEpveh7MSF6SjjrpNVNNVJfFup7xTY3UpFtm67foy9HDVXneLtFVt4pMz5kZtgNcvCniNFb1hlEQ=="],
 
     "iconv-lite": ["iconv-lite@0.7.2", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw=="],
+
+    "ilha": ["ilha@0.15.1", "", { "peerDependencies": { "effect": "^4.0.0" } }, "sha512-Jjjh1lWnl9aF30/MudfulWVS+zynpaZAyDhmo0zzAYWQWSjWtCdAj1uZhIYV0LW3UryWHW9weNLCo2ksLm6YFQ=="],
 
     "immediate": ["immediate@3.0.6", "", {}, "sha512-XXOFtyqDjNDAQxVfYxuF7g9Il/IbWmmlQg2MYKOH8ExIT1qg6xc4zyS3HaEEATgs1btfzxq15ciUiY7gjSXRGQ=="],
 
