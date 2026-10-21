@@ -3830,6 +3830,40 @@ await app.captureFrames('review/sidebar', [
 ])
 ```
 
+### Record a video
+
+`app.recordVideo()` turns the same clock into a **video recorder**. Each frame
+is a screenshot at an exact timestamp, so the result is smooth at any `fps`,
+however long a frame takes to render.
+
+```ts
+const video = await app.recordVideo({ path: 'review/demo.mp4', fps: 60 })
+
+await app.getByTestId('sidebar-collapse').click()
+await video.wait(400)                  // 24 frames of the animation
+
+for (let step = 0; step < 30; step++) {
+  await app.mouse.wheel({ x: 600, y: 400 }, 0, -40)
+  await video.frame()                  // one frame per wheel tick
+}
+
+await video.stop()                     // encode, delete frames, resume the clock
+```
+
+| Call | What it does |
+|---|---|
+| `app.recordVideo({ path, fps })` | Pauses the clock and captures the first frame. `fps` defaults to 60 |
+| `video.frame()` | Advances the clock by `1000 / fps` ms and captures one frame |
+| `video.wait(ms)` | Captures `ms` of video with no input |
+| `video.nowMs` | Clock time of the next frame |
+| `video.stop()` | Encodes with `ffmpeg`, deletes the frames, resumes the clock |
+
+Input between frames lands **instantly**, so move the pointer in small steps
+across frames for a visible glide. The extension picks the codec: `.mp4`
+(H.264, 4:2:0), `.webm` (VP9) or `.gif`. `ffmpeg` must be on `PATH`. Like
+`captureFrames`, it needs Node or Bun; in a browser page use the controlling
+browser tool.
+
 ### Live apps
 
 `launch({ command, args })` starts the app and speaks the same commands

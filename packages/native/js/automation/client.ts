@@ -710,8 +710,140 @@ export class App {
     return paths
   }
 
+  /**
+   * Record a video on the paused clock. Every frame is a screenshot taken at
+   * an exact timestamp, so the result is smooth at any `fps` no matter how
+   * long a frame takes to render. Input between frames lands instantly.
+   */
+  async recordVideo(options: { path: string; fps?: number }): Promise<VideoRecording> {
+    if (typeof process === "undefined") {
+      throw new AutomationError(
+        "Unsupported",
+        "Browser video capture must use the controlling browser automation client"
+      )
+    }
+    const fps = options.fps ?? 60
+    if (!(fps > 0)) {
+      throw new AutomationError("Protocol", `fps must be positive, got ${fps}`)
+    }
+    const fs = await importNodeModule<typeof import("node:fs/promises")>("node:fs/promises")
+    const os = await importNodeModule<typeof import("node:os")>("node:os")
+    const path = await importNodeModule<typeof import("node:path")>("node:path")
+    const framesDir = await fs.mkdtemp(path.join(os.tmpdir(), "gpuix-video-"))
+    const startMs = await this.clock.pause()
+    const recording = new VideoRecording({
+      app: this,
+      path: options.path,
+      fps,
+      startMs,
+      framesDir,
+    })
+    await recording.frame()
+    return recording
+  }
+
   async close(): Promise<void> {
     await this.backend.close()
+  }
+}
+
+/** A video in progress. Created by `app.recordVideo()`. */
+export class VideoRecording {
+  readonly path: string
+  readonly fps: number
+  private frames = 0
+  private stopped = false
+  private readonly app: App
+  private readonly startMs: number
+  private readonly framesDir: string
+
+  constructor(options: {
+    app: App
+    path: string
+    fps: number
+    startMs: number
+    framesDir: string
+  }) {
+    this.app = options.app
+    this.path = options.path
+    this.fps = options.fps
+    this.startMs = options.startMs
+    this.framesDir = options.framesDir
+  }
+
+  /** Clock time of the next frame, in ms. */
+  get nowMs(): number {
+    return this.startMs + (this.frames * 1000) / this.fps
+  }
+
+  /** Set the clock to the next frame time and capture it. */
+  async frame(): Promise<void> {
+    if (this.stopped) {
+      throw new AutomationError("Closed", "Video recording already stopped")
+    }
+    await this.app.clock.set(this.nowMs)
+    const name = `frame-${String(this.frames).padStart(6, "0")}.png`
+    await this.app.screenshot({ path: `${this.framesDir}/${name}` })
+    this.frames += 1
+  }
+
+  /** Record `ms` of video, one frame per `1000 / fps` ms of clock time. */
+  async wait(ms: number): Promise<void> {
+    const count = Math.round((ms * this.fps) / 1000)
+    for (let index = 0; index < count; index += 1) await this.frame()
+  }
+
+  /** Encode the frames with ffmpeg, delete them, and resume the clock. */
+  async stop(): Promise<string> {
+    if (this.stopped) return this.path
+    this.stopped = true
+    const fs = await importNodeModule<typeof import("node:fs/promises")>("node:fs/promises")
+    const nodePath = await importNodeModule<typeof import("node:path")>("node:path")
+    const { spawn } = await importNodeModule<typeof import("node:child_process")>(
+      "node:child_process"
+    )
+    try {
+      await fs.mkdir(nodePath.dirname(nodePath.resolve(this.path)), { recursive: true })
+      const extension = nodePath.extname(this.path).toLowerCase()
+      // H.264 needs even dimensions and 4:2:0 to play in browsers and QuickTime.
+      const codec =
+        extension === ".webm"
+          ? ["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "20"]
+          : extension === ".gif"
+            ? []
+            : ["-c:v", "libx264", "-crf", "14", "-pix_fmt", "yuv420p",
+               "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"]
+      const args = [
+        "-y", "-v", "error",
+        "-framerate", String(this.fps),
+        "-i", nodePath.join(this.framesDir, "frame-%06d.png"),
+        ...codec,
+        this.path,
+      ]
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] })
+        let stderr = ""
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr += chunk.toString("utf8")
+        })
+        child.on("error", (error) => {
+          reject(
+            new AutomationError(
+              "Unsupported",
+              `recordVideo needs ffmpeg on PATH: ${error.message}`
+            )
+          )
+        })
+        child.on("close", (code) => {
+          if (code === 0) resolve()
+          else reject(new AutomationError("Protocol", `ffmpeg exited with ${code}: ${stderr}`))
+        })
+      })
+    } finally {
+      await fs.rm(this.framesDir, { recursive: true, force: true })
+      await this.app.clock.resume()
+    }
+    return this.path
   }
 }
 
