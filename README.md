@@ -855,7 +855,8 @@ GPUI scene ──► offscreen Metal / wgpu render ──► RGBA in POSIX share
 ```
 
 - **Terminals**: kitty and Ghostty. WezTerm is untested and likely cannot read
-  shared memory frames on macOS
+  shared memory frames on macOS. VS Code works with the setup below. Zed's
+  terminal has no graphics protocol, so the screen stays blank
 - **Platforms**: macOS and Linux. Windows throws
 - **Size**: the window fills the terminal and follows its resizes. `width`,
   `height` and window chrome options are ignored
@@ -870,15 +871,49 @@ GPUI scene ──► offscreen Metal / wgpu render ──► RGBA in POSIX share
   limit
 - **Clipboard**: copy writes the system clipboard with OSC 52. Paste with the
   terminal's own paste shortcut
+- **Hot reload**: `bun --hot app.tsx` remounts React in the same terminal on
+  save, like it does in a native window
+- **Memory**: slightly less than a native window of the same size, because
+  there are no window surfaces. The terminal keeps its own copy of each frame,
+  so the machine as a whole saves about nothing
+
+Memory of a small app (Activity Monitor footprint, Apple Silicon, 800x480
+window at 2x):
+
+| State | Native window | Terminal |
+|---|---|---|
+| Idle | 80 MB | 66 MB |
+| Redrawing every 100 ms | 178 MB | 161 MB |
+
+The jump when redrawing is Metal driver memory, the same in both modes. The
+difference is the window's drawable surfaces, so it grows with the window size.
 
 **SSH works.** On the same machine frames go through shared memory. When the
 terminal cannot open it (SSH, a container), the app finds out at startup and
-sends each frame inline, compressed. That is about 120 KB per 1600x960 frame,
-so expect fewer frames per second on a slow link. tmux is not supported.
+sends frames inline, compressed. In kitty and Ghostty 1.4+ only the regions that
+changed are sent: a hover or a keystroke is a few KB. Terminals that cannot edit
+a shown image (Ghostty 1.3, WezTerm) get the whole frame each time, about 120 KB
+at 1600x960, so expect fewer frames per second on a slow link. tmux is not
+supported.
 
 ```bash
 ssh -t my-server 'GPUIX_TERMINAL=1 bun app.tsx'   # -t: the app needs a tty
 ```
+
+**VS Code needs one setting.** Its terminal supports kitty graphics since
+1.110, but images are **off by default**, and then the app paints a blank
+screen. Turn them on in `settings.json`:
+
+```jsonc
+{
+  "terminal.integrated.enableImages": true,
+  // images need the WebGL renderer, so leave this on "auto" or "on"
+  "terminal.integrated.gpuAcceleration": "auto"
+}
+```
+
+VS Code cannot read shared memory, so frames go inline, like over SSH. Expect
+fewer frames per second than in kitty or Ghostty.
 
 **No titlebar.** A terminal has no macOS traffic lights, so space reserved for
 them becomes an empty gap. `isTerminal()` tells the app, and it is a plain

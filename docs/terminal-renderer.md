@@ -61,15 +61,20 @@ The terminal on another machine cannot open our shm. At window open the presente
 the same way kitty's `icat` and yazi do:
 
 ```
-ESC_G a=q,i=<probe>,s=1,v=1,f=24,t=s,S=3;<b64 name of a 3 byte shm object> ESC\  CSI c
+ESC_G a=q,i=<shm probe>,s=1,v=1,f=24,t=s,S=3;<b64 name of a 3 byte shm object> ESC\
+ESC_G a=t,i=<edit probe>,s=1,v=1,f=24,t=d,q=2;AAAA ESC\          1x1 image
+ESC_G a=f,i=<edit probe>,r=1,s=1,v=1,X=1,f=24,t=d;AAAA ESC\      edit its root frame
+ESC_G a=d,d=I,i=<edit probe>,q=2 ESC\  CSI c
 
-ESC_G i=<probe>;OK            → shared memory (same machine)
-ESC_G i=<probe>;ENOENT:...    → inline
-CSI ?62;...c with no OK       → inline (replies come in order)
-nothing in 2 s                → inline
+ESC_G i=<shm probe>;OK          → shared memory (same machine)
+ESC_G i=<shm probe>;ENOENT:...  → inline
+ESC_G i=<edit probe>;OK         → inline frames send only the changed regions
+CSI ?62;...c                    → end of replies (they come in order)
+nothing in 2 s                  → inline, whole frames
 ```
 
-Inline frames are the full RGBA frame, zlib level 1, base64, in 4096 byte chunks:
+The first inline frame, and every frame after a resize, is the full RGBA frame, zlib
+level 1, base64, in 4096 byte chunks:
 
 ```
 CSI ?2026h CSI H  ESC_G a=T,i=1,p=1,f=32,o=z,t=d,s=W,v=H,C=1,q=2,m=1;<chunk> ESC\
@@ -77,15 +82,32 @@ CSI ?2026h CSI H  ESC_G a=T,i=1,p=1,f=32,o=z,t=d,s=W,v=H,C=1,q=2,m=1;<chunk> ESC
 ESC_G a=q,i=<fence n>,s=1,v=1,f=24,t=d;AAAA ESC\     ← terminal answers OK when it got here
 ```
 
+When the terminal can edit frames, later frames are diffed against the last one sent and
+only the changed regions go out, as edits of the shown frame (kitty 0.20+, Ghostty 1.4+):
+
+```
+CSI ?2026h  ESC_G a=f,i=1,r=1,x=X,y=Y,s=W,v=H,X=1,f=32,o=z,t=d,q=2,m=1;<chunk> ESC\
+            ESC_G a=f,r=1,m=0,q=2;<chunk> ESC\  ← one edit per changed rect
+            ...                          CSI ?2026l  ESC_G a=q,i=<fence n>,... ESC\
+```
+
+- **Diff**: 32 px tiles. Changed tiles next to each other in a row of tiles are one rect,
+  and a rect below one with the same columns extends it, so a scrolled list is one edit.
+  A frame with no change sends nothing
+- **`X=1`** overwrites the pixels. The default alpha blends them onto the old frame
+- **Continuation chunks repeat `a=f,r=1`**. The spec requires `a=f`. kitty up to at least
+  0.42 reads the frame number from the last chunk, so without `r=1` the edit is appended as
+  a new animation frame and the screen goes stale
 - **Fence gate**: no new frame renders while 2 fences wait for their reply. Without it
   SSH and TCP buffers hold seconds of stale frames and input lags behind. A fence with no
   reply for 2 s stops counting
-- **Size**: about 120 KB per 1600x960 frame of `terminal_hello`, about 470 KB for a dense
-  2360x1640 chat. 20 Mbit/s gives about 20 and 5 fps for full-frame updates
+- **Size**: a full frame is about 120 KB at 1600x960 for `terminal_hello`, about 470 KB
+  for a dense 2360x1640 chat. A hover with frame edits is 8 to 30 KB. In the harness, 120
+  mouse moves sent 0.98 MB with edits and 9.1 MB without
 - **The write blocks the main thread** while the link drains. Fine for SSH, a writer
   thread would keep input responsive on very slow links
-- **Not done**: dirty tiles (hover and typing would be 5 to 10x smaller), `f=24`, tmux.
-  Under tmux replies are not routed back to the pane, so the probe falls back to inline
+- **Not done**: `f=24`, tmux. Under tmux replies are not routed back to the pane, so the
+  probe falls back to inline whole frames
 
 ## Input
 
@@ -153,8 +175,10 @@ renderer.init ─► init_macos                 renderer.init ─► init_thread
 ## Testing without a terminal window
 
 `tmp/fake-kitty.py` (gitignored) runs a binary in a pty with a fake pixel size, reads every
-shm or inline frame into a PNG, answers `a=q` and `CSI c`, and injects mouse, keys, resize
-and ctrl-c. `REMOTE=1` makes it refuse shm, like a terminal on another machine.
+shm or inline frame into a PNG, answers `a=q` and `CSI c`, applies frame edits, and injects
+mouse, keys, resize and ctrl-c. `REMOTE=1` makes it refuse shm, like a terminal on another
+machine. `NO_EDITS=1` refuses frame edits like Ghostty 1.3. A frame is counted at each
+fence, so the PNGs of both modes must be identical (dedupe repeats in the `NO_EDITS` run).
 
 ```bash
 uv run --no-project --python 3.13 tmp/fake-kitty.py tmp/out \
@@ -168,6 +192,16 @@ docker exec gpui-term-linux python3 /harness/fake-kitty.py /harness/out \
 # so the probe fails for real. docker exec forwards no pixel size (8x16 cell fallback)
 uv run --no-project --python 3.13 tmp/fake-kitty.py tmp/out \
   docker exec -it -e XDG_RUNTIME_DIR=/tmp gpui-term-linux /target/debug/examples/terminal_hello
+```
+
+**In a real terminal**, `tmp/relay.py` (gitignored) sits between the terminal and the app.
+It renames the shm probe object so the terminal answers ENOENT, like over SSH, moves the
+mouse on a script, and logs the terminal's replies and the bytes sent. A Ghostty tip build
+from the `tip` release runs next to the installed one:
+
+```bash
+open -g -n Ghostty.app --args --quit-after-last-window-closed=true \
+  --command="/usr/bin/python3 $PWD/tmp/relay.py /tmp/relay.log $PWD/packages/gpui-terminal/target/release/examples/terminal_hello"
 ```
 
 ## Research notes
@@ -187,12 +221,17 @@ The encoder and parser here are hand written, about 700 lines.
 | Terminal | `t=s` | `a=f` frame edits | 2048 resize |
 |---|---|---|---|
 | kitty | yes | yes | yes |
-| Ghostty 1.3 | yes | no (tip only) | yes |
-| WezTerm | likely broken on macOS (`read()` on shm) | yes | no |
+| Ghostty 1.3 | yes | no ([1.4](https://github.com/ghostty-org/ghostty/pull/13943), tested on tip) | yes |
+| WezTerm 20240203 | likely broken on macOS (`read()` on shm) | no reply to the probe | no |
+| VS Code 1.110+ | no, `t=d` only ([xterm.js#5714](https://github.com/xtermjs/xterm.js/issues/5714)) | no | no |
+| Zed | no graphics (alacritty_terminal) | no | no |
+
+VS Code needs `terminal.integrated.enableImages: true` (default false). Without it
+xterm.js drops every `ESC_G`, the probe sees only `CSI c`, and frames go inline into
+nothing. xterm.js sizes kitty images in CSS pixels, so the right scale there is 1.
 
 ## Not done
 
-- **Dirty rectangles**: `a=f,r=1,x,y,s,v` would cut terminal upload cost. Ghostty 1.3 lacks it
 - **Copy shortcut**: Ghostty takes cmd-c for itself and ctrl-c quits, so a text field has
   no copy key in terminal mode
 - **Linux GPUIX run**: `gpuix-native` type-checks on Linux, but no app ran there yet
