@@ -961,6 +961,13 @@ gh release create '@gpuix/solid@0.5.0' --title '@gpuix/solid@0.5.0' \
 ```
 
 4. CI publishes npm, then uploads `example-chat-*` to the React release with `--clobber`
+5. **Always deploy the website** once the npm publish succeeds. Never skip it.
+   The site renders `README.md` and the changelog, and hosts the browser chat
+   example, so it is stale until you deploy:
+
+```bash
+cd website && bun run deploy:prod
+```
 
 **Each adapter gets its own GitHub release**, because a Solid user never installs
 React and will not look under a React tag. Native has no release: users reach it

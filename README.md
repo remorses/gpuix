@@ -112,7 +112,7 @@ For hot reload during development, use `bun --hot` rather than plain `bun`.
 A save then remounts React on the same window instead of opening a second one.
 
 Bun is not required to run the renderer. GPUIX uses Node-API native bindings,
-and React apps also run on Node.js, as [`disktree`](./disktree/) does. For
+and React apps also run on Node.js, as [`disktree`](https://github.com/remorses/gpuix/tree/main/disktree) does. For
 Node.js, compile TSX to JavaScript first or use a Node-compatible TSX loader.
 The `--hot` option and same-window hot-remount workflow described below are
 Bun-specific; running an app on Node.js does not provide Bun's hot reload.
