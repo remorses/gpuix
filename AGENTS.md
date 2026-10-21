@@ -53,6 +53,19 @@ For Select, `items` on Root is optional. It is only a label lookup for
 mounted `SelectItem` children. Do not walk `child.type`. Do not require `items`
 for the menu to work.
 
+## React and Solid stay in sync
+
+`@gpuix/react` and `@gpuix/solid` must expose the **same features**. When you
+add or change a feature in one adapter, do the same in the other in the same
+change: elements, props, events, components (`Select`, `Combobox`, `Tooltip`),
+reactive values (`useWindowSize` ↔ its Solid primitive), renderer options,
+testing and automation helpers.
+
+Put shared logic in `@gpuix/native` (see [Shared JavaScript runtime](#shared-javascript-runtime))
+so each adapter only adds its framework glue. Add tests and README docs for
+both adapters. If a feature cannot exist in one framework, say why in the
+README and the changeset.
+
 ## Project Goal
 
 GPUIX enables building **native GPU-accelerated desktop applications** using
