@@ -3089,6 +3089,8 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 A Rust crate can add its own GPUI component as an element. The crate builds its
 own Node addon that links `gpuix-native`, registers the element at load time,
 and replaces the prebuilt `@gpuix/native` binary.
+[`example-rust-native-element/`](./example-rust-native-element) is a complete
+crate with an end-to-end test.
 
 ```rust
 use gpuix_native::gpui;
@@ -3143,11 +3145,30 @@ fn init() {
 }
 ```
 
-The crate is a `cdylib` with `napi` and `napi-derive` as dependencies and
-`napi_build::setup()` in its `build.rs`, like `packages/native`. Every export of
-`@gpuix/native` is still in the built addon. Point the app at it:
+The crate is a `cdylib` with `napi_build::setup()` in its `build.rs`. Take
+`gpuix-native` from the git tag of the `@gpuix/native` version your app
+installs. Cargo also clones the Zed submodule, so the first build takes a while:
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gpuix-native = { git = "https://github.com/remorses/gpuix", tag = "@gpuix/native@0.12.0" }
+napi = { version = "3", features = ["napi8", "serde-json"] }
+napi-derive = "3"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
+```
+
+Every export of `@gpuix/native` is still in the built addon. Point the app at
+it:
 
 ```bash
+cargo build --release
+cp target/release/libmy_addon.dylib my-addon.node   # .so on Linux, .dll on Windows
 NAPI_RS_NATIVE_LIBRARY_PATH=./my-addon.node bun app.tsx
 ```
 
@@ -3171,6 +3192,15 @@ declare module "@gpuix/react/jsx-runtime" {
 
 Rules:
 
+- **Same GPUIX version on both sides.** The addon replaces the whole native
+  half of `@gpuix/native`. The JavaScript in `@gpuix/native`, `@gpuix/react`
+  and `@gpuix/solid` still comes from npm, and it calls the addon through napi
+  methods and the `applyBatch` protocol, which change between releases. Pin
+  the tag that matches the installed `@gpuix/native` exactly, and rebuild the
+  addon on every GPUIX upgrade. A mismatch fails at run time, not at build time.
+- **Same napi major.** Use `napi` 3 and `napi-derive` 3, like `gpuix-native`.
+  Cargo then links one copy, so the `module_init` and the GPUIX exports share
+  one registry.
 - **One GPUI.** Use `gpuix_native::gpui`, or take `gpui` from the same
   repository and revision as `gpuix-native`. A second copy of GPUI can't draw
   into GPUIX's window.

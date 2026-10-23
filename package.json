@@ -7,6 +7,7 @@
     "packages/*",
     "examples",
     "example-app",
+    "example-rust-native-element",
     "disktree"
   ],
   "scripts": {

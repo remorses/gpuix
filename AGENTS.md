@@ -49,6 +49,11 @@ Names with a `-` belong to elements other crates add with
 exception and is reserved in `RESERVED_ELEMENT_TYPES`. A new built-in with a `-`
 can break an app that already registered that name.
 
+Other crates compile against the public custom element API: `CustomElement`,
+`CustomRenderContext`, `custom_surface`, `register_custom_element`, and
+`EventPayload`. After you change any of them, run
+`cd example-rust-native-element && bun run test`.
+
 ## Built-in components follow Base UI
 
 Headless controls in `@gpuix/react` and `@gpuix/solid` (`select`, `combobox`,
@@ -239,6 +244,10 @@ gpuix/
 ├── examples/
 │   ├── package.json            # Workspace package for examples
 │   └── counter.tsx             # Example React app
+│
+├── example-rust-native-element/ # Crate that adds <rust-greeting> from Rust
+│   ├── src/lib.rs              # CustomElement + register_custom_element
+│   └── greeting.test.tsx       # e2e: builds the addon, paints, clicks
 │
 └── AGENTS.md                   # This file
 ```
@@ -1351,6 +1360,10 @@ cd examples && bun run test
 
 # Starter todo app, driven through the automation client
 cd example-app && bun run test
+
+# A separate crate registers <rust-greeting> via register_custom_element.
+# Builds its own addon with cargo, then loads it with NAPI_RS_NATIVE_LIBRARY_PATH
+cd example-rust-native-element && bun run test
 
 # Chat and timeline draw / chrome regressions (excluded from the default run)
 cd examples && bun run test:perf

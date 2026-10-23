@@ -1,0 +1,23 @@
+[package]
+name = "example-rust-native-element"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# An app outside this repository pins the git tag of the `@gpuix/native` version
+# it installs from npm. See "Your own native elements" in the README.
+gpuix-native = { path = "../packages/native" }
+napi = { version = "3.12.7", features = ["napi8", "serde-json"] }
+napi-derive = "3.6.8"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2.4.4"
+
+# Same as packages/native, so the shared target dir reuses its compiled crates.
+[profile.release]
+lto = true
