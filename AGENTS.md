@@ -42,6 +42,13 @@ opens is a plain exported function, like `isTerminal()`. Apps and examples
 follow the same rule: no `useState`, `useMemo`, or custom hook for a value that
 a plain call or constant gives.
 
+## Built-in element names never contain `-`
+
+Names with a `-` belong to elements other crates add with
+`register_custom_element`, like DOM custom elements. `virtual-list` is the only
+exception and is reserved in `RESERVED_ELEMENT_TYPES`. A new built-in with a `-`
+can break an app that already registered that name.
+
 ## Built-in components follow Base UI
 
 Headless controls in `@gpuix/react` and `@gpuix/solid` (`select`, `combobox`,

@@ -39,7 +39,15 @@ mod updater;
 ))]
 mod test_renderer;
 
+pub use custom_elements::{
+    custom_surface, register_custom_element, wire_standard_events, CustomElement,
+    CustomElementConstructor, CustomElementFactory, CustomRenderContext,
+    RegisterCustomElementError,
+};
 pub use element_tree::*;
+/// The GPUI this renderer is built on. Custom elements must use this copy:
+/// a second GPUI in the same addon can't draw into GPUIX's window.
+pub use gpui;
 pub use renderer::*;
 pub use style::*;
 

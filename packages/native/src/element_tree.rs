@@ -23,8 +23,8 @@ pub struct EventPayload {
     /// Numeric element ID (matches the ID assigned in JS via createElement).
     pub element_id: f64,
 
-    /// Event type string — matches the key used in EVENT_PROPS on the JS side.
-    /// e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
+    /// Event type string. The JS handler prop is `on` + this name capitalized:
+    /// "click" → `onClick`, "mouseDown" → `onMouseDown`.
     pub event_type: String,
 
     // ── Mouse position ───────────────────────────────────────────────
@@ -137,6 +137,10 @@ pub struct EventPayload {
     /// Populated for: fileDrop.
     pub paths: Option<Vec<String>>,
 
+    /// Any JSON value, like the DOM's `CustomEvent.detail`. For elements added
+    /// with `register_custom_element`, whose data fits no field above.
+    pub detail: Option<serde_json::Value>,
+
     // ── Modifiers ────────────────────────────────────────────────────
     pub modifiers: Option<EventModifiers>,
 }
@@ -173,6 +177,7 @@ impl Default for EventPayload {
             match_count: None,
             motion_generation: None,
             paths: None,
+            detail: None,
             modifiers: None,
         }
     }

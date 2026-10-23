@@ -3084,6 +3084,133 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Custom drawing (planned)                         |
 
+### Your own native elements
+
+A Rust crate can add its own GPUI component as an element. The crate builds its
+own Node addon that links `gpuix-native`, registers the element at load time,
+and replaces the prebuilt `@gpuix/native` binary.
+
+```rust
+use gpuix_native::gpui;
+use gpuix_native::{CustomElement, CustomElementFactory, CustomRenderContext, GpuixView};
+
+struct Greeting {
+    name: String,
+}
+
+impl CustomElement for Greeting {
+    fn render(
+        &mut self,
+        ctx: CustomRenderContext,
+        _window: &mut gpui::Window,
+        _cx: &mut gpui::Context<GpuixView>,
+    ) -> gpui::AnyElement {
+        ctx.text(0, format!("Hello, {}", self.name), None)
+    }
+
+    fn set_prop(&mut self, key: &str, value: serde_json::Value) {
+        if key == "name" {
+            self.name = value.as_str().unwrap_or_default().to_string();
+        }
+    }
+
+    fn supported_props(&self) -> &'static [&'static str] {
+        &["name"]
+    }
+
+    fn supported_events(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn destroy(&mut self) {}
+}
+
+struct GreetingFactory;
+
+impl CustomElementFactory for GreetingFactory {
+    fn element_type(&self) -> &str {
+        "my-greeting"
+    }
+
+    fn create(&self, _id: u64) -> Box<dyn CustomElement> {
+        Box::new(Greeting { name: String::new() })
+    }
+}
+
+#[napi_derive::module_init]
+fn init() {
+    gpuix_native::register_custom_element(|| Box::new(GreetingFactory)).unwrap();
+}
+```
+
+The crate is a `cdylib` with `napi` and `napi-derive` as dependencies and
+`napi_build::setup()` in its `build.rs`, like `packages/native`. Every export of
+`@gpuix/native` is still in the built addon. Point the app at it:
+
+```bash
+NAPI_RS_NATIVE_LIBRARY_PATH=./my-addon.node bun app.tsx
+```
+
+Then declare the element for TypeScript. Solid apps augment
+`@gpuix/solid/jsx-runtime` the same way.
+
+```ts
+import type { EventPayload, Props } from "@gpuix/react"
+
+declare module "@gpuix/react/jsx-runtime" {
+  namespace JSX {
+    interface IntrinsicElements {
+      "my-greeting": Props & {
+        name?: string
+        onGreet?: (event: EventPayload) => void
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- **One GPUI.** Use `gpuix_native::gpui`, or take `gpui` from the same
+  repository and revision as `gpuix-native`. A second copy of GPUI can't draw
+  into GPUIX's window.
+- **Names contain a `-`**, like DOM custom elements, so they never collide with
+  an element GPUIX adds later. Built-in names are refused.
+- **Register before the first renderer.** Renderers created earlier keep the
+  elements they started with.
+- Props reach `set_prop` as JSON. `custom_surface` applies `style`, hover,
+  accessibility, and the standard mouse events to your root.
+- An element that takes keyboard input owns a GPUI `FocusHandle`. Pass
+  `tabIndex` to put it in the Tab order.
+
+#### Custom events
+
+Any **function** prop named `on` + uppercase is a handler: `onGreet` listens
+for `greet`. List the name in `supported_events`, then emit it with
+`emit_event_full` and put your data in `detail`, which takes any JSON.
+
+```rust
+fn supported_events(&self) -> &'static [&'static str] {
+    &["greet"]
+}
+
+// in render()
+let callback = ctx.event_callback.clone();
+let id = ctx.id;
+el.on_mouse_down(gpui::MouseButton::Left, move |_, _, _| {
+    gpuix_native::emit_event_full(&callback, id, "greet", |payload| {
+        payload.detail = Some(serde_json::json!({ "name": "world" }));
+    });
+})
+```
+
+```tsx
+<my-greeting onGreet={(event) => console.log(event.detail.name)} />
+```
+
+A value that is not a function stays a normal prop, so `onTop={true}` reaches
+`set_prop("onTop", true)`.
+
 ## Images and icons
 
 `<img>` takes a **filesystem path, data URL, or http(s) URL**. Resolve local

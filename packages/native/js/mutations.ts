@@ -85,44 +85,21 @@ export function createMutationQueue(
   return mutations
 }
 
-export const EVENT_PROPS = [
-  ["onToggleFile", "toggleFile"],
-  ["onShowMore", "showMore"],
-  ["onLineClick", "lineClick"],
-  ["onLinkClick", "linkClick"],
-  ["onVisibleRange", "visibleRange"],
-  ["onHighlight", "highlight"],
-  ["onMotionComplete", "motionComplete"],
-  ["onChange", "change"],
-  ["onSubmit", "submit"],
-  ["onClick", "click"],
-  ["onAuxClick", "auxClick"],
-  ["onMouseDown", "mouseDown"],
-  ["onMouseUp", "mouseUp"],
-  ["onMouseEnter", "mouseEnter"],
-  ["onMouseLeave", "mouseLeave"],
-  ["onMouseMove", "mouseMove"],
-  ["onMouseDownOutside", "mouseDownOutside"],
-  ["onKeyDown", "keyDown"],
-  ["onKeyUp", "keyUp"],
-  ["onFocus", "focus"],
-  ["onBlur", "blur"],
-  ["onScroll", "scroll"],
-  ["onLayout", "layout"],
-  ["onScrollChange", "scrollChange"],
-  ["onFileDrop", "fileDrop"],
-] as const
-
-export const EVENT_PROP_NAMES: ReadonlySet<string> = new Set(
-  EVENT_PROPS.map(([name]) => name)
-)
+const HANDLER_PROP_NAME = /^on[A-Z]/
 
 /**
- * Event type for a handler prop. Adapters walk an element's own props and look
- * each one up here, which beats testing every entry of `EVENT_PROPS` against an
- * element that has two or three props.
+ * Event type a prop listens for, or undefined when the prop is data.
+ *
+ * Any function named `on` + uppercase is a handler: `onToggleFile` listens for
+ * `toggleFile`. No list of names, so an element added with
+ * `register_custom_element` can take `onGreet`. Rust drops events an element
+ * does not support. A non-function stays data, so `onTop={true}` still reaches
+ * the element's `set_prop`.
  */
-export const EVENT_TYPE_BY_PROP: ReadonlyMap<string, string> = new Map(EVENT_PROPS)
+export function handlerEventType(name: string, value: unknown): string | undefined {
+  if (typeof value !== "function" || !HANDLER_PROP_NAME.test(name)) return undefined
+  return name[2].toLowerCase() + name.slice(3)
+}
 
 export const RESERVED_PROPS: ReadonlySet<string> = new Set([
   "style",
@@ -150,8 +127,8 @@ export const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "aria-level",
 ])
 
-export function isReservedProp(name: string): boolean {
-  return RESERVED_PROPS.has(name) || EVENT_PROP_NAMES.has(name)
+export function isReservedProp(name: string, value: unknown): boolean {
+  return RESERVED_PROPS.has(name) || handlerEventType(name, value) !== undefined
 }
 
 /**
