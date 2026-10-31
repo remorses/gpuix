@@ -1,5 +1,5 @@
 import { connectTest } from '@gpuix/react/automation'
-import { createTestRoot } from '@gpuix/react/testing'
+import { createTestRoot, hasNativeTestRenderer } from '@gpuix/react/testing'
 import type { EventPayload, Props } from '@gpuix/react'
 import { expect, test } from 'vitest'
 
@@ -16,7 +16,9 @@ declare module '@gpuix/react/jsx-runtime' {
 
 // The addon is loaded through NAPI_RS_NATIVE_LIBRARY_PATH (vitest.config.ts),
 // so this file only passes when the Rust crate registered <rust-greeting>.
-test('a crate adds <rust-greeting>: it paints, takes props, and emits events', async () => {
+// The addon still builds on Linux; only rendering needs TestGpuixRenderer,
+// which is macOS and Windows only.
+test.skipIf(!hasNativeTestRenderer)('a crate adds <rust-greeting>: it paints, takes props, and emits events', async () => {
   const greeted: unknown[] = []
   const { render, renderer, unmount } = createTestRoot()
   const app = (name: string) => (
