@@ -22,6 +22,8 @@ mod diff;
 mod element_tree;
 mod markdown;
 mod motion;
+// napi payloads for GpuixRenderer::notify; the browser build has no napi.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod notifications;
 mod renderer;
 // The data model is public so `examples/bench_serde.rs` measures the real
