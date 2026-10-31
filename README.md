@@ -301,6 +301,39 @@ does not exist in the browser wasm build. The repo must be **public**, or
 GitHub will 404 the API. Optional: put a Cloudflare cache in front of
 `api.github.com`. Same GitHub JSON. Not a custom schema.
 
+### 7. Roll back an update
+
+`downloadAndInstall()` keeps the bundle it replaced at
+`<cache>/gpuix/updater/<bundle name>/previous`: `~/Library/Caches` on macOS,
+`$XDG_CACHE_HOME` (or `~/.cache`) on Linux. The slot is fixed rather than a
+temp dir because the installing process exits before anyone can roll back, and
+it is named after the bundle so two apps never restore each other.
+
+```tsx
+import { rollbackUpdate } from '@gpuix/native'
+
+try {
+  await rollbackUpdate()
+} catch (error) {
+  console.error(error) // "no previous version to restore"
+}
+```
+
+The restore replaces the running bundle with the kept one and consumes it, so a
+second call reports that there is nothing left to restore. Like
+`downloadAndInstall()`, it does **not** relaunch: quit after it returns, or the
+next start uses the restored files. The returned promise rejects with the
+reason when there is nothing to restore.
+
+The swap is a rename, so the bundle and the cache must be on one volume. On
+Linux an AppImage on another mount is copied instead. Either way, a failed
+swap puts the kept bundle back, so the app always has something to start.
+
+**Windows cannot roll back.** The NSIS and WiX installers run in their own
+process and replace the installation out of reach, so `rollbackUpdate()` always
+rejects there and says to **reinstall the previous version**. Keep the previous
+installer if you need that path.
+
 ### Start from the example app
 
 [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,

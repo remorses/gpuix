@@ -26,6 +26,7 @@ export declare class AvailableUpdate {
   /**
    * Download, verify the signature, and replace the running app.
    *
+   * Keeps the bundle it replaced, so `rollbackUpdate()` can put it back.
    * Does not relaunch. Quit after this returns, or the next start uses the
    * new files.
    */
@@ -808,6 +809,19 @@ export interface PathPromptOptions {
   /** Label for the picker confirmation button. */
   prompt?: string
 }
+
+/**
+ * Put back the bundle the last update replaced.
+ *
+ * `downloadAndInstall()` keeps that bundle at
+ * `<cache>/gpuix/updater/<bundle name>/previous`, a fixed path because the
+ * installing process exits. The restore consumes it, so a second call has
+ * nothing left to restore. Does not relaunch.
+ *
+ * Windows installers run in their own process and cannot be reversed here, so
+ * this always fails there and asks for a reinstall of the previous version.
+ */
+export declare function rollbackUpdate(): Promise<void>
 
 /** One extra HTTP header on the feed or download request. */
 export interface UpdaterHeader {
