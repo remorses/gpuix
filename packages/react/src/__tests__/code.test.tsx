@@ -4,8 +4,11 @@ import fs from "fs"
 import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
+
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 const TS_SOURCE = `interface User {
   id: number
@@ -32,7 +35,7 @@ function codeBounds(renderer: { findByType(type: string): { id: number }[]; getE
   return bounds!
 }
 
-describe("<code>", () => {
+describeNative("<code>", () => {
   it("renders one row per source line", () => {
     const { render, renderer } = createTestRoot()
     render(<code code={"a\nb\nc"} language="ts" />)
