@@ -1054,42 +1054,30 @@ background daemon, run the app from a `launchd` agent in
 
 ### Clipboard
 
-`copyText(text)` writes text to the system clipboard. It is a **command**, not a
-hook: nothing re-renders when the clipboard changes, so there is no state to
-subscribe to.
+`writeToClipboard(text)` and `readFromClipboard()` are renderer methods, like
+`setWindowTitle()`. They are commands, not state: nothing re-renders when the
+clipboard changes. Same call from `@gpuix/react` and `@gpuix/solid`:
 
 ```tsx
-import { copyText } from '@gpuix/react'
-
 function CopyButton({ text }: { text: string }) {
-  return <div onClick={() => copyText(text)}>Copy</div>
+  const renderer = useGpuixRequired()
+  return <div onClick={() => renderer.writeToClipboard?.(text)}>Copy</div>
 }
+
+const pasted = useGpuixRequired().readFromClipboard?.() // string | null
 ```
 
-The renderer methods behind it are `writeToClipboard(text)` and
-`readFromClipboard()`. A read returns the clipboard's text, or `null` when it
-holds no text at all: the clipboard is empty, or it holds an image or files.
-Both calls are **synchronous** on every desktop platform: GPUI reads the
-platform clipboard directly, so there is no promise to await. On Windows and
-Linux the call runs on the UI thread while JavaScript waits for the answer.
-Reach them through `useGpuixRequired()` when a component needs to
-read:
-
-```tsx
-const renderer = useGpuixRequired()
-const pasted = renderer.readFromClipboard?.() // string | null
-```
-
-An empty string is a real clipboard entry, not a no-op: `copyText('')` clears
-the clipboard instead of leaving the previous contents behind, and reads back
-as `''`. Only plain text is written and read; metadata and multi-entry items
-are not exposed, and a file list reads as `null` rather than as paths.
-`copyText` throws when no window is mounted, so a copy button that cannot copy
-never looks like it worked.
-
-The terminal renderer writes through OSC 52 and keeps a local copy, so a read
-there only returns text this app wrote. The browser renderer has no clipboard
-binding, and `copyText` throws.
+- A read returns the clipboard's text, or `null` when it holds no text at all:
+  the clipboard is empty, or it holds an image or files. A file list never
+  reads as paths.
+- Both calls are **synchronous**. GPUI reads the platform clipboard directly,
+  so there is no promise to await. On Windows and Linux the call runs on the
+  UI thread while JavaScript waits for the answer.
+- An empty string is a real entry: `writeToClipboard('')` clears the clipboard
+  and reads back as `''`. Only plain text is written and read.
+- The terminal renderer writes through OSC 52 and keeps a local copy, so a read
+  there only returns text this app wrote. The browser renderer has no
+  clipboard methods.
 
 ### Custom fonts
 
@@ -4343,7 +4331,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Headless Select, Combobox, and Tooltip
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
-- [x] Clipboard text (`writeToClipboard` / `readFromClipboard`, `copyText`)
+- [x] Clipboard text (`writeToClipboard` / `readFromClipboard`)
 - [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar with the standard shortcuts (`appName`)

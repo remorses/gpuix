@@ -1314,7 +1314,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] `highlight` prop: search matches and explicit ranges
 - [x] Headless Select, Combobox, Tooltip
 - [x] `setWindowTitle`
-- [x] Clipboard text (`copyText`, `writeToClipboard` / `readFromClipboard`)
+- [x] Clipboard text (`writeToClipboard` / `readFromClipboard`)
 - [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar (`crate::app_menu`, `appName`)

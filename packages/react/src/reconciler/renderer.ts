@@ -343,12 +343,6 @@ function renderSlot(): RenderSlot {
   return created
 }
 
-/** The renderer `render()` mounted, for commands that do not re-render. */
-export function activeRenderer(): NativeRenderer | undefined {
-  return (Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined)
-    ?.renderer
-}
-
 export interface RenderOptions extends WindowOptions, WindowKeyEventHandlers {
   onEvent?: (event: EventPayload) => void
   renderer?: NativeRenderer
