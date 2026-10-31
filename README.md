@@ -772,7 +772,7 @@ terminal.
 | Option | Values | Purpose |
 |---|---|---|
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |
-| `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
+| `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop. In a terminal both non-opaque values let the terminal's background show through |
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. The chat example uses `(16, 17)` |
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
@@ -893,6 +893,9 @@ GPUI scene ──► offscreen Metal / wgpu render ──► RGBA in POSIX share
 - **Platforms**: macOS and Linux. Windows throws
 - **Size**: the window fills the terminal and follows its resizes. `width`,
   `height` and window chrome options are ignored
+- **Background**: `windowBackground: 'transparent'` or `'blurred'` sends
+  unpainted and translucent pixels with their alpha, so the terminal's own
+  background shows behind the app. See **Blurred wallpaper** below
 - **Input**: hover, clicks, drag, scroll, keys with key-up, paste and focus
   come from SGR pixel mouse reports and the kitty keyboard protocol
 - **Quit**: ctrl-c, even when a text field has focus. The terminal is restored
@@ -947,6 +950,40 @@ screen. Turn them on in `settings.json`:
 
 VS Code cannot read shared memory, so frames go inline, like over SSH. Expect
 fewer frames per second than in kitty or Ghostty.
+
+**Blurred wallpaper comes from the terminal.** The kitty graphics protocol has
+no escape code that sets a terminal's opacity or blur. Those are terminal
+settings. GPUIX sends each pixel's alpha, so a terminal that is already
+translucent shows its blurred wallpaper wherever the app leaves the background
+clear:
+
+```tsx
+render(<div style={{ backgroundColor: '#14141480', width: '100%', height: '100%' }} />, {
+  terminal: true,
+  windowBackground: 'blurred',
+})
+```
+
+```conf
+# kitty.conf
+background_opacity 0.6
+background_blur 32
+
+# ghostty config
+background-opacity = 0.6
+background-blur = true
+```
+
+- `"transparent"` and `"blurred"` behave the same in a terminal. The blur, if
+  any, comes from the terminal's `background_blur` / `background-blur`
+- `"opaque"` (the default) sends every pixel opaque. Unpainted pixels are
+  black, as in a native window
+- GPUI renders premultiplied colour. GPUIX converts each frame to straight
+  RGBA, like a decoded PNG, before it sends it
+- Whether a transparent image pixel reaches the desktop is up to the terminal.
+  The protocol only promises alpha blending with the cells under the image,
+  and kitty applies `background_opacity` only to cells with the default
+  background colour
 
 **No titlebar.** A terminal has no macOS traffic lights, so space reserved for
 them becomes an empty gap. `isTerminal()` tells the app, and it is a plain
