@@ -412,6 +412,10 @@ export interface HighlightSpec {
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
 // Framework adapters add their own children, key, and ref fields.
+
+/** Value an `aria-*` custom prop may carry, before the native mapper validates it. */
+export type AriaPropValue = string | number | boolean | undefined
+
 export interface HostProps {
   style?: StyleDesc
 
@@ -511,6 +515,11 @@ export interface HostProps {
   "aria-valuetext"?: string
   /** Heading level, 1-based. */
   "aria-level"?: number
+  /**
+   * Any other ARIA attribute. The native mapper in `accessibility.rs` is the
+   * only list of supported names (README "Accessibility"); it ignores the rest.
+   */
+  [aria: `aria-${string}`]: AriaPropValue
   /** Stable locator id for automation. */
   testId?: string
   /** Internal native animation description used by motion components. */
@@ -540,13 +549,8 @@ export type VirtualListShared = {
   overdraw?: number
   onVisibleRange?: (event: EventPayload) => void
   role?: string
-  "aria-label"?: string
-  "aria-description"?: string
-  "aria-id"?: string
-  "aria-expanded"?: boolean
-  "aria-selected"?: boolean
-  "aria-valuetext"?: string
-  "aria-level"?: number
+  /** Any `aria-*` attribute; see `HostProps`. */
+  [aria: `aria-${string}`]: AriaPropValue
   testId?: string
 }
 

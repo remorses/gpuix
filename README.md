@@ -2048,16 +2048,39 @@ PascalCase. `"none"` and `"presentation"` produce no node.
 </div>
 ```
 
-| Prop               | GPUI / AccessKit                          |
-| ------------------ | ----------------------------------------- |
-| `role`             | `.role(Role::…)`                          |
-| `aria-label`       | accessible name                           |
-| `aria-description` | extra description after name, role, value |
-| `aria-id`          | `AXIdentifier` / UIA AutomationId         |
-| `aria-expanded`    | expanded state                            |
-| `aria-selected`    | selected state                            |
-| `aria-valuetext`   | string value                              |
-| `aria-level`       | heading level                             |
+| Prop                | GPUI / AccessKit                          |
+| ------------------- | ----------------------------------------- |
+| `role`              | `.role(Role::…)`                          |
+| `aria-label`        | accessible name                           |
+| `aria-description`  | extra description after name, role, value |
+| `aria-id`           | `AXIdentifier` / UIA AutomationId         |
+| `aria-expanded`     | expanded state                            |
+| `aria-selected`     | selected state                            |
+| `aria-valuetext`    | string value                              |
+| `aria-valuenow`     | numeric value                             |
+| `aria-valuemin`     | minimum numeric value                     |
+| `aria-valuemax`     | maximum numeric value                     |
+| `aria-level`        | heading level                             |
+| `aria-keyshortcuts` | keyboard shortcut hint                    |
+| `aria-placeholder`  | placeholder text                          |
+| `aria-checked`      | toggled: `true`, `false`, or `"mixed"`    |
+| `aria-pressed`      | toggled: `true`, `false`, or `"mixed"`    |
+| `aria-orientation`  | `"horizontal"` or `"vertical"`            |
+| `aria-posinset`     | position in a set                         |
+| `aria-setsize`      | size of a set                             |
+| `aria-rowindex`     | row index                                 |
+| `aria-colindex`     | column index                              |
+| `aria-rowcount`     | row count                                 |
+| `aria-colcount`     | column count                              |
+
+Set and table values are positive integers; a numeric value must be finite.
+Anything else is ignored, never a panic, and an unknown `role` token falls back
+to the element's default role.
+
+`aria-activedescendant` is **not** mapped. The web prop is a container-side id
+reference, while GPUI's `aria_active_descendant()` takes no argument and is set
+on the *selected child*. `aria-invalid`, `aria-required`, `aria-modal`,
+`aria-current`, and `aria-haspopup` have no builder in the pinned GPUI fork.
 
 Native defaults, so common elements are not silent:
 

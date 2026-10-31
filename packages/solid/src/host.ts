@@ -3,7 +3,7 @@
 import {
   BUILT_IN_TYPES,
   handlerEventType,
-  UNIVERSAL_PROPS,
+  isUniversalProp,
   registerEventHandler,
   serializeCustomProp,
   unregisterEventHandler,
@@ -147,7 +147,7 @@ export function replaceHostText(node: HostText, value: string): void {
 }
 
 function customPropAllowed(node: HostElement, name: string): boolean {
-  return !BUILT_IN_TYPES.has(node.type) || UNIVERSAL_PROPS.has(name)
+  return !BUILT_IN_TYPES.has(node.type) || isUniversalProp(name)
 }
 
 export function setHostProperty(

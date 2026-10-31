@@ -111,6 +111,12 @@ export const RESERVED_PROPS: ReadonlySet<string> = new Set([
 
 export const BUILT_IN_TYPES: ReadonlySet<string> = new Set(["div", "text"])
 
+/**
+ * Props every element forwards to Rust as custom props, beyond events. Any
+ * `aria-*` attribute qualifies: the native accessibility mapper is the single
+ * source of truth for which ones it understands, and it ignores the rest, so
+ * the adapters do not keep a second list to drift.
+ */
 export const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "autoFocus",
   "tabIndex",
@@ -118,14 +124,11 @@ export const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "testId",
   "highlight",
   "role",
-  "aria-label",
-  "aria-description",
-  "aria-id",
-  "aria-expanded",
-  "aria-selected",
-  "aria-valuetext",
-  "aria-level",
 ])
+
+export function isUniversalProp(name: string): boolean {
+  return name.startsWith("aria-") || UNIVERSAL_PROPS.has(name)
+}
 
 export function isReservedProp(name: string, value: unknown): boolean {
   return RESERVED_PROPS.has(name) || handlerEventType(name, value) !== undefined

@@ -11,10 +11,10 @@ import {
   BUILT_IN_TYPES,
   handlerEventType,
   isReservedProp,
+  isUniversalProp,
   RESERVED_PROPS,
   sameMutationValue,
   serializeCustomProp,
-  UNIVERSAL_PROPS,
 } from "@gpuix/native/host"
 
 const NoEventPriority = 0
@@ -202,7 +202,7 @@ function syncCustomProps(
   const builtIn = BUILT_IN_TYPES.has(type)
   for (const [key, value] of Object.entries(props)) {
     if (isReservedProp(key, value)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
+    if (builtIn && !isUniversalProp(key)) continue
     renderer.setCustomProp(id, key, serializeCustomProp(value))
   }
 }
@@ -233,7 +233,7 @@ function diffCustomProps(
     const oldValue = previous[key]
     if (value === oldValue) continue
     if (RESERVED_PROPS.has(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
+    if (builtIn && !isUniversalProp(key)) continue
     const wasData = key in previous && !isReservedProp(key, oldValue)
     if (handlerEventType(key, value)) {
       if (wasData) renderer.setCustomProp(id, key, null)
@@ -252,7 +252,7 @@ function diffCustomProps(
   // Removed props
   for (const key in previous) {
     if (key in next || isReservedProp(key, previous[key])) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
+    if (builtIn && !isUniversalProp(key)) continue
     renderer.setCustomProp(id, key, null)
   }
 }
