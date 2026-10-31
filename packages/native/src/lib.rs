@@ -21,6 +21,7 @@ mod diff;
 mod element_tree;
 mod markdown;
 mod motion;
+mod notifications;
 mod renderer;
 // The data model is public so `examples/bench_serde.rs` measures the real
 // types instead of a copy that silently drifts from them.

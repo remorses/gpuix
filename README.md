@@ -954,6 +954,40 @@ function WindowControls() {
 Windows, Linux, and FreeBSD. `zoomWindow()` uses the platform's native zoom or
 maximize operation. These methods are not available in the browser renderer.
 
+### Notifications
+
+`notify()` posts an OS notification through GPUI: `UNUserNotificationCenter`
+on macOS, a toast on Windows, and the XDG notification service on Linux.
+
+```tsx
+const renderer = useGpuixRequired()
+
+renderer.setAppIdentity?.('com.acme.notes', 'Notes') // once, at startup
+renderer.onNotificationResponse?.(({ tag, actionId }) => {
+  if (tag === 'upload-1' && actionId === 'open') openUploads()
+})
+renderer.notify?.({
+  tag: 'upload-1',
+  title: 'Upload complete',
+  body: '3 files',
+  actions: [{ id: 'open', label: 'Open' }],
+})
+renderer.dismissNotification?.('upload-1')
+```
+
+- **`tag` is the notification's identity.** Posting the same tag again replaces
+  the earlier one where the platform supports it, and the response carries it
+  back. `actionId` is absent when the reader clicked the body.
+- **Delivery is best-effort.** macOS asks for permission on the first post, and
+  a denied permission or a missing notification service is a silent no-op.
+  There is no permission query to call.
+- **Windows needs `setAppIdentity()`** before the first post. The identifier
+  becomes the AppUserModelID, and toasts without one are dropped. It is not
+  `appName` (macOS menu items) or `appId` (the Wayland/X11 window class).
+- Linux shows actions only when the notification daemon supports them.
+- A later `onNotificationResponse()` replaces the handler. These methods are not
+  available in the browser renderer.
+
 ### Window measurements
 
 **Snapshots** from `readWindowSize(renderer)` and `readWindowInsets(renderer)`

@@ -440,6 +440,7 @@ enum UiCommand {
     ZoomWindow,
     ToggleFullscreen,
     SetWindowTitle(String),
+    UpdateApp(Box<dyn FnOnce(&mut gpui::App) + Send>),
     PromptForPaths {
         options: gpui::PathPromptOptions,
         deferred: PathPromptDeferred,
@@ -576,6 +577,10 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::UpdateApp(update) => {
+                cx.update(update);
+                anyhow::Ok(())
+            }
             UiCommand::PromptForPaths { options, deferred } => {
                 let background_executor = cx.background_executor().clone();
                 let receiver = cx.update(|cx| cx.prompt_for_paths(options));
@@ -997,6 +1002,25 @@ impl GpuixRenderer {
             .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?
             .unbounded_send(command)
             .map_err(|_| Error::from_reason("The GPUI UI thread is not running"))
+    }
+
+    /// Run `update` against the GPUI app, on the thread that owns it.
+    fn update_app(&self, update: impl FnOnce(&mut gpui::App) + Send + 'static) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |_window, cx| update(cx));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::UpdateApp(Box::new(update)));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
     }
 
     fn begin_path_prompt(&self, options: gpui::PathPromptOptions, deferred: PathPromptDeferred) {
@@ -1918,6 +1942,47 @@ impl GpuixRenderer {
         Err(Error::from_reason(
             "The production GPUIX renderer does not support this operating system",
         ))
+    }
+
+    /// Post an OS notification. A tag that matches an earlier one replaces it
+    /// where the platform supports it; delivery being unavailable is a no-op.
+    #[napi]
+    pub fn notify(&self, options: crate::notifications::NotificationOptions) -> Result<()> {
+        self.update_app(move |cx| cx.show_system_notification(options.into_gpui()))
+    }
+
+    /// Remove the delivered or pending notification with this tag.
+    #[napi]
+    pub fn dismiss_notification(&self, tag: String) -> Result<()> {
+        self.update_app(move |cx| cx.dismiss_system_notification(&tag))
+    }
+
+    /// Set the identity the OS attributes notifications to.
+    ///
+    /// Windows drops toasts without an AppUserModelID; this is the only entry
+    /// point for it (`WindowOptions.appId` is the Wayland/X11 window class).
+    #[napi]
+    pub fn set_app_identity(&self, identifier: String, name: String) -> Result<()> {
+        self.update_app(move |cx| cx.set_app_identity(&identifier, &name))
+    }
+
+    /// Call `callback` when the reader clicks a notification or one of its
+    /// actions. A later call replaces the handler.
+    #[napi(ts_args_type = "callback: (response: NotificationResponse) => void")]
+    pub fn on_notification_response(
+        &self,
+        callback: Function<crate::notifications::NotificationResponse, ()>,
+    ) -> Result<()> {
+        let callback = callback
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .weak::<true>()
+            .build()?;
+        self.update_app(move |cx| {
+            cx.on_system_notification_response(move |response, _cx| {
+                callback.call(response.into(), ThreadsafeFunctionCallMode::NonBlocking);
+            })
+        })
     }
 
     /// Open the platform path picker. Returns null when the user cancels.

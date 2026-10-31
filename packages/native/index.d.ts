@@ -106,6 +106,25 @@ export declare class GpuixRenderer {
   /** Enter or exit native fullscreen. */
   toggleFullscreen(): void
   setWindowTitle(title: string): void
+  /**
+   * Post an OS notification. A tag that matches an earlier one replaces it
+   * where the platform supports it; delivery being unavailable is a no-op.
+   */
+  notify(options: NotificationOptions): void
+  /** Remove the delivered or pending notification with this tag. */
+  dismissNotification(tag: string): void
+  /**
+   * Set the identity the OS attributes notifications to.
+   *
+   * Windows drops toasts without an AppUserModelID; this is the only entry
+   * point for it (`WindowOptions.appId` is the Wayland/X11 window class).
+   */
+  setAppIdentity(identifier: string, name: string): void
+  /**
+   * Call `callback` when the reader clicks a notification or one of its
+   * actions. A later call replaces the handler.
+   */
+  onNotificationResponse(callback: (response: NotificationResponse) => void): void
   /** Open the platform path picker. Returns null when the user cancels. */
   promptForPaths(options?: PathPromptOptions | undefined | null): Promise<Array<string> | null>
   focusElement(elementId: number): void
@@ -723,6 +742,35 @@ export interface LayerShellOptions {
    * overlay that never takes keyboard focus.
    */
   keyboardInteractivity?: string
+}
+
+/** One button offered on a notification. */
+export interface NotificationAction {
+  /** Identifies the action in `NotificationResponse.actionId`. */
+  id: string
+  /** The button's label. */
+  label: string
+}
+
+/** A notification to post. */
+export interface NotificationOptions {
+  /**
+   * Stable identity: posting the same tag replaces the earlier one where
+   * the platform supports it, and responses carry it back.
+   */
+  tag: string
+  /** The headline. */
+  title: string
+  /** The line under the title. Absent is an empty body. */
+  body?: string
+  /** Buttons. Platforms that cannot show them drop them. */
+  actions?: Array<NotificationAction>
+}
+
+/** What the reader activated: the notification and the action, if any. */
+export interface NotificationResponse {
+  tag: string
+  actionId?: string
 }
 
 export interface PathPromptOptions {
