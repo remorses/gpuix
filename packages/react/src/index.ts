@@ -159,6 +159,7 @@ export type {
   WindowKeyEventHandlers,
   WindowSizeHost,
 } from "./types/host.js"
+export { copyText } from "./clipboard.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"
 export {
   applyMacCpuThrottleFromEnv,

@@ -34,6 +34,8 @@ export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
   promptForPaths(options?: PathPromptOptions): Promise<string[] | null>
+  writeToClipboard(text: string): void
+  readFromClipboard(): string | null
   flush(): void
   drainEvents(): EventPayload[]
   simulateKeystrokes(keystrokes: string): void
@@ -197,6 +199,8 @@ export class TestRenderer implements NativeRenderer {
     NativeRenderer["setWindowSelectionChange"]
   >
   readonly setWindowKeyEvents: NonNullable<NativeRenderer["setWindowKeyEvents"]>
+  readonly writeToClipboard: NonNullable<NativeRenderer["writeToClipboard"]>
+  readonly readFromClipboard: NonNullable<NativeRenderer["readFromClipboard"]>
   private readonly dispatchEvent: (event: EventPayload) => void
 
   constructor(options: TestRendererOptions = {}) {
@@ -211,6 +215,8 @@ export class TestRenderer implements NativeRenderer {
     this.focusPrevious = this.native.focusPrevious.bind(this.native)
     this.promptForPaths = this.native.promptForPaths.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
+    this.writeToClipboard = this.native.writeToClipboard.bind(this.native)
+    this.readFromClipboard = this.native.readFromClipboard.bind(this.native)
     this.setWindowSelectionChange = this.native.setWindowSelectionChange.bind(
       this.native
     )

@@ -725,6 +725,24 @@ impl TestGpuixRenderer {
         self.selection.lock().clear();
     }
 
+    /// Write text to the clipboard, exactly as `GpuixRenderer` does.
+    ///
+    /// `VisualTestPlatform` keeps this clipboard in memory, so a test never
+    /// replaces the developer's system clipboard.
+    #[napi]
+    pub fn write_to_clipboard(&self, text: String) -> Result<()> {
+        with_test_state(|cx, _window, _view| {
+            cx.update(move |cx| crate::clipboard::write_text(cx, text));
+            Ok(())
+        })
+    }
+
+    /// Read the clipboard's text, or null when it holds no text at all.
+    #[napi]
+    pub fn read_from_clipboard(&self) -> Result<Option<String>> {
+        with_test_state(|cx, _window, _view| Ok(cx.update(|cx| crate::clipboard::read(cx))))
+    }
+
     /// Syntax-cache counters as `[hits, misses, documents]`.
     ///
     /// GPUIX rebuilds its whole element tree every frame, so a `<code>` block

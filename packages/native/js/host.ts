@@ -711,6 +711,8 @@ export type NativeRenderer = MutationHost &
       | "dismissNotification"
       | "setAppIdentity"
       | "onNotificationResponse"
+      | "writeToClipboard"
+      | "readFromClipboard"
       | "registerFont"
       | "promptForPaths"
       | "activateWindow"

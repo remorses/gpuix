@@ -13,12 +13,11 @@ use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardEntry,
-    ClipboardItem, Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, GlobalElementId, KeyBinding, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent,
-    SharedString, Style, Task, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window,
-    WrappedLine,
+    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context,
+    CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
+    GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent, SharedString, Style, Task, TextRun,
+    TextStyle, UTF16Selection, UnderlineStyle, Window, WrappedLine,
 };
 use unicode_segmentation::UnicodeSegmentation;
 use web_time::Instant;
@@ -78,17 +77,6 @@ const UNDO_LIMIT: usize = 200;
 
 fn caret_visible(ms_since_activity: u64) -> bool {
     (ms_since_activity / CARET_BLINK_MS) % 2 == 0
-}
-
-fn clipboard_text(item: ClipboardItem) -> Option<String> {
-    if item
-        .entries
-        .iter()
-        .any(|entry| matches!(entry, ClipboardEntry::ExternalPaths(_)))
-    {
-        return None;
-    }
-    item.text()
 }
 
 // Chrome paints the caret at line height, not font size. Firefox uses the em
@@ -1109,7 +1097,7 @@ impl TextEditorState {
             cx.propagate();
             return;
         }
-        let Some(text) = cx.read_from_clipboard().and_then(clipboard_text) else {
+        let Some(text) = crate::clipboard::paste_text(cx.read_from_clipboard()) else {
             cx.propagate();
             return;
         };
@@ -2049,32 +2037,6 @@ mod tests {
         let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0));
         assert_eq!(bounds.origin, point(px(10.0), px(4.0)));
         assert_eq!(bounds.size, size(px(2.0), px(20.0)));
-    }
-
-    #[test]
-    fn external_paths_are_not_text_editor_paste() {
-        let item = ClipboardItem {
-            entries: vec![
-                ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
-                    [std::path::PathBuf::from("/tmp/image.png")]
-                        .into_iter()
-                        .collect(),
-                )),
-                ClipboardEntry::String(gpui::ClipboardString::new("/tmp/image.png".to_string())),
-            ],
-        };
-        assert_eq!(clipboard_text(item), None);
-    }
-
-    #[test]
-    fn text_still_pastes_when_the_clipboard_also_has_an_image() {
-        let item = ClipboardItem {
-            entries: vec![
-                ClipboardEntry::String(gpui::ClipboardString::new("caption".to_string())),
-                ClipboardEntry::Image(gpui::Image::empty()),
-            ],
-        };
-        assert_eq!(clipboard_text(item), Some("caption".to_string()));
     }
 
     #[test]

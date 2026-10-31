@@ -125,6 +125,22 @@ export declare class GpuixRenderer {
    * actions. A later call replaces the handler.
    */
   onNotificationResponse(callback: (response: NotificationResponse) => void): void
+  /**
+   * Write text to the OS clipboard.
+   *
+   * An empty string is a real clipboard entry, so it clears the clipboard
+   * instead of leaving the previous contents behind.
+   */
+  writeToClipboard(text: string): void
+  /**
+   * Read the clipboard's text, or null when it holds no text at all: the
+   * clipboard is empty, or it holds an image or files.
+   *
+   * Synchronous, because every desktop GPUI platform reads the platform
+   * clipboard directly. On Windows and Linux the read runs on the UI thread
+   * and only the JavaScript thread waits; the UI thread never blocks.
+   */
+  readFromClipboard(): string | null
   /** Open the platform path picker. Returns null when the user cancels. */
   promptForPaths(options?: PathPromptOptions | undefined | null): Promise<Array<string> | null>
   focusElement(elementId: number): void
@@ -348,6 +364,15 @@ export declare class TestGpuixRenderer {
   getSelectedText(): string | null
   /** Drop the current selection. */
   clearSelection(): void
+  /**
+   * Write text to the clipboard, exactly as `GpuixRenderer` does.
+   *
+   * `VisualTestPlatform` keeps this clipboard in memory, so a test never
+   * replaces the developer's system clipboard.
+   */
+  writeToClipboard(text: string): void
+  /** Read the clipboard's text, or null when it holds no text at all. */
+  readFromClipboard(): string | null
   /**
    * Syntax-cache counters as `[hits, misses, documents]`.
    *

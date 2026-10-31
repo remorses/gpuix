@@ -1052,6 +1052,45 @@ activation policy, so there is no menu-bar-agent mode yet. For a real
 background daemon, run the app from a `launchd` agent in
 `~/Library/LaunchAgents/`; launchd never activates the process.
 
+### Clipboard
+
+`copyText(text)` writes text to the system clipboard. It is a **command**, not a
+hook: nothing re-renders when the clipboard changes, so there is no state to
+subscribe to.
+
+```tsx
+import { copyText } from '@gpuix/react'
+
+function CopyButton({ text }: { text: string }) {
+  return <div onClick={() => copyText(text)}>Copy</div>
+}
+```
+
+The renderer methods behind it are `writeToClipboard(text)` and
+`readFromClipboard()`. A read returns the clipboard's text, or `null` when it
+holds no text at all: the clipboard is empty, or it holds an image or files.
+Both calls are **synchronous** on every desktop platform: GPUI reads the
+platform clipboard directly, so there is no promise to await. On Windows and
+Linux the call runs on the UI thread while JavaScript waits for the answer.
+Reach them through `useGpuixRequired()` when a component needs to
+read:
+
+```tsx
+const renderer = useGpuixRequired()
+const pasted = renderer.readFromClipboard?.() // string | null
+```
+
+An empty string is a real clipboard entry, not a no-op: `copyText('')` clears
+the clipboard instead of leaving the previous contents behind, and reads back
+as `''`. Only plain text is written and read; metadata and multi-entry items
+are not exposed, and a file list reads as `null` rather than as paths.
+`copyText` throws when no window is mounted, so a copy button that cannot copy
+never looks like it worked.
+
+The terminal renderer writes through OSC 52 and keeps a local copy, so a read
+there only returns text this app wrote. The browser renderer has no clipboard
+binding, and `copyText` throws.
+
 ### Custom fonts
 
 `registerFont()` makes a font that is not installed on the machine available to
@@ -4304,6 +4343,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Headless Select, Combobox, and Tooltip
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
+- [x] Clipboard text (`writeToClipboard` / `readFromClipboard`, `copyText`)
 - [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar with the standard shortcuts (`appName`)
