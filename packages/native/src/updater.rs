@@ -1119,12 +1119,10 @@ mod packager {
     /// exits before anyone can roll back. Keyed by the bundle's file name, so
     /// two apps never restore each other. The directory is created here, as
     /// the user, so the admin install on macOS never leaves it root-owned.
-    #[cfg_attr(windows, allow(dead_code))]
     pub(super) fn previous_bundle_path(bundle: &Path) -> Result<PathBuf> {
         previous_bundle_path_in(&cache_dir().ok_or(Error::CacheDirUnavailable)?, bundle)
     }
 
-    #[cfg_attr(windows, allow(dead_code))]
     pub(super) fn previous_bundle_path_in(cache: &Path, bundle: &Path) -> Result<PathBuf> {
         let name = bundle.file_name().ok_or_else(|| {
             std::io::Error::other(format!("{} has no file name", bundle.display()))
@@ -1149,7 +1147,6 @@ mod packager {
     /// A rename keeps the mode and costs nothing, so it goes first. Two cases
     /// fall back: a directory cannot be renamed over a non-empty one, and a
     /// file on another mount has to be copied.
-    #[cfg_attr(windows, allow(dead_code))]
     pub(super) fn replace_bundle(from: &Path, to: &Path) -> std::io::Result<()> {
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent)?;
@@ -1176,7 +1173,6 @@ mod packager {
     /// The kept bundle is consumed: a second rollback has nothing to restore.
     /// `current` moves aside first, so a failed restore leaves a working
     /// bundle behind.
-    #[cfg_attr(windows, allow(dead_code))]
     pub(super) fn restore_previous(previous: &Path, current: &Path) -> std::io::Result<()> {
         let replaced = previous.with_file_name("replaced");
         remove_any(&replaced)?;
@@ -1191,7 +1187,6 @@ mod packager {
     }
 
     /// Restore the previous bundle, or say why there is nothing to restore.
-    #[cfg_attr(windows, allow(dead_code))]
     pub(super) fn rollback_previous(previous: &Path, current: &Path) -> Result<()> {
         if !previous.exists() {
             return Err(Error::NothingToRestore);
