@@ -31,7 +31,7 @@
     },
     "disktree": {
       "name": "disktree",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "bin": "dist/cli.js",
       "dependencies": {
         "@gpuix/native": "workspace:^",
@@ -55,6 +55,19 @@
       },
       "devDependencies": {
         "@types/bun": "^1.2.0",
+        "@types/react": "^19.2.0",
+        "typescript": "^5.3.0",
+        "vitest": "^4.0.18",
+      },
+    },
+    "example-rust-native-element": {
+      "name": "@gpuix/example-rust-native-element",
+      "version": "0.0.0",
+      "dependencies": {
+        "@gpuix/react": "workspace:^",
+        "react": "^19.2.4",
+      },
+      "devDependencies": {
         "@types/react": "^19.2.0",
         "typescript": "^5.3.0",
         "vitest": "^4.0.18",
@@ -271,6 +284,8 @@
     "@gpuix/cli": ["@gpuix/cli@workspace:cli"],
 
     "@gpuix/example-app": ["@gpuix/example-app@workspace:example-app"],
+
+    "@gpuix/example-rust-native-element": ["@gpuix/example-rust-native-element@workspace:example-rust-native-element"],
 
     "@gpuix/examples": ["@gpuix/examples@workspace:examples"],
 

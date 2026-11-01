@@ -8,12 +8,15 @@ import fs from "fs"
 import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import {
   expectScreenshotsDiffer,
   expectScreenshotsEqual,
   SHOTS_DIR,
 } from "./test-utils.js"
+
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
@@ -35,7 +38,7 @@ function comparePixels(name: string, a: React.ReactElement, b: React.ReactElemen
   expectScreenshotsDiffer(left, right)
 }
 
-describe("style props reach the renderer", () => {
+describeNative("style props reach the renderer", () => {
   it("applies padding to a <text> node", () => {
     // `<text>` used to apply a text-only subset of the style set, so every
     // layout prop on it was dropped.

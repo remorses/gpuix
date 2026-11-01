@@ -4,8 +4,11 @@ import fs from "fs"
 import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it, vi } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
+
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 const PATCH = [
   "diff --git a/src/app.ts b/src/app.ts",
@@ -64,7 +67,7 @@ beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
 })
 
-describe("<diff>", () => {
+describeNative("<diff>", () => {
   it("renders file headers with addition and deletion counts", () => {
     const { render, renderer } = createTestRoot()
     render(<diff patch={PATCH} style={{ width: "100%", height: "100%" }} />)

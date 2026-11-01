@@ -135,6 +135,175 @@ describeNative("accessibility", () => {
     )
   })
 
+  it("passes aria-keyshortcuts, aria-placeholder, aria-checked, aria-pressed, and aria-orientation", () => {
+    testRoot.render(
+      <div style={{ width: 320, height: 200 }}>
+        <div
+          role="button"
+          aria-label="Pressed"
+          aria-keyshortcuts="Meta+K"
+          aria-pressed={true}
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="button"
+          aria-label="Unpressed"
+          aria-pressed={false}
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="button"
+          aria-label="Partial"
+          aria-pressed="mixed"
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="checkbox"
+          aria-label="Select all"
+          aria-checked="mixed"
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="textbox"
+          aria-label="Search"
+          aria-placeholder="Search notes"
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="tablist"
+          aria-label="Panels"
+          aria-orientation="vertical"
+          style={{ width: 120, height: 24 }}
+        />
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getA11yTree()
+    const buttons = withRole(tree, "Button")
+    const byLabel = (label: string) =>
+      buttons.find((aria) => aria.label === label)
+    expect(byLabel("Pressed")).toEqual(
+      expect.objectContaining({ keyboard_shortcut: "Meta+K", toggled: "True" }),
+    )
+    expect(byLabel("Unpressed")?.toggled).toBe("False")
+    expect(byLabel("Partial")?.toggled).toBe("Mixed")
+    expect(withRole(tree, "CheckBox")[0]?.toggled).toBe("Mixed")
+    expect(withRole(tree, "TextInput")[0]?.placeholder).toBe("Search notes")
+    expect(withRole(tree, "TabList")[0]?.orientation).toBe("Vertical")
+  })
+
+  it("passes aria-valuenow, aria-valuemin, and aria-valuemax as numeric values", () => {
+    testRoot.render(
+      <div style={{ width: 280, height: 120 }}>
+        <div
+          role="slider"
+          aria-label="Volume"
+          aria-valuenow={40}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="spinbutton"
+          aria-label="Quantity"
+          aria-valuenow={2.5}
+          aria-valuemin={-10}
+          style={{ width: 120, height: 24 }}
+        />
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getA11yTree()
+    expect(withRole(tree, "Slider")[0]).toEqual(
+      expect.objectContaining({
+        label: "Volume",
+        numeric_value: 40,
+        min_numeric_value: 0,
+        max_numeric_value: 100,
+      }),
+    )
+    const spinbutton = withRole(tree, "SpinButton")[0]
+    expect(spinbutton?.numeric_value).toBe(2.5)
+    expect(spinbutton?.min_numeric_value).toBe(-10)
+    expect(spinbutton?.max_numeric_value).toBeUndefined()
+  })
+
+  it("passes aria-posinset, aria-setsize, and the table indexes", () => {
+    testRoot.render(
+      <div style={{ width: 280, height: 160 }}>
+        <div
+          role="listitem"
+          aria-label="Row"
+          aria-posinset={2}
+          aria-setsize={9}
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="gridcell"
+          aria-label="Cell"
+          aria-rowindex={3}
+          aria-colindex={4}
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="grid"
+          aria-label="Sheet"
+          aria-rowcount={10}
+          aria-colcount={6}
+          style={{ width: 120, height: 24 }}
+        />
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getA11yTree()
+    expect(withRole(tree, "ListItem")[0]).toEqual(
+      expect.objectContaining({ position_in_set: 2, size_of_set: 9 }),
+    )
+    expect(withRole(tree, "GridCell")[0]).toEqual(
+      expect.objectContaining({ row_index: 3, column_index: 4 }),
+    )
+    expect(withRole(tree, "Grid")[0]).toEqual(
+      expect.objectContaining({ row_count: 10, column_count: 6 }),
+    )
+  })
+
+  it("drops invalid aria values instead of panicking", () => {
+    testRoot.render(
+      <div style={{ width: 280, height: 120 }}>
+        <div
+          role="slider"
+          aria-label="Bad value"
+          aria-valuenow="not-a-number"
+          aria-valuemin={Number.POSITIVE_INFINITY}
+          aria-posinset={0}
+          aria-setsize={-3}
+          aria-rowindex={2.5}
+          style={{ width: 120, height: 24 }}
+        />
+        <div
+          role="button"
+          aria-label="Bad tokens"
+          aria-orientation="diagonal"
+          aria-pressed="maybe"
+          style={{ width: 120, height: 24 }}
+        />
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getA11yTree()
+    const slider = withRole(tree, "Slider")[0]
+    expect(slider?.label).toBe("Bad value")
+    expect(slider?.numeric_value).toBeUndefined()
+    expect(slider?.min_numeric_value).toBeUndefined()
+    expect(slider?.position_in_set).toBeUndefined()
+    expect(slider?.size_of_set).toBeUndefined()
+    expect(slider?.row_index).toBeUndefined()
+
+    const button = withRole(tree, "Button")[0]
+    expect(button?.orientation).toBeUndefined()
+    expect(button?.toggled).toBeUndefined()
+  })
+
   it("reports <input> as TextInput and <textarea> as MultilineTextInput", () => {
     testRoot.render(
       <div style={{ width: 280, height: 120 }}>

@@ -6,9 +6,12 @@
 
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
-describe("selection hit testing across layouts", () => {
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
+
+describeNative("selection hit testing across layouts", () => {
   it("selects the column the pointer is actually in", () => {
     const { render, renderer } = createTestRoot()
     render(
@@ -133,7 +136,7 @@ describe("selection hit testing across layouts", () => {
   })
 })
 
-describe("copy listener", () => {
+describeNative("copy listener", () => {
   it("registers once per frame, not once per text element", () => {
     const { render, renderer } = createTestRoot()
     render(
@@ -153,7 +156,7 @@ describe("copy listener", () => {
   })
 })
 
-describe("painted text log", () => {
+describeNative("painted text log", () => {
   it("includes text that opted out of selection", () => {
     const { render, renderer } = createTestRoot()
     render(
@@ -173,7 +176,7 @@ describe("painted text log", () => {
   })
 })
 
-describe("standard events on native elements", () => {
+describeNative("standard events on native elements", () => {
   it("fires onClick on <code>", () => {
     const onClick = vi.fn()
     const { render, renderer } = createTestRoot()

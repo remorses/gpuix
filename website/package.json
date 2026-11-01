@@ -13,21 +13,21 @@
     "typegen": "wrangler types"
   },
   "dependencies": {
-    "@cloudflare/vite-plugin": "1.35.0",
+    "@cloudflare/vite-plugin": "1.64.0",
     "@cloudflare/workers-types": "^4.20250712.0",
-    "@holocron.so/vite": "^0.35.2",
+    "@holocron.so/vite": "^0.38.0",
     "@tailwindcss/vite": "^4.3.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "spiceflow": "1.26.0-rsc.18",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "spiceflow": "1.26.0-rsc.22",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "typescript": "^5.8.3",
-    "vite": "^8.2.1",
-    "wrangler": "4.92.0"
+    "vite": "^8.3.4",
+    "wrangler": "4.151.2"
   },
   "engines": {
     "node": ">=18.0.0"

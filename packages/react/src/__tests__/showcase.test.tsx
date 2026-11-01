@@ -8,8 +8,11 @@ import fs from "fs"
 import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
+
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 const NOTES = [
   "## Release notes",
@@ -88,7 +91,7 @@ beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
 })
 
-describe("native text showcase", () => {
+describeNative("native text showcase", () => {
   it("renders markdown, code and diff together", () => {
     const shot = path.join(SHOTS_DIR, "showcase.png")
     const { render, renderer } = createTestRoot()

@@ -14,6 +14,7 @@ export {
   IME_MIRROR_SELECTOR,
   serveAutomationStdio,
   SseBackend,
+  VideoRecording,
 } from "./client.js"
 export type {
   AutomationBackend,

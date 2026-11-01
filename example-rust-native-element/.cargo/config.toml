@@ -1,0 +1,3 @@
+# Reuse the GPUI build of packages/native instead of compiling it a second time.
+[build]
+target-dir = "../packages/native/target"

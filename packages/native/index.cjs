@@ -784,3 +784,4 @@ module.exports.TestGpuixRenderer = nativeBinding.TestGpuixRenderer
 module.exports.checkUpdate = nativeBinding.checkUpdate
 module.exports.hasTestGpuixRenderer = nativeBinding.hasTestGpuixRenderer
 module.exports.isTerminal = nativeBinding.isTerminal
+module.exports.rollbackUpdate = nativeBinding.rollbackUpdate

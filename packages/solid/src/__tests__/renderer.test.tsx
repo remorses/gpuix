@@ -99,6 +99,38 @@ describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
     })
   })
 
+  it("treats any on* function as a handler and keeps on* data as a prop", () => {
+    const [greet, setGreet] = createSignal<unknown>()
+    const [top, setTop] = createSignal<unknown>(true)
+    const details: unknown[] = []
+    setGreet(() => (event: { detail?: unknown }) => details.push(event.detail))
+    const app = createTestRoot()
+    app.render(() => <my-chart testId="chart" onGreet={greet()} onTop={top()} />)
+
+    const first = app.renderer.findByTestId("chart")!
+    expect([...first.events]).toEqual(["greet"])
+    expect(first.customProps).toEqual({ onTop: true })
+    app.root.dispatch({ elementId: first.id, eventType: "greet", detail: { name: "world" } })
+    expect(details).toEqual([{ name: "world" }])
+
+    // Each prop switches between handler and data.
+    app.flushSync(() => {
+      setGreet("hi")
+      setTop(() => () => {})
+    })
+    const second = app.renderer.findByTestId("chart")!
+    expect([...second.events]).toEqual(["top"])
+    expect(second.customProps).toEqual({ onGreet: "hi" })
+
+    app.flushSync(() => {
+      setGreet(undefined)
+      setTop(undefined)
+    })
+    const third = app.renderer.findByTestId("chart")!
+    expect([...third.events]).toEqual([])
+    expect(third.customProps).toBeUndefined()
+  })
+
   it("removes listeners and rejects stale events after remount", () => {
     const [enabled, setEnabled] = createSignal(true)
     let clicks = 0

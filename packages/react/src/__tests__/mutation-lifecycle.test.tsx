@@ -168,6 +168,41 @@ describeNative("mutation lifecycle", () => {
     }
   })
 
+  it("treats any on* function as a handler and keeps on* data as a prop", () => {
+    const { render, renderer, unmount } = createTestRoot()
+    const onGreet = vi.fn()
+    const chart = (greet: unknown, top: unknown) => (
+      <my-chart testId="chart" onGreet={greet} onTop={top} />
+    )
+
+    try {
+      render(chart(onGreet, true))
+      const first = renderer.findByTestId("chart")!
+      expect([...first.events]).toEqual(["greet"])
+      expect(first.customProps).toEqual({ onTop: true })
+
+      handleGpuixEvent(
+        { elementId: first.id, eventType: "greet", detail: { name: "world" } },
+        renderer
+      )
+      expect(onGreet.mock.calls[0]?.[0].detail).toEqual({ name: "world" })
+
+      // Each prop switches between handler and data.
+      const onTop = vi.fn()
+      render(chart("hi", onTop))
+      const second = renderer.findByTestId("chart")!
+      expect([...second.events]).toEqual(["top"])
+      expect(second.customProps).toEqual({ onGreet: "hi" })
+
+      render(chart(undefined, undefined))
+      const third = renderer.findByTestId("chart")!
+      expect([...third.events]).toEqual([])
+      expect(third.customProps).toBeUndefined()
+    } finally {
+      unmount()
+    }
+  })
+
   it("keeps element ids and click handlers isolated across live roots", () => {
     const a = createTestRoot()
     const b = createTestRoot()

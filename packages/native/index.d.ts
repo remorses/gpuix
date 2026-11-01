@@ -26,6 +26,7 @@ export declare class AvailableUpdate {
   /**
    * Download, verify the signature, and replace the running app.
    *
+   * Keeps the bundle it replaced, so `rollbackUpdate()` can put it back.
    * Does not relaunch. Quit after this returns, or the next start uses the
    * new files.
    */
@@ -83,7 +84,7 @@ export declare class GpuixRenderer {
    * that turned a mouse position into layout coordinates pointed at the
    * wrong place on every window that was not exactly that size.
    */
-  getWindowSize(): WindowSize
+  getWindowSize(forceRender?: boolean | undefined | null): WindowSize
   getWindowInsets(): WindowInsets
   /** `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout. */
   setDebugFrameOverlay(mode: string): string
@@ -110,6 +111,41 @@ export declare class GpuixRenderer {
   /** Whether the window is in native fullscreen. */
   isFullscreen(): boolean
   setWindowTitle(title: string): void
+  /**
+   * Post an OS notification. A tag that matches an earlier one replaces it
+   * where the platform supports it; delivery being unavailable is a no-op.
+   */
+  notify(options: NotificationOptions): void
+  /** Remove the delivered or pending notification with this tag. */
+  dismissNotification(tag: string): void
+  /**
+   * Set the identity the OS attributes notifications to.
+   *
+   * Windows drops toasts without an AppUserModelID; this is the only entry
+   * point for it (`WindowOptions.appId` is the Wayland/X11 window class).
+   */
+  setAppIdentity(identifier: string, name: string): void
+  /**
+   * Call `callback` when the reader clicks a notification or one of its
+   * actions. A later call replaces the handler.
+   */
+  onNotificationResponse(callback: (response: NotificationResponse) => void): void
+  /**
+   * Write text to the OS clipboard.
+   *
+   * An empty string is a real clipboard entry, so it clears the clipboard
+   * instead of leaving the previous contents behind.
+   */
+  writeToClipboard(text: string): void
+  /**
+   * Read the clipboard's text, or null when it holds no text at all: the
+   * clipboard is empty, or it holds an image or files.
+   *
+   * Synchronous, because every desktop GPUI platform reads the platform
+   * clipboard directly. On Windows and Linux the read runs on the UI thread
+   * and only the JavaScript thread waits; the UI thread never blocks.
+   */
+  readFromClipboard(): string | null
   /** Open the platform path picker. Returns null when the user cancels. */
   promptForPaths(options?: PathPromptOptions | undefined | null): Promise<Array<string> | null>
   focusElement(elementId: number): void
@@ -180,15 +216,15 @@ export declare class GpuixRenderer {
    * exist then has already fallen back to another font.
    */
   registerFont(data: Buffer): void
-  getAutomationTree(): string
-  getElementBounds(id: number): ElementBounds | null
+  getAutomationTree(forceRender?: boolean | undefined | null): string
+  getElementBounds(id: number, forceRender?: boolean | undefined | null): ElementBounds | null
   /**
    * The elements whose last painted box holds the window point `(x, y)`,
    * topmost first, like the DOM's `elementsFromPoint`. An element that did
    * not paint is never listed, `overflow: hidden | scroll` clips what lies
    * outside it, and `pointer-events: none` is skipped.
    */
-  getElementsAt(x: number, y: number): Array<number>
+  getElementsAt(x: number, y: number, forceRender?: boolean | undefined | null): Array<number>
   getAllText(): Array<string>
   getPaintedText(): Array<string>
   /**
@@ -334,6 +370,15 @@ export declare class TestGpuixRenderer {
   /** Drop the current selection. */
   clearSelection(): void
   /**
+   * Write text to the clipboard, exactly as `GpuixRenderer` does.
+   *
+   * `VisualTestPlatform` keeps this clipboard in memory, so a test never
+   * replaces the developer's system clipboard.
+   */
+  writeToClipboard(text: string): void
+  /** Read the clipboard's text, or null when it holds no text at all. */
+  readFromClipboard(): string | null
+  /**
    * Syntax-cache counters as `[hits, misses, documents]`.
    *
    * GPUIX rebuilds its whole element tree every frame, so a `<code>` block
@@ -437,6 +482,12 @@ export declare class TestGpuixRenderer {
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */
   getElementBounds(id: number): ElementBounds | null
+  /**
+   * Bounds from the frame the view last published, without painting a new
+   * one. This is what `GpuixRenderer.getElementBounds` returns on Windows
+   * and Linux.
+   */
+  getPublishedElementBounds(id: number): ElementBounds | null
   /** Ids under the window point, topmost first. See the live renderer. */
   getElementsAt(x: number, y: number): Array<number>
   clockPause(): number
@@ -515,8 +566,8 @@ export interface EventPayload {
   /** Numeric element ID (matches the ID assigned in JS via createElement). */
   elementId: number
   /**
-   * Event type string — matches the key used in EVENT_PROPS on the JS side.
-   * e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
+   * Event type string. The JS handler prop is `on` + this name capitalized:
+   * "click" → `onClick`, "mouseDown" → `onMouseDown`.
    */
   eventType: string
   /** Mouse X position in window coordinates (pixels). */
@@ -637,6 +688,11 @@ export interface EventPayload {
    * Populated for: fileDrop.
    */
   paths?: Array<string>
+  /**
+   * Any JSON value, like the DOM's `CustomEvent.detail`. For elements added
+   * with `register_custom_element`, whose data fits no field above.
+   */
+  detail?: any
   modifiers?: EventModifiers
 }
 
@@ -724,6 +780,35 @@ export interface LayerShellOptions {
   keyboardInteractivity?: string
 }
 
+/** One button offered on a notification. */
+export interface NotificationAction {
+  /** Identifies the action in `NotificationResponse.actionId`. */
+  id: string
+  /** The button's label. */
+  label: string
+}
+
+/** A notification to post. */
+export interface NotificationOptions {
+  /**
+   * Stable identity: posting the same tag replaces the earlier one where
+   * the platform supports it, and responses carry it back.
+   */
+  tag: string
+  /** The headline. */
+  title: string
+  /** The line under the title. Absent is an empty body. */
+  body?: string
+  /** Buttons. Platforms that cannot show them drop them. */
+  actions?: Array<NotificationAction>
+}
+
+/** What the reader activated: the notification and the action, if any. */
+export interface NotificationResponse {
+  tag: string
+  actionId?: string
+}
+
 export interface PathPromptOptions {
   /** Select files. Defaults to true unless `directories` is true. */
   files?: boolean
@@ -734,6 +819,19 @@ export interface PathPromptOptions {
   /** Label for the picker confirmation button. */
   prompt?: string
 }
+
+/**
+ * Put back the bundle the last update replaced.
+ *
+ * `downloadAndInstall()` keeps that bundle at
+ * `<cache>/gpuix/updater/<bundle name>/previous`, a fixed path because the
+ * installing process exits. The restore consumes it, so a second call has
+ * nothing left to restore. Does not relaunch.
+ *
+ * Windows installers run in their own process and cannot be reversed here, so
+ * this always fails there and asks for a reinstall of the previous version.
+ */
+export declare function rollbackUpdate(): Promise<void>
 
 /** One extra HTTP header on the feed or download request. */
 export interface UpdaterHeader {

@@ -110,7 +110,7 @@ impl CustomRenderContext<'_> {
 ///
 /// The caller must have given `el` a host-derived id already: gpui keys both the
 /// pseudo-style state and the accessibility node off that id.
-pub(crate) fn custom_surface(
+pub fn custom_surface(
     mut el: gpui::Stateful<gpui::Div>,
     ctx: &CustomRenderContext,
 ) -> gpui::Stateful<gpui::Div> {
@@ -141,7 +141,7 @@ pub(crate) fn custom_surface(
 /// Generic over the element, not just `Stateful<Div>`, because `<img>` and
 /// `<svg>` are gpui leaves and cannot hold a child. They declare the same props
 /// as everything else, so they have to wire the same events.
-pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
+pub fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
     mut el: E,
     ctx: &CustomRenderContext,
 ) -> E {
@@ -257,6 +257,86 @@ pub trait CustomElementFactory: 'static {
     fn create(&self, id: u64) -> Box<dyn CustomElement>;
 }
 
+// ── Registration from other crates ───────────────────────────────────
+
+/// Builds one factory. A plain `fn` so the list can live in a `static` and be
+/// read by every renderer the process creates, on any thread.
+pub type CustomElementConstructor = fn() -> Box<dyn CustomElementFactory>;
+
+/// Elements added by crates that link `gpuix-native`, in registration order.
+static REGISTERED_FACTORIES: std::sync::Mutex<Vec<(String, CustomElementConstructor)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Element types the renderer owns. `div`, `text` and `virtual-list` are built
+/// before the registry is consulted, so a factory with one of these names
+/// would never run; the rest would silently replace a built-in.
+const RESERVED_ELEMENT_TYPES: &[&str] = &[
+    "div",
+    "text",
+    "virtual-list",
+    "img",
+    "svg",
+    "canvas",
+    "input",
+    "textarea",
+    "anchored",
+    "code",
+    "diff",
+    "markdown",
+];
+
+/// Why [`register_custom_element`] refused a factory.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RegisterCustomElementError {
+    /// Names need a `-`, like DOM custom elements, so they can never collide
+    /// with an element GPUIX adds later.
+    #[error("custom element type `{0}` must contain a `-`, e.g. `my-editor`")]
+    MissingHyphen(String),
+    #[error("`{0}` is a built-in GPUIX element type")]
+    Reserved(String),
+    #[error("custom element type `{0}` is already registered")]
+    AlreadyRegistered(String),
+}
+
+/// Add a native element type to every renderer created after this call.
+///
+/// This is how a crate that links `gpuix-native` into its own Node addon
+/// exposes a GPUI component to React and Solid. Call it once at startup,
+/// before the first renderer is created, for example from a
+/// `#[napi_derive::module_init]` function. Renderers that already exist keep
+/// the elements they started with.
+///
+/// The element type comes from the factory's
+/// [`CustomElementFactory::element_type`] and must contain a `-`.
+pub fn register_custom_element(
+    make: CustomElementConstructor,
+) -> Result<(), RegisterCustomElementError> {
+    let element_type = make().element_type().to_string();
+    if RESERVED_ELEMENT_TYPES.contains(&element_type.as_str()) {
+        return Err(RegisterCustomElementError::Reserved(element_type));
+    }
+    if !element_type.contains('-') {
+        return Err(RegisterCustomElementError::MissingHyphen(element_type));
+    }
+    let mut registered = REGISTERED_FACTORIES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if registered.iter().any(|(name, _)| *name == element_type) {
+        return Err(RegisterCustomElementError::AlreadyRegistered(element_type));
+    }
+    registered.push((element_type, make));
+    Ok(())
+}
+
+fn registered_factories() -> Vec<CustomElementConstructor> {
+    REGISTERED_FACTORIES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|(_, make)| *make)
+        .collect()
+}
+
 // ── Registry ─────────────────────────────────────────────────────────
 
 /// Stores one custom adapter together with the state already synchronized into it.
@@ -313,7 +393,8 @@ impl CustomElementRegistry {
         }
     }
 
-    /// Create a registry pre-loaded with all built-in custom elements.
+    /// Create a registry pre-loaded with all built-in custom elements, then
+    /// every element added through [`register_custom_element`].
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(input::InputFactory));
@@ -324,6 +405,9 @@ impl CustomElementRegistry {
         registry.register(Box::new(code::CodeFactory));
         registry.register(Box::new(diff::DiffFactory));
         registry.register(Box::new(markdown::MarkdownFactory));
+        for make in registered_factories() {
+            registry.register(make());
+        }
         registry
     }
 
@@ -564,5 +648,56 @@ mod tests {
         assert!(registry.get_or_create(42, "first").is_some());
         assert!(registry.get_or_create(42, "second").is_some());
         assert_eq!(destroyed.get(), 1);
+    }
+
+    struct NamedFactory(&'static str);
+
+    impl CustomElementFactory for NamedFactory {
+        fn element_type(&self) -> &str {
+            self.0
+        }
+
+        fn create(&self, _id: u64) -> Box<dyn CustomElement> {
+            Box::new(RecordingElement {
+                updates: Rc::new(RefCell::new(Vec::new())),
+                destroyed: Rc::new(Cell::new(0)),
+            })
+        }
+    }
+
+    // The registered list is process-wide and tests share the process, so each
+    // test uses names no other test registers.
+    #[test]
+    fn registered_elements_join_every_new_registry() {
+        register_custom_element(|| Box::new(NamedFactory("test-registered"))).unwrap();
+
+        let mut registry = CustomElementRegistry::with_defaults();
+        assert!(registry.get_or_create(1, "test-registered").is_some());
+        assert!(registry.get_or_create(2, "code").is_some());
+        assert!(registry.get_or_create(3, "test-never-registered").is_none());
+    }
+
+    #[test]
+    fn registration_rejects_names_gpuix_owns_or_could_add() {
+        assert_eq!(
+            register_custom_element(|| Box::new(NamedFactory("editor"))),
+            Err(RegisterCustomElementError::MissingHyphen("editor".into()))
+        );
+        assert_eq!(
+            register_custom_element(|| Box::new(NamedFactory("virtual-list"))),
+            Err(RegisterCustomElementError::Reserved("virtual-list".into()))
+        );
+        assert_eq!(
+            register_custom_element(|| Box::new(NamedFactory("markdown"))),
+            Err(RegisterCustomElementError::Reserved("markdown".into()))
+        );
+
+        register_custom_element(|| Box::new(NamedFactory("test-twice"))).unwrap();
+        assert_eq!(
+            register_custom_element(|| Box::new(NamedFactory("test-twice"))),
+            Err(RegisterCustomElementError::AlreadyRegistered(
+                "test-twice".into()
+            ))
+        );
     }
 }

@@ -64,6 +64,7 @@ pub(crate) struct WindowInner {
     state: RefCell<WindowState>,
     callbacks: RefCell<Callbacks>,
     renderer: RefCell<Renderer>,
+    background: Cell<WindowBackgroundAppearance>,
     presenter: RefCell<KittyPresenter>,
     frame_requested: Cell<bool>,
     last_frame: Cell<Option<Instant>>,
@@ -103,6 +104,7 @@ impl TerminalWindow {
                 DevicePixels(size.width as i32),
                 DevicePixels(size.height as i32),
             ))?),
+            background: Cell::new(WindowBackgroundAppearance::Opaque),
             presenter: RefCell::new(presenter),
             frame_requested: Cell::new(true),
             last_frame: Cell::new(None),
@@ -516,7 +518,7 @@ impl PlatformWindow for TerminalWindow {
     }
 
     fn background_appearance(&self) -> WindowBackgroundAppearance {
-        WindowBackgroundAppearance::Opaque
+        self.0.background.get()
     }
 
     fn set_title(&mut self, title: &str) {
@@ -544,7 +546,19 @@ impl PlatformWindow for TerminalWindow {
         self.0.state.borrow().title.clone()
     }
 
-    fn set_background_appearance(&self, _background_appearance: WindowBackgroundAppearance) {}
+    /// `Transparent` and `Blurred` leave unpainted pixels see-through, so the
+    /// terminal's own background shows behind the app. A terminal configured
+    /// with background opacity and blur (kitty `background_blur`, Ghostty
+    /// `background-blur`) then shows the blurred wallpaper. No escape code lets
+    /// an app turn that blur on, so `Blurred` cannot do more than `Transparent`.
+    fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {
+        self.0.background.set(background_appearance);
+        self.0
+            .renderer
+            .borrow_mut()
+            .set_transparent(background_appearance != WindowBackgroundAppearance::Opaque);
+        self.0.frame_requested.set(true);
+    }
 
     fn minimize(&self) {}
 
@@ -625,7 +639,10 @@ impl PlatformWindow for TerminalWindow {
 
 /// Renders a scene offscreen into CPU-readable RGBA pixels.
 #[cfg(target_os = "macos")]
-struct Renderer(gpui_macos::metal_renderer::MetalRenderer);
+struct Renderer {
+    renderer: gpui_macos::metal_renderer::MetalRenderer,
+    transparent: bool,
+}
 
 #[cfg(target_os = "macos")]
 impl Renderer {
@@ -634,12 +651,19 @@ impl Renderer {
             gpui_macos::metal_renderer::InstanceBufferPool::default(),
         ));
         // Kitty takes RGBA. Rendering in that format avoids a CPU swizzle.
-        Ok(Self(
-            gpui_macos::metal_renderer::MetalRenderer::new_headless(
+        Ok(Self {
+            renderer: gpui_macos::metal_renderer::MetalRenderer::new_headless(
                 instance_buffer_pool,
                 metal::MTLPixelFormat::RGBA8Unorm,
             ),
-        ))
+            transparent: false,
+        })
+    }
+
+    /// A headless Metal renderer clears to opaque black until told otherwise.
+    fn set_transparent(&mut self, transparent: bool) {
+        self.transparent = transparent;
+        self.renderer.update_transparency(transparent);
     }
 
     fn render(
@@ -648,11 +672,15 @@ impl Renderer {
         size: Size<DevicePixels>,
         pixels: &mut [u8],
     ) -> anyhow::Result<()> {
-        self.0.render_scene_to_pixels(scene, size, pixels)
+        self.renderer.render_scene_to_pixels(scene, size, pixels)?;
+        if self.transparent {
+            unpremultiply(pixels);
+        }
+        Ok(())
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
-        self.0.sprite_atlas().clone()
+        self.renderer.sprite_atlas().clone()
     }
 }
 
@@ -672,6 +700,7 @@ fn autoreleasepool<T>(body: impl FnOnce() -> T) -> T {
 struct Renderer {
     renderer: gpui_wgpu::WgpuRenderer,
     _context: gpui_wgpu::WgpuContext,
+    transparent: bool,
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -681,7 +710,12 @@ impl Renderer {
         Ok(Self {
             renderer: gpui_wgpu::WgpuRenderer::new_offscreen(&context, size)?,
             _context: context,
+            transparent: false,
         })
+    }
+
+    fn set_transparent(&mut self, transparent: bool) {
+        self.transparent = transparent;
     }
 
     fn render(
@@ -690,10 +724,70 @@ impl Renderer {
         size: Size<DevicePixels>,
         pixels: &mut [u8],
     ) -> anyhow::Result<()> {
-        self.renderer.render_to_pixels(scene, size, pixels)
+        self.renderer.render_to_pixels(scene, size, pixels)?;
+        // The offscreen wgpu target always clears to transparent, so an opaque
+        // window has to drop the alpha itself. Its colour is already the scene
+        // composited over black, which is what an opaque native window shows.
+        if self.transparent {
+            unpremultiply(pixels);
+        } else {
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel[3] = u8::MAX;
+            }
+        }
+        Ok(())
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
         self.renderer.sprite_atlas().clone()
+    }
+}
+
+/// GPUI blends onto a transparent clear, so translucent pixels come back with
+/// premultiplied colour. The kitty graphics protocol's `f=32` is straight RGBA,
+/// so without this a 50% white panel would reach the terminal as 50% gray.
+fn unpremultiply(pixels: &mut [u8]) {
+    for pixel in pixels.chunks_exact_mut(4) {
+        let alpha = u32::from(pixel[3]);
+        if alpha == 0 || alpha == 255 {
+            continue;
+        }
+        for channel in &mut pixel[..3] {
+            *channel = ((u32::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unpremultiply;
+
+    #[test]
+    fn unpremultiply_restores_straight_alpha() {
+        // 50% white and 25% red, premultiplied, plus an opaque and an empty pixel.
+        let mut pixels = vec![
+            128, 128, 128, 128, //
+            64, 0, 0, 64, //
+            10, 20, 30, 255, //
+            0, 0, 0, 0,
+        ];
+        unpremultiply(&mut pixels);
+        assert_eq!(
+            pixels,
+            vec![
+                255, 255, 255, 128, //
+                255, 0, 0, 64, //
+                10, 20, 30, 255, //
+                0, 0, 0, 0,
+            ]
+        );
+    }
+
+    #[test]
+    fn unpremultiply_clamps_colour_brighter_than_its_alpha() {
+        // GPUI's Metal pipeline adds destination alpha, so a channel can exceed it.
+        let mut pixels = vec![200, 0, 0, 100];
+        unpremultiply(&mut pixels);
+        assert_eq!(pixels, vec![255, 0, 0, 100]);
     }
 }

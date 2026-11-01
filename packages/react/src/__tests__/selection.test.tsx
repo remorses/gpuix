@@ -7,9 +7,12 @@
 
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
-describe("text selection", () => {
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
+
+describeNative("text selection", () => {
   it("selects text inside one element", () => {
     const { render, renderer } = createTestRoot()
     render(

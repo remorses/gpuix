@@ -2,9 +2,8 @@
 // native elements and event contract.
 import {
   BUILT_IN_TYPES,
-  EVENT_PROP_NAMES,
-  EVENT_TYPE_BY_PROP,
-  UNIVERSAL_PROPS,
+  handlerEventType,
+  isUniversalProp,
   registerEventHandler,
   serializeCustomProp,
   unregisterEventHandler,
@@ -130,7 +129,9 @@ function isElementType(type: string): type is ElementType {
     case "virtual-list":
       return true
     default:
-      return false
+      // Elements registered from Rust with `register_custom_element` always
+      // have a `-`. Rust warns and renders nothing for a name it doesn't know.
+      return type.includes("-")
   }
 }
 
@@ -145,12 +146,8 @@ export function replaceHostText(node: HostText, value: string): void {
   if (node.root && node.mounted) node.root.mutations.setText(node.id, next)
 }
 
-function eventTypeFor(name: string): string | undefined {
-  return EVENT_TYPE_BY_PROP.get(name)
-}
-
 function customPropAllowed(node: HostElement, name: string): boolean {
-  return !BUILT_IN_TYPES.has(node.type) || UNIVERSAL_PROPS.has(name)
+  return !BUILT_IN_TYPES.has(node.type) || isUniversalProp(name)
 }
 
 export function setHostProperty(
@@ -167,30 +164,37 @@ export function setHostProperty(
     if (node.root && node.mounted) node.root.mutations.setStyle(node.id, node.style)
     return
   }
-  const eventType = eventTypeFor(name)
+  if (value === undefined) node.props.delete(name)
+  else node.props.set(name, value)
+  if (!node.root || !node.mounted) return
+
+  // `onTop` can switch between a handler and data. Rust only holds the data
+  // form, so the handler form counts as absent there.
+  const eventType = handlerEventType(name, value)
+  const previousType = handlerEventType(name, previous)
+  if (previousType) {
+    unregisterEventHandler(node.root.eventHandlers, node.id, previousType)
+  }
   if (eventType) {
-    if (isEventHandler(value)) node.props.set(name, value)
-    else node.props.delete(name)
-    if (!node.root || !node.mounted) return
-    if (isEventHandler(previous)) {
-      unregisterEventHandler(node.root.eventHandlers, node.id, eventType)
-    }
-    if (isEventHandler(value)) {
-      registerEventHandler(
-        node.root.eventHandlers,
-        node.id,
-        eventType,
-        value
-      )
-    }
-    if (isEventHandler(previous) !== isEventHandler(value)) {
-      node.root.mutations.setEventListener(node.id, eventType, isEventHandler(value))
+    registerEventHandler(
+      node.root.eventHandlers,
+      node.id,
+      eventType,
+      value as (event: EventPayload) => void
+    )
+  }
+  if (!previousType !== !eventType) {
+    node.root.mutations.setEventListener(node.id, (eventType ?? previousType)!, !!eventType)
+  }
+
+  if (!customPropAllowed(node, name)) return
+  if (eventType) {
+    if (previous !== undefined && !previousType) {
+      node.root.mutations.setCustomProp(node.id, name, null)
     }
     return
   }
-  if (value === undefined) node.props.delete(name)
-  else node.props.set(name, value)
-  if (!node.root || !node.mounted || !customPropAllowed(node, name)) return
+  if (previousType && value === undefined) return
   node.root.mutations.setCustomProp(
     node.id,
     name,
@@ -212,11 +216,16 @@ function mount(root: HostRoot, node: HostNode): void {
   } else {
     if (Object.keys(node.style).length > 0) root.mutations.setStyle(node.id, node.style)
     for (const [name, value] of node.props) {
-      const eventType = eventTypeFor(name)
-      if (eventType && isEventHandler(value)) {
-        registerEventHandler(root.eventHandlers, node.id, eventType, value)
+      const eventType = handlerEventType(name, value)
+      if (eventType) {
+        registerEventHandler(
+          root.eventHandlers,
+          node.id,
+          eventType,
+          value as (event: EventPayload) => void
+        )
         root.mutations.setEventListener(node.id, eventType, true)
-      } else if (!EVENT_PROP_NAMES.has(name) && customPropAllowed(node, name)) {
+      } else if (customPropAllowed(node, name)) {
         root.mutations.setCustomProp(
           node.id,
           name,
@@ -298,12 +307,6 @@ export function isHostText(node: HostNode | HostParent): node is HostText {
 export function isHostElement(value: unknown): value is HostElement {
   return typeof value === "object" && value !== null &&
     (value as { kind?: unknown }).kind === "element"
-}
-
-function isEventHandler(
-  value: HostPropertyValue
-): value is (event: EventPayload) => void {
-  return typeof value === "function"
 }
 
 function isStyle(value: HostPropertyValue): value is StyleDesc {

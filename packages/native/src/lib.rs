@@ -15,12 +15,16 @@ mod accessibility;
 #[cfg(target_os = "macos")]
 mod app_menu;
 mod automation;
+mod clipboard;
 mod color;
 mod custom_elements;
 mod diff;
 mod element_tree;
 mod markdown;
 mod motion;
+// napi payloads for GpuixRenderer::notify; the browser build has no napi.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod notifications;
 mod renderer;
 // The data model is public so `examples/bench_serde.rs` measures the real
 // types instead of a copy that silently drifts from them.
@@ -39,7 +43,15 @@ mod updater;
 ))]
 mod test_renderer;
 
+pub use custom_elements::{
+    custom_surface, register_custom_element, wire_standard_events, CustomElement,
+    CustomElementConstructor, CustomElementFactory, CustomRenderContext,
+    RegisterCustomElementError,
+};
 pub use element_tree::*;
+/// The GPUI this renderer is built on. Custom elements must use this copy:
+/// a second GPUI in the same addon can't draw into GPUIX's window.
+pub use gpui;
 pub use renderer::*;
 pub use style::*;
 

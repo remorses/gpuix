@@ -42,6 +42,18 @@ opens is a plain exported function, like `isTerminal()`. Apps and examples
 follow the same rule: no `useState`, `useMemo`, or custom hook for a value that
 a plain call or constant gives.
 
+## Built-in element names never contain `-`
+
+Names with a `-` belong to elements other crates add with
+`register_custom_element`, like DOM custom elements. `virtual-list` is the only
+exception and is reserved in `RESERVED_ELEMENT_TYPES`. A new built-in with a `-`
+can break an app that already registered that name.
+
+Other crates compile against the public custom element API: `CustomElement`,
+`CustomRenderContext`, `custom_surface`, `register_custom_element`, and
+`EventPayload`. After you change any of them, run
+`cd example-rust-native-element && bun run test`.
+
 ## Built-in components follow Base UI
 
 Headless controls in `@gpuix/react` and `@gpuix/solid` (`select`, `combobox`,
@@ -52,6 +64,19 @@ For Select, `items` on Root is optional. It is only a label lookup for
 `SelectValue` while the popup is closed. Keyboard nav and clicks read the
 mounted `SelectItem` children. Do not walk `child.type`. Do not require `items`
 for the menu to work.
+
+## React and Solid stay in sync
+
+`@gpuix/react` and `@gpuix/solid` must expose the **same features**. When you
+add or change a feature in one adapter, do the same in the other in the same
+change: elements, props, events, components (`Select`, `Combobox`, `Tooltip`),
+reactive values (`useWindowSize` ↔ its Solid primitive), renderer options,
+testing and automation helpers.
+
+Put shared logic in `@gpuix/native` (see [Shared JavaScript runtime](#shared-javascript-runtime))
+so each adapter only adds its framework glue. Add tests and README docs for
+both adapters. If a feature cannot exist in one framework, say why in the
+README and the changeset.
 
 ## Project Goal
 
@@ -219,6 +244,10 @@ gpuix/
 ├── examples/
 │   ├── package.json            # Workspace package for examples
 │   └── counter.tsx             # Example React app
+│
+├── example-rust-native-element/ # Crate that adds <rust-greeting> from Rust
+│   ├── src/lib.rs              # CustomElement + register_custom_element
+│   └── greeting.test.tsx       # e2e: builds the addon, paints, clicks
 │
 └── AGENTS.md                   # This file
 ```
@@ -427,6 +456,20 @@ that applies only the base styles type-checks the prop, serializes it, and drops
 it. `custom_surface` in `custom_elements/mod.rs` does this for you.
 
 ## Bounds: a container uses a tracker, a leaf uses `on_painted`
+
+`BOUNDS` is thread-local to the painting thread. On Windows and Linux that is
+the UI thread, not JS, so `GpuixView` also publishes each finished frame (bounds
+and viewport) into a `SharedPaintedFrame` that `GpuixRenderer` reads from the
+JS thread. A read must never become a `UiCommand`: it would force a frame, and
+it would time out while a Windows file dialog blocks the UI thread. The
+publisher is a `deferred` canvas with `usize::MAX` priority so it paints after
+`<anchored>` and every other deferred draw. Keep that priority, or deferred
+bounds are missing from the snapshot.
+
+The `forceRender` argument on the bounds and size reads calls
+`render_window_now` (`window.draw` plus `present_cached_frame`) on the thread
+that owns the window, then reads. It is the same on every OS. Never route a
+default read through it.
 
 `getByTestId(..).click()` needs a recorded box. Two mechanisms, both required:
 
@@ -948,6 +991,13 @@ gh release create '@gpuix/solid@0.5.0' --title '@gpuix/solid@0.5.0' \
 ```
 
 4. CI publishes npm, then uploads `example-chat-*` to the React release with `--clobber`
+5. **Always deploy the website** once the npm publish succeeds. Never skip it.
+   The site renders `README.md` and the changelog, and hosts the browser chat
+   example, so it is stale until you deploy:
+
+```bash
+cd website && bun run deploy:prod
+```
 
 **Each adapter gets its own GitHub release**, because a Solid user never installs
 React and will not look under a React tag. Native has no release: users reach it
@@ -1278,6 +1328,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] `highlight` prop: search matches and explicit ranges
 - [x] Headless Select, Combobox, Tooltip
 - [x] `setWindowTitle`
+- [x] Clipboard text (`writeToClipboard` / `readFromClipboard`)
 - [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar (`crate::app_menu`, `appName`)
@@ -1324,6 +1375,10 @@ cd examples && bun run test
 
 # Starter todo app, driven through the automation client
 cd example-app && bun run test
+
+# A separate crate registers <rust-greeting> via register_custom_element.
+# Builds its own addon with cargo, then loads it with NAPI_RS_NATIVE_LIBRARY_PATH
+cd example-rust-native-element && bun run test
 
 # Chat and timeline draw / chrome regressions (excluded from the default run)
 cd examples && bun run test:perf

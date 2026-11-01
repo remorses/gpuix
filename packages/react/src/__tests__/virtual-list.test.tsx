@@ -2,8 +2,11 @@
 
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
+
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 function Rows({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
@@ -72,7 +75,7 @@ function DynamicFocusableRows({ enabled }: { enabled: boolean }) {
   )
 }
 
-describe("<virtual-list>", () => {
+describeNative("<virtual-list>", () => {
   it("builds and paints only rows near the viewport", () => {
     const { render, renderer } = createTestRoot()
     render(

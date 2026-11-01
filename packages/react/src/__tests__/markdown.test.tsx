@@ -4,8 +4,11 @@ import fs from "fs"
 import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it, vi } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
+
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 const DOC = [
   "# GPUIX",
@@ -39,7 +42,7 @@ beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
 })
 
-describe("<markdown>", () => {
+describeNative("<markdown>", () => {
   it("renders headings and paragraphs in document order", () => {
     const { render, renderer } = createTestRoot()
     render(<markdown source={"# Title\n\nSome body text."} />)

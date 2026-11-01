@@ -6,15 +6,19 @@
 
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { findRanges, useTextSearch } from "../hooks/use-text-search.js"
+
+// The GPU test renderer is macOS and Windows only.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const itNative = hasNativeTestRenderer ? it : it.skip
 
 /** The matched substrings, in paint order. */
 function matched(renderer: { getPaintedHighlights(): Array<{ text: string; start: number; end: number }> }) {
   return renderer.getPaintedHighlights().map((hit) => hit.text.slice(hit.start, hit.end))
 }
 
-describe("highlight", () => {
+describeNative("highlight", () => {
   it("paints nothing when no element declares one", () => {
     const { render, renderer } = createTestRoot()
     render(
@@ -426,7 +430,7 @@ describe("highlight", () => {
   })
 })
 
-describe("useTextSearch", () => {
+describeNative("useTextSearch", () => {
   function FindBar({ query }: { query: string }) {
     const search = useTextSearch({ query })
     return (
@@ -467,7 +471,7 @@ describe("useTextSearch", () => {
 })
 
 describe("findRanges", () => {
-  it("matches Unicode ranges identically in JS, retained text, and native code", () => {
+  itNative("matches Unicode ranges identically in JS, retained text, and native code", () => {
     const { render, renderer } = createTestRoot()
     const cases: Array<{ text: string; query: string; wholeWord?: boolean; expected: number[][] }> = [
       { text: "ΟΣ", query: "ΟΣ", expected: [[0, 2]] },
@@ -554,7 +558,7 @@ describe("findRanges", () => {
     ).toEqual([])
   })
 
-  it("agrees with the native matcher on the same input", () => {
+  itNative("agrees with the native matcher on the same input", () => {
     const { render, renderer } = createTestRoot()
     const text = "İstanbul and fox and Fox"
     render(

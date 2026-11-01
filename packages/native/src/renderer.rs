@@ -88,9 +88,9 @@ pub(crate) fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::
 
 /// Abstracted event callback shared by desktop, browser, and test renderers.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub(crate) type EventCallback = Arc<dyn Fn(EventPayload) + Send + Sync>;
+pub type EventCallback = Arc<dyn Fn(EventPayload) + Send + Sync>;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-pub(crate) type EventCallback = Rc<dyn Fn(EventPayload)>;
+pub type EventCallback = Rc<dyn Fn(EventPayload)>;
 
 fn raw_dimension_u32(value: f64, label: &str) -> std::result::Result<u32, String> {
     if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 || value > u32::MAX as f64 {
@@ -318,6 +318,21 @@ pub(crate) fn debug_frame_overlay_stats_js(
     }
 }
 
+/// Draw one frame now and present it, so paint-recorded state (bounds, the
+/// published frame) is current when this returns. The platform frame loop
+/// would draw it a tick later; a forced read cannot wait for that.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn render_window_now<C: gpui::AppContext>(
+    window: gpui::AnyWindowHandle,
+    cx: &mut C,
+) -> anyhow::Result<()> {
+    window.update(cx, |_root, window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+        window.present_cached_frame();
+    })
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 fn recv_ui_response<T>(receiver: std::sync::mpsc::Receiver<T>, operation: &str) -> Result<T> {
     match receiver.recv_timeout(Duration::from_secs(2)) {
@@ -332,6 +347,17 @@ fn recv_ui_response<T>(receiver: std::sync::mpsc::Receiver<T>, operation: &str) 
 }
 
 #[cfg(target_os = "macos")]
+fn with_app<R>(update: impl FnOnce(&mut gpui::App) -> R) -> Result<R> {
+    GPUI_APP.with(|app| {
+        let app = app.borrow();
+        let app = app
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+        Ok(app.update(update))
+    })
+}
+
+#[cfg(target_os = "macos")]
 fn update_window<R>(
     update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) -> R,
 ) -> Result<R> {
@@ -339,17 +365,11 @@ fn update_window<R>(
         .with(|window| *window.borrow())
         .ok_or_else(|| Error::from_reason("GPUI window is not initialized"))?;
 
-    GPUI_APP.with(|app| {
-        let app = app.borrow();
-        let app = app
-            .as_ref()
-            .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
-        app.update(|cx| {
-            window
-                .update(cx, update)
-                .map_err(|error| Error::from_reason(error.to_string()))
-        })
-    })
+    with_app(|cx| {
+        window
+            .update(cx, update)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    })?
 }
 
 #[cfg(target_os = "macos")]
@@ -447,6 +467,7 @@ enum UiCommand {
         response: SyncSender<bool>,
     },
     SetWindowTitle(String),
+    UpdateApp(Box<dyn FnOnce(&mut gpui::App) + Send>),
     PromptForPaths {
         options: gpui::PathPromptOptions,
         deferred: PathPromptDeferred,
@@ -500,15 +521,11 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<[f64; 3]>>,
     },
-    GetAutomationBounds {
-        response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
-    },
     GetWindowSize {
         response: SyncSender<WindowSize>,
     },
-    GetElementBounds {
-        id: u64,
-        response: SyncSender<Option<crate::automation::ElementBounds>>,
+    RenderNow {
+        response: SyncSender<()>,
     },
     FocusElement(u64),
     FocusNext,
@@ -591,6 +608,10 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::UpdateApp(update) => {
+                cx.update(update);
+                anyhow::Ok(())
+            }
             UiCommand::PromptForPaths { options, deferred } => {
                 let background_executor = cx.background_executor().clone();
                 let receiver = cx.update(|cx| cx.prompt_for_paths(options));
@@ -748,22 +769,9 @@ async fn run_ui_commands(
                         .ok();
                 })
             }
-            UiCommand::GetAutomationBounds { response } => {
-                window.update(cx, move |_view, window, cx| {
-                    cx.notify();
-                    window.refresh();
-                    window.on_next_frame(move |_window, _cx| {
-                        response.send(crate::automation::all_bounds()).ok();
-                    });
-                })
-            }
-            UiCommand::GetElementBounds { id, response } => {
-                window.update(cx, move |_view, window, cx| {
-                    cx.notify();
-                    window.refresh();
-                    window.on_next_frame(move |_window, _cx| {
-                        response.send(crate::automation::get_bounds(id)).ok();
-                    });
+            UiCommand::RenderNow { response } => {
+                render_window_now(window.into(), cx).map(|()| {
+                    response.send(()).ok();
                 })
             }
             UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
@@ -984,6 +992,10 @@ pub struct GpuixRenderer {
     selection: SharedSelection,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
+    /// Last painted bounds and viewport, published by the UI thread after each
+    /// frame. Reads use it so they never wait for the UI thread.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    painted_frame: crate::automation::SharedPaintedFrame,
     /// False after `Platform::run` returns. `tick()` reports that so JS can
     /// `process.exit`, matching macOS where `pump_events` returning false is
     /// the last-window-closed signal. The UI thread owns the Win32/Linux loop,
@@ -1012,6 +1024,52 @@ impl GpuixRenderer {
             .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?
             .unbounded_send(command)
             .map_err(|_| Error::from_reason("The GPUI UI thread is not running"))
+    }
+
+    /// Run `update` against the GPUI app, on the thread that owns it.
+    fn update_app(&self, update: impl FnOnce(&mut gpui::App) + Send + 'static) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return with_app(update);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::UpdateApp(Box::new(update)));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Draw a frame now, for reads called with `forceRender`.
+    fn render_now(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let window = GPUI_WINDOW
+                .with(|window| *window.borrow())
+                .ok_or_else(|| Error::from_reason("GPUI window is not initialized"))?;
+            return with_app(|cx| render_window_now(window.into(), cx))?
+                .map_err(|error| Error::from_reason(format!("{error:#}")));
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::RenderNow { response })?;
+            return recv_ui_response(receiver, "the forced render");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
     }
 
     fn begin_path_prompt(&self, options: gpui::PathPromptOptions, deferred: PathPromptDeferred) {
@@ -1096,11 +1154,7 @@ impl GpuixRenderer {
         return Ok(crate::automation::all_bounds());
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        {
-            let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetAutomationBounds { response })?;
-            return recv_ui_response(receiver, "the automation bounds query");
-        }
+        return Ok(self.painted_frame.all_bounds());
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1142,11 +1196,7 @@ impl GpuixRenderer {
         return Ok(crate::automation::get_bounds(id));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        {
-            let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetElementBounds { id, response })?;
-            return recv_ui_response(receiver, "the element bounds query");
-        }
+        return Ok(self.painted_frame.bounds(id));
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1195,6 +1245,8 @@ impl GpuixRenderer {
             selection: SharedSelection::default(),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+            painted_frame: crate::automation::SharedPaintedFrame::default(),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_running: Arc::new(AtomicBool::new(false)),
         }
@@ -1391,6 +1443,7 @@ impl GpuixRenderer {
         let window_options = options.clone();
         let tree = self.tree.clone();
         let selection = self.selection.clone();
+        let painted_frame = self.painted_frame.clone();
         let callback = self.event_callback_for_view();
         let (command_sender, command_receiver) = mpsc::unbounded();
         let (startup_sender, startup_receiver) = sync_channel(1);
@@ -1450,7 +1503,12 @@ impl GpuixRenderer {
                             let window = match cx.open_window(
                                 to_gpui_window_options(&window_options, bounds),
                                 |_window, cx| {
-                                    cx.new(|_| GpuixView::new(tree, callback, title, selection))
+                                    cx.new(|_| {
+                                        let mut view =
+                                            GpuixView::new(tree, callback, title, selection);
+                                        view.painted_frame = Some(painted_frame);
+                                        view
+                                    })
                                 },
                             ) {
                                 Ok(window) => window,
@@ -1662,7 +1720,10 @@ impl GpuixRenderer {
     /// that turned a mouse position into layout coordinates pointed at the
     /// wrong place on every window that was not exactly that size.
     #[napi]
-    pub fn get_window_size(&self) -> Result<WindowSize> {
+    pub fn get_window_size(&self, force_render: Option<bool>) -> Result<WindowSize> {
+        if force_render == Some(true) {
+            self.render_now()?;
+        }
         #[cfg(target_os = "macos")]
         return update_window(|_view, window, _cx| {
             let size = window.viewport_size();
@@ -1674,6 +1735,10 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
+            if let Some((width, height)) = self.painted_frame.viewport() {
+                return Ok(WindowSize { width, height });
+            }
+            // Nothing has painted yet, so there is no published size.
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::GetWindowSize { response })?;
             return recv_ui_response(receiver, "the window size query");
@@ -1808,15 +1873,7 @@ impl GpuixRenderer {
         {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::GetDebugFrameOverlayStats { response })?;
-            match receiver.recv_timeout(Duration::from_secs(2)) {
-                Ok(stats) => Ok(stats),
-                Err(RecvTimeoutError::Timeout) => Err(Error::from_reason(
-                    "Timed out after 2 seconds waiting for debug frame overlay stats",
-                )),
-                Err(RecvTimeoutError::Disconnected) => Err(Error::from_reason(
-                    "The GPUI UI thread stopped during the debug frame overlay stats query",
-                )),
-            }
+            return recv_ui_response(receiver, "the debug frame overlay stats query");
         }
 
         #[cfg(not(any(
@@ -1985,6 +2042,87 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::SetWindowTitle(title));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Post an OS notification. A tag that matches an earlier one replaces it
+    /// where the platform supports it; delivery being unavailable is a no-op.
+    #[napi]
+    pub fn notify(&self, options: crate::notifications::NotificationOptions) -> Result<()> {
+        self.update_app(move |cx| cx.show_system_notification(options.into_gpui()))
+    }
+
+    /// Remove the delivered or pending notification with this tag.
+    #[napi]
+    pub fn dismiss_notification(&self, tag: String) -> Result<()> {
+        self.update_app(move |cx| cx.dismiss_system_notification(&tag))
+    }
+
+    /// Set the identity the OS attributes notifications to.
+    ///
+    /// Windows drops toasts without an AppUserModelID; this is the only entry
+    /// point for it (`WindowOptions.appId` is the Wayland/X11 window class).
+    #[napi]
+    pub fn set_app_identity(&self, identifier: String, name: String) -> Result<()> {
+        self.update_app(move |cx| cx.set_app_identity(&identifier, &name))
+    }
+
+    /// Call `callback` when the reader clicks a notification or one of its
+    /// actions. A later call replaces the handler.
+    #[napi(ts_args_type = "callback: (response: NotificationResponse) => void")]
+    pub fn on_notification_response(
+        &self,
+        callback: Function<crate::notifications::NotificationResponse, ()>,
+    ) -> Result<()> {
+        let callback = callback
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .weak::<true>()
+            .build()?;
+        self.update_app(move |cx| {
+            cx.on_system_notification_response(move |response, _cx| {
+                callback.call(response.into(), ThreadsafeFunctionCallMode::NonBlocking);
+            })
+        })
+    }
+
+    /// Write text to the OS clipboard.
+    ///
+    /// An empty string is a real clipboard entry, so it clears the clipboard
+    /// instead of leaving the previous contents behind.
+    #[napi]
+    pub fn write_to_clipboard(&self, text: String) -> Result<()> {
+        self.update_app(move |cx| crate::clipboard::write_text(cx, text))
+    }
+
+    /// Read the clipboard's text, or null when it holds no text at all: the
+    /// clipboard is empty, or it holds an image or files.
+    ///
+    /// Synchronous, because every desktop GPUI platform reads the platform
+    /// clipboard directly. On Windows and Linux the read runs on the UI thread
+    /// and only the JavaScript thread waits; the UI thread never blocks.
+    #[napi]
+    pub fn read_from_clipboard(&self) -> Result<Option<String>> {
+        #[cfg(target_os = "macos")]
+        return with_app(|cx| crate::clipboard::read(cx));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.update_app(move |cx| {
+                response.send(crate::clipboard::read(cx)).ok();
+            })?;
+            return recv_ui_response(receiver, "the clipboard read");
+        }
 
         #[cfg(not(any(
             target_os = "macos",
@@ -2545,8 +2683,10 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn get_automation_tree(&self) -> Result<String> {
-        self.request_invalidate()?;
+    pub fn get_automation_tree(&self, force_render: Option<bool>) -> Result<String> {
+        if force_render == Some(true) {
+            self.render_now()?;
+        }
         let bounds = self.automation_bounds()?;
         let tree = self.tree.lock().unwrap();
         let json = tree.to_automation_json(&bounds);
@@ -2555,8 +2695,15 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn get_element_bounds(&self, id: f64) -> Result<Option<ElementBounds>> {
+    pub fn get_element_bounds(
+        &self,
+        id: f64,
+        force_render: Option<bool>,
+    ) -> Result<Option<ElementBounds>> {
         let id = to_element_id(id)?;
+        if force_render == Some(true) {
+            self.render_now()?;
+        }
         Ok(self.element_bounds(id)?.map(ElementBounds::from_painted))
     }
 
@@ -2565,7 +2712,15 @@ impl GpuixRenderer {
     /// not paint is never listed, `overflow: hidden | scroll` clips what lies
     /// outside it, and `pointer-events: none` is skipped.
     #[napi]
-    pub fn get_elements_at(&self, x: f64, y: f64) -> Result<Vec<f64>> {
+    pub fn get_elements_at(
+        &self,
+        x: f64,
+        y: f64,
+        force_render: Option<bool>,
+    ) -> Result<Vec<f64>> {
+        if force_render == Some(true) {
+            self.render_now()?;
+        }
         Ok(self
             .elements_at(x, y)?
             .into_iter()
@@ -3720,7 +3875,9 @@ impl Drop for GpuixRenderer {
 
 // ── GPUI View ────────────────────────────────────────────────────────
 
-pub(crate) struct GpuixView {
+/// The root view of a GPUIX window. Custom elements render with its
+/// `Context`, so they can create entities, focus handles and subscriptions.
+pub struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) event_callback: Option<EventCallback>,
     pub(crate) window_title: String,
@@ -3750,6 +3907,9 @@ pub(crate) struct GpuixView {
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
+    /// Where each finished frame is published for the JS thread. Only set when
+    /// the UI thread is not the JS thread (Windows and Linux).
+    pub(crate) painted_frame: Option<crate::automation::SharedPaintedFrame>,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Latest pointer sample and list during selection edge scrolling.
@@ -4057,6 +4217,7 @@ impl GpuixView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
+            painted_frame: None,
             virtual_lists: HashMap::new(),
             selection_drag_position: None,
             selection_scroll_list: None,
@@ -5295,6 +5456,11 @@ impl gpui::Render for GpuixView {
                 ))
                 .child(crate::automation::bounds_frame_reset())
                 .child(result)
+                .children(
+                    self.painted_frame
+                        .clone()
+                        .map(crate::automation::bounds_frame_publish),
+                )
                 .into_any_element()
         };
 
@@ -6878,7 +7044,7 @@ const PAINT_REPORT_EPSILON: f32 = 0.01;
 /// caller customize it via a closure, then sends it through the callback.
 /// Production: queues on Node.js event loop via ThreadsafeFunction.
 /// Tests: pushes to a synchronous Vec for drainEvents().
-pub(crate) fn emit_event_full(
+pub fn emit_event_full(
     callback: &Option<EventCallback>,
     element_id: u64,
     event_type: &str,

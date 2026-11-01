@@ -34,6 +34,8 @@ export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
   promptForPaths(options?: PathPromptOptions): Promise<string[] | null>
+  writeToClipboard(text: string): void
+  readFromClipboard(): string | null
   flush(): void
   drainEvents(): EventPayload[]
   simulateKeystrokes(keystrokes: string): void
@@ -70,6 +72,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getAutomationTree(): string
   getRetainedElementCount(): number
   getElementBounds(elementId: number): ElementBounds | null
+  getPublishedElementBounds(elementId: number): ElementBounds | null
   getElementsAt(x: number, y: number): number[]
   clockPause(): number
   clockSet(nowMs: number): number
@@ -160,6 +163,21 @@ export interface A11yTreeNode {
     expanded?: boolean
     selected?: boolean
     level?: number
+    /** `"True" | "False" | "Mixed"`, straight from AccessKit's `Toggled`. */
+    toggled?: string
+    /** `"Horizontal" | "Vertical"`, from AccessKit's `Orientation`. */
+    orientation?: string
+    keyboard_shortcut?: string
+    placeholder?: string
+    numeric_value?: number
+    min_numeric_value?: number
+    max_numeric_value?: number
+    position_in_set?: number
+    size_of_set?: number
+    row_index?: number
+    column_index?: number
+    row_count?: number
+    column_count?: number
     on_action?: string[]
   }
 }
@@ -182,6 +200,8 @@ export class TestRenderer implements NativeRenderer {
     NativeRenderer["setWindowSelectionChange"]
   >
   readonly setWindowKeyEvents: NonNullable<NativeRenderer["setWindowKeyEvents"]>
+  readonly writeToClipboard: NonNullable<NativeRenderer["writeToClipboard"]>
+  readonly readFromClipboard: NonNullable<NativeRenderer["readFromClipboard"]>
   private readonly dispatchEvent: (event: EventPayload) => void
 
   constructor(options: TestRendererOptions = {}) {
@@ -196,6 +216,8 @@ export class TestRenderer implements NativeRenderer {
     this.focusPrevious = this.native.focusPrevious.bind(this.native)
     this.promptForPaths = this.native.promptForPaths.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
+    this.writeToClipboard = this.native.writeToClipboard.bind(this.native)
+    this.readFromClipboard = this.native.readFromClipboard.bind(this.native)
     this.setWindowSelectionChange = this.native.setWindowSelectionChange.bind(
       this.native
     )
@@ -489,6 +511,12 @@ export class TestRenderer implements NativeRenderer {
 
   getElementBounds(elementId: number): ElementBounds | null {
     return this.native.getElementBounds(elementId)
+  }
+
+  /** Bounds from the last published frame, with no new paint. This is what
+   *  `getElementBounds` reads on a live Windows or Linux renderer. */
+  getPublishedElementBounds(elementId: number): ElementBounds | null {
+    return this.native.getPublishedElementBounds(elementId)
   }
 
   /** Ids of the elements under the window point, topmost first. */

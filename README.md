@@ -112,7 +112,7 @@ For hot reload during development, use `bun --hot` rather than plain `bun`.
 A save then remounts React on the same window instead of opening a second one.
 
 Bun is not required to run the renderer. GPUIX uses Node-API native bindings,
-and React apps also run on Node.js, as [`disktree`](./disktree/) does. For
+and React apps also run on Node.js, as [`disktree`](https://github.com/remorses/gpuix/tree/main/disktree) does. For
 Node.js, compile TSX to JavaScript first or use a Node-compatible TSX loader.
 The `--hot` option and same-window hot-remount workflow described below are
 Bun-specific; running an app on Node.js does not provide Bun's hot reload.
@@ -300,6 +300,39 @@ HTTPS is in the native crate. This works on **Bun** and **hermes-node**. It
 does not exist in the browser wasm build. The repo must be **public**, or
 GitHub will 404 the API. Optional: put a Cloudflare cache in front of
 `api.github.com`. Same GitHub JSON. Not a custom schema.
+
+### 7. Roll back an update
+
+`downloadAndInstall()` keeps the bundle it replaced at
+`<cache>/gpuix/updater/<bundle name>/previous`: `~/Library/Caches` on macOS,
+`$XDG_CACHE_HOME` (or `~/.cache`) on Linux. The slot is fixed rather than a
+temp dir because the installing process exits before anyone can roll back, and
+it is named after the bundle so two apps never restore each other.
+
+```tsx
+import { rollbackUpdate } from '@gpuix/native'
+
+try {
+  await rollbackUpdate()
+} catch (error) {
+  console.error(error) // "no previous version to restore"
+}
+```
+
+The restore replaces the running bundle with the kept one and consumes it, so a
+second call reports that there is nothing left to restore. Like
+`downloadAndInstall()`, it does **not** relaunch: quit after it returns, or the
+next start uses the restored files. The returned promise rejects with the
+reason when there is nothing to restore.
+
+The swap is a rename, so the bundle and the cache must be on one volume. On
+Linux an AppImage on another mount is copied instead. Either way, a failed
+swap puts the kept bundle back, so the app always has something to start.
+
+**Windows cannot roll back.** The NSIS and WiX installers run in their own
+process and replace the installation out of reach, so `rollbackUpdate()` always
+rejects there and says to **reinstall the previous version**. Keep the previous
+installer if you need that path.
 
 ### Start from the example app
 
@@ -739,7 +772,7 @@ terminal.
 | Option | Values | Purpose |
 |---|---|---|
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |
-| `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
+| `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop. In a terminal both non-opaque values let the terminal's background show through |
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. The chat example uses `(16, 17)` |
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
@@ -855,10 +888,14 @@ GPUI scene ──► offscreen Metal / wgpu render ──► RGBA in POSIX share
 ```
 
 - **Terminals**: kitty and Ghostty. WezTerm is untested and likely cannot read
-  shared memory frames on macOS
+  shared memory frames on macOS. VS Code works with the setup below. Zed's
+  terminal has no graphics protocol, so the screen stays blank
 - **Platforms**: macOS and Linux. Windows throws
 - **Size**: the window fills the terminal and follows its resizes. `width`,
   `height` and window chrome options are ignored
+- **Background**: `windowBackground: 'transparent'` or `'blurred'` sends
+  unpainted and translucent pixels with their alpha, so the terminal's own
+  background shows behind the app. See **Blurred wallpaper** below
 - **Input**: hover, clicks, drag, scroll, keys with key-up, paste and focus
   come from SGR pixel mouse reports and the kitty keyboard protocol
 - **Quit**: ctrl-c, even when a text field has focus. The terminal is restored
@@ -870,15 +907,83 @@ GPUI scene ──► offscreen Metal / wgpu render ──► RGBA in POSIX share
   limit
 - **Clipboard**: copy writes the system clipboard with OSC 52. Paste with the
   terminal's own paste shortcut
+- **Hot reload**: `bun --hot app.tsx` remounts React in the same terminal on
+  save, like it does in a native window
+- **Memory**: slightly less than a native window of the same size, because
+  there are no window surfaces. The terminal keeps its own copy of each frame,
+  so the machine as a whole saves about nothing
+
+Memory of a small app (Activity Monitor footprint, Apple Silicon, 800x480
+window at 2x):
+
+| State | Native window | Terminal |
+|---|---|---|
+| Idle | 80 MB | 66 MB |
+| Redrawing every 100 ms | 178 MB | 161 MB |
+
+The jump when redrawing is Metal driver memory, the same in both modes. The
+difference is the window's drawable surfaces, so it grows with the window size.
 
 **SSH works.** On the same machine frames go through shared memory. When the
 terminal cannot open it (SSH, a container), the app finds out at startup and
-sends each frame inline, compressed. That is about 120 KB per 1600x960 frame,
-so expect fewer frames per second on a slow link. tmux is not supported.
+sends frames inline, compressed. In kitty and Ghostty 1.4+ only the regions that
+changed are sent: a hover or a keystroke is a few KB. Terminals that cannot edit
+a shown image (Ghostty 1.3, WezTerm) get the whole frame each time, about 120 KB
+at 1600x960, so expect fewer frames per second on a slow link. tmux is not
+supported.
 
 ```bash
 ssh -t my-server 'GPUIX_TERMINAL=1 bun app.tsx'   # -t: the app needs a tty
 ```
+
+**VS Code needs one setting.** Its terminal supports kitty graphics since
+1.110, but images are **off by default**, and then the app paints a blank
+screen. Turn them on in `settings.json`:
+
+```jsonc
+{
+  "terminal.integrated.enableImages": true,
+  // images need the WebGL renderer, so leave this on "auto" or "on"
+  "terminal.integrated.gpuAcceleration": "auto"
+}
+```
+
+VS Code cannot read shared memory, so frames go inline, like over SSH. Expect
+fewer frames per second than in kitty or Ghostty.
+
+**Blurred wallpaper comes from the terminal.** The kitty graphics protocol has
+no escape code that sets a terminal's opacity or blur. Those are terminal
+settings. GPUIX sends each pixel's alpha, so a terminal that is already
+translucent shows its blurred wallpaper wherever the app leaves the background
+clear:
+
+```tsx
+render(<div style={{ backgroundColor: '#14141480', width: '100%', height: '100%' }} />, {
+  terminal: true,
+  windowBackground: 'blurred',
+})
+```
+
+```conf
+# kitty.conf
+background_opacity 0.6
+background_blur 32
+
+# ghostty config
+background-opacity = 0.6
+background-blur = true
+```
+
+- `"transparent"` and `"blurred"` behave the same in a terminal. The blur, if
+  any, comes from the terminal's `background_blur` / `background-blur`
+- `"opaque"` (the default) sends every pixel opaque. Unpainted pixels are
+  black, as in a native window
+- GPUI renders premultiplied colour. GPUIX converts each frame to straight
+  RGBA, like a decoded PNG, before it sends it
+- Whether a transparent image pixel reaches the desktop is up to the terminal.
+  The protocol only promises alpha blending with the cells under the image,
+  and kitty applies `background_opacity` only to cells with the default
+  background colour
 
 **No titlebar.** A terminal has no macOS traffic lights, so space reserved for
 them becomes an empty gap. `isTerminal()` tells the app, and it is a plain
@@ -924,6 +1029,40 @@ the content inside it, so a panel that folds can take the window with it.
 branch on it instead of tracking its own guess. These methods are not available
 in the browser renderer.
 
+### Notifications
+
+`notify()` posts an OS notification through GPUI: `UNUserNotificationCenter`
+on macOS, a toast on Windows, and the XDG notification service on Linux.
+
+```tsx
+const renderer = useGpuixRequired()
+
+renderer.setAppIdentity?.('com.acme.notes', 'Notes') // once, at startup
+renderer.onNotificationResponse?.(({ tag, actionId }) => {
+  if (tag === 'upload-1' && actionId === 'open') openUploads()
+})
+renderer.notify?.({
+  tag: 'upload-1',
+  title: 'Upload complete',
+  body: '3 files',
+  actions: [{ id: 'open', label: 'Open' }],
+})
+renderer.dismissNotification?.('upload-1')
+```
+
+- **`tag` is the notification's identity.** Posting the same tag again replaces
+  the earlier one where the platform supports it, and the response carries it
+  back. `actionId` is absent when the reader clicked the body.
+- **Delivery is best-effort.** macOS asks for permission on the first post, and
+  a denied permission or a missing notification service is a silent no-op.
+  There is no permission query to call.
+- **Windows needs `setAppIdentity()`** before the first post. The identifier
+  becomes the AppUserModelID, and toasts without one are dropped. It is not
+  `appName` (macOS menu items) or `appId` (the Wayland/X11 window class).
+- Linux shows actions only when the notification daemon supports them.
+- A later `onNotificationResponse()` replaces the handler. These methods are not
+  available in the browser renderer.
+
 ### Window measurements
 
 **Snapshots** from `readWindowSize(renderer)` and `readWindowInsets(renderer)`
@@ -937,7 +1076,10 @@ readWindowSize(null) // { width: 800, height: 600 }
 readWindowInsets(null).keyboardVisible // false
 ```
 
-Missing or not-yet-open windows use the default size and zero insets.
+Missing or not-yet-open windows use the default size and zero insets. When a
+read fails after an earlier success, `readWindowSize` keeps the last size it
+read for that renderer, so `observeWindowSize` never reports a resize that did
+not happen.
 `observeWindowSize` and `observeWindowInsets` deliver these same snapshots;
 React's `useWindowSize` / `useWindowInsets` and Solid's `createWindowSize` /
 `createWindowInsets` use the shared readers.
@@ -977,6 +1119,16 @@ On the current Windows GPUI backend, the system dialog does not distinguish
 cancellation from other `IFileDialog::Show` errors, so both resolve with
 `null`. This needs a fix in GPUI before GPUIX can report those errors.
 
+**While the dialog is open**, on Windows it blocks GPUI's UI thread until it closes. Calls that need
+that thread (`getScrollOffset`, `getListScrollTop`, `getFocusedElementId`,
+`getDebugFrameOverlay*`, `setImage`, `setImagePixels`, `registerFont`, the
+`simulate*` input calls, the `clock*` calls, and any read with `forceRender`)
+wait 2 seconds, then throw `Timed out after 2 seconds waiting for ...`.
+
+`getWindowSize`, `getElementBounds`, `getElementsAt` and `getAutomationTree`
+answer from the last painted frame without the UI thread, so they keep working
+while a dialog is open.
+
 | Platform | `focus: false` | `show: false` |
 |---|---|---|
 | macOS | window orders in front without becoming key, like `open -g` | honored |
@@ -987,6 +1139,33 @@ The process still gets a **Dock icon** on macOS. GPUI sets the regular
 activation policy, so there is no menu-bar-agent mode yet. For a real
 background daemon, run the app from a `launchd` agent in
 `~/Library/LaunchAgents/`; launchd never activates the process.
+
+### Clipboard
+
+`writeToClipboard(text)` and `readFromClipboard()` are renderer methods, like
+`setWindowTitle()`. They are commands, not state: nothing re-renders when the
+clipboard changes. Same call from `@gpuix/react` and `@gpuix/solid`:
+
+```tsx
+function CopyButton({ text }: { text: string }) {
+  const renderer = useGpuixRequired()
+  return <div onClick={() => renderer.writeToClipboard?.(text)}>Copy</div>
+}
+
+const pasted = useGpuixRequired().readFromClipboard?.() // string | null
+```
+
+- A read returns the clipboard's text, or `null` when it holds no text at all:
+  the clipboard is empty, or it holds an image or files. A file list never
+  reads as paths.
+- Both calls are **synchronous**. GPUI reads the platform clipboard directly,
+  so there is no promise to await. On Windows and Linux the call runs on the
+  UI thread while JavaScript waits for the answer.
+- An empty string is a real entry: `writeToClipboard('')` clears the clipboard
+  and reads back as `''`. Only plain text is written and read.
+- The terminal renderer writes through OSC 52 and keeps a local copy, so a read
+  there only returns text this app wrote. The browser renderer has no
+  clipboard methods.
 
 ### Custom fonts
 
@@ -2018,16 +2197,39 @@ PascalCase. `"none"` and `"presentation"` produce no node.
 </div>
 ```
 
-| Prop               | GPUI / AccessKit                          |
-| ------------------ | ----------------------------------------- |
-| `role`             | `.role(Role::…)`                          |
-| `aria-label`       | accessible name                           |
-| `aria-description` | extra description after name, role, value |
-| `aria-id`          | `AXIdentifier` / UIA AutomationId         |
-| `aria-expanded`    | expanded state                            |
-| `aria-selected`    | selected state                            |
-| `aria-valuetext`   | string value                              |
-| `aria-level`       | heading level                             |
+| Prop                | GPUI / AccessKit                          |
+| ------------------- | ----------------------------------------- |
+| `role`              | `.role(Role::…)`                          |
+| `aria-label`        | accessible name                           |
+| `aria-description`  | extra description after name, role, value |
+| `aria-id`           | `AXIdentifier` / UIA AutomationId         |
+| `aria-expanded`     | expanded state                            |
+| `aria-selected`     | selected state                            |
+| `aria-valuetext`    | string value                              |
+| `aria-valuenow`     | numeric value                             |
+| `aria-valuemin`     | minimum numeric value                     |
+| `aria-valuemax`     | maximum numeric value                     |
+| `aria-level`        | heading level                             |
+| `aria-keyshortcuts` | keyboard shortcut hint                    |
+| `aria-placeholder`  | placeholder text                          |
+| `aria-checked`      | toggled: `true`, `false`, or `"mixed"`    |
+| `aria-pressed`      | toggled: `true`, `false`, or `"mixed"`    |
+| `aria-orientation`  | `"horizontal"` or `"vertical"`            |
+| `aria-posinset`     | position in a set                         |
+| `aria-setsize`      | size of a set                             |
+| `aria-rowindex`     | row index                                 |
+| `aria-colindex`     | column index                              |
+| `aria-rowcount`     | row count                                 |
+| `aria-colcount`     | column count                              |
+
+Set and table values are positive integers; a numeric value must be finite.
+Anything else is ignored, never a panic, and an unknown `role` token falls back
+to the element's default role.
+
+`aria-activedescendant` is **not** mapped. The web prop is a container-side id
+reference, while GPUI's `aria_active_descendant()` takes no argument and is set
+on the *selected child*. `aria-invalid`, `aria-required`, `aria-modal`,
+`aria-current`, and `aria-haspopup` have no builder in the pinned GPUI fork.
 
 Native defaults, so common elements are not silent:
 
@@ -2509,6 +2711,29 @@ same commit as mount. The box is the element's border box, like a DOM
 const box = renderer.getElementBounds?.(ref.current.id)
 // { x, y, width, height }
 ```
+
+The read is free: it never draws a frame. On Windows and Linux the UI thread
+publishes each finished frame (bounds and window size) for the JS thread, so
+`getElementBounds`, `getElementsAt`, `getAutomationTree` and `getWindowSize`
+answer from it without a UI-thread round trip, and polling them leaves an idle
+window at 0 frames per second. Before the first frame, bounds are empty.
+
+Pass `true` as the last argument to draw a frame first and read the result of
+that frame. The default read is the last painted frame, which can lag a commit
+that has not painted yet.
+
+```tsx
+renderer.getElementBounds?.(id, true)       // fresh bounds
+renderer.getElementsAt?.(x, y, true)
+renderer.getAutomationTree?.(true)
+renderer.getWindowSize?.(true)
+```
+
+`forceRender` behaves the same on macOS, Windows and Linux. It costs one frame
+per call, so use it for one-off checks and automation, not polling. The
+automation client forces a render for its own reads. The test renderer always
+paints before it reads, so it ignores the argument. On Windows and Linux a
+forced read needs the UI thread, so it times out while one is blocked.
 
 ### Find what is under a point
 
@@ -3053,6 +3278,163 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Custom drawing (planned)                         |
+
+### Your own native elements
+
+A Rust crate can add its own GPUI component as an element. The crate builds its
+own Node addon that links `gpuix-native`, registers the element at load time,
+and replaces the prebuilt `@gpuix/native` binary.
+[`example-rust-native-element/`](./example-rust-native-element) is a complete
+crate with an end-to-end test.
+
+```rust
+use gpuix_native::gpui;
+use gpuix_native::{CustomElement, CustomElementFactory, CustomRenderContext, GpuixView};
+
+struct Greeting {
+    name: String,
+}
+
+impl CustomElement for Greeting {
+    fn render(
+        &mut self,
+        ctx: CustomRenderContext,
+        _window: &mut gpui::Window,
+        _cx: &mut gpui::Context<GpuixView>,
+    ) -> gpui::AnyElement {
+        ctx.text(0, format!("Hello, {}", self.name), None)
+    }
+
+    fn set_prop(&mut self, key: &str, value: serde_json::Value) {
+        if key == "name" {
+            self.name = value.as_str().unwrap_or_default().to_string();
+        }
+    }
+
+    fn supported_props(&self) -> &'static [&'static str] {
+        &["name"]
+    }
+
+    fn supported_events(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn destroy(&mut self) {}
+}
+
+struct GreetingFactory;
+
+impl CustomElementFactory for GreetingFactory {
+    fn element_type(&self) -> &str {
+        "my-greeting"
+    }
+
+    fn create(&self, _id: u64) -> Box<dyn CustomElement> {
+        Box::new(Greeting { name: String::new() })
+    }
+}
+
+#[napi_derive::module_init]
+fn init() {
+    gpuix_native::register_custom_element(|| Box::new(GreetingFactory)).unwrap();
+}
+```
+
+The crate is a `cdylib` with `napi_build::setup()` in its `build.rs`. Take
+`gpuix-native` from the git tag of the `@gpuix/native` version your app
+installs. Cargo also clones the Zed submodule, so the first build takes a while:
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gpuix-native = { git = "https://github.com/remorses/gpuix", tag = "@gpuix/native@0.12.0" }
+napi = { version = "3", features = ["napi8", "serde-json"] }
+napi-derive = "3"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
+```
+
+Every export of `@gpuix/native` is still in the built addon. Point the app at
+it:
+
+```bash
+cargo build --release
+cp target/release/libmy_addon.dylib my-addon.node   # .so on Linux, .dll on Windows
+NAPI_RS_NATIVE_LIBRARY_PATH=./my-addon.node bun app.tsx
+```
+
+Then declare the element for TypeScript. Solid apps augment
+`@gpuix/solid/jsx-runtime` the same way.
+
+```ts
+import type { EventPayload, Props } from "@gpuix/react"
+
+declare module "@gpuix/react/jsx-runtime" {
+  namespace JSX {
+    interface IntrinsicElements {
+      "my-greeting": Props & {
+        name?: string
+        onGreet?: (event: EventPayload) => void
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- **Same GPUIX version on both sides.** The addon replaces the whole native
+  half of `@gpuix/native`. The JavaScript in `@gpuix/native`, `@gpuix/react`
+  and `@gpuix/solid` still comes from npm, and it calls the addon through napi
+  methods and the `applyBatch` protocol, which change between releases. Pin
+  the tag that matches the installed `@gpuix/native` exactly, and rebuild the
+  addon on every GPUIX upgrade. A mismatch fails at run time, not at build time.
+- **Same napi major.** Use `napi` 3 and `napi-derive` 3, like `gpuix-native`.
+  Cargo then links one copy, so the `module_init` and the GPUIX exports share
+  one registry.
+- **One GPUI.** Use `gpuix_native::gpui`, or take `gpui` from the same
+  repository and revision as `gpuix-native`. A second copy of GPUI can't draw
+  into GPUIX's window.
+- **Names contain a `-`**, like DOM custom elements, so they never collide with
+  an element GPUIX adds later. Built-in names are refused.
+- **Register before the first renderer.** Renderers created earlier keep the
+  elements they started with.
+- Props reach `set_prop` as JSON. `custom_surface` applies `style`, hover,
+  accessibility, and the standard mouse events to your root.
+- An element that takes keyboard input owns a GPUI `FocusHandle`. Pass
+  `tabIndex` to put it in the Tab order.
+
+#### Custom events
+
+Any **function** prop named `on` + uppercase is a handler: `onGreet` listens
+for `greet`. List the name in `supported_events`, then emit it with
+`emit_event_full` and put your data in `detail`, which takes any JSON.
+
+```rust
+fn supported_events(&self) -> &'static [&'static str] {
+    &["greet"]
+}
+
+// in render()
+let callback = ctx.event_callback.clone();
+let id = ctx.id;
+el.on_mouse_down(gpui::MouseButton::Left, move |_, _, _| {
+    gpuix_native::emit_event_full(&callback, id, "greet", |payload| {
+        payload.detail = Some(serde_json::json!({ "name": "world" }));
+    });
+})
+```
+
+```tsx
+<my-greeting onGreet={(event) => console.log(event.detail.name)} />
+```
+
+A value that is not a function stays a normal prop, so `onTop={true}` reaches
+`set_prop("onTop", true)`.
 
 ## Images and icons
 
@@ -3835,6 +4217,40 @@ await app.captureFrames('review/sidebar', [
 ])
 ```
 
+### Record a video
+
+`app.recordVideo()` turns the same clock into a **video recorder**. Each frame
+is a screenshot at an exact timestamp, so the result is smooth at any `fps`,
+however long a frame takes to render.
+
+```ts
+const video = await app.recordVideo({ path: 'review/demo.mp4', fps: 60 })
+
+await app.getByTestId('sidebar-collapse').click()
+await video.wait(400)                  // 24 frames of the animation
+
+for (let step = 0; step < 30; step++) {
+  await app.mouse.wheel({ x: 600, y: 400 }, 0, -40)
+  await video.frame()                  // one frame per wheel tick
+}
+
+await video.stop()                     // encode, delete frames, resume the clock
+```
+
+| Call | What it does |
+|---|---|
+| `app.recordVideo({ path, fps })` | Pauses the clock and captures the first frame. `fps` defaults to 60 |
+| `video.frame()` | Advances the clock by `1000 / fps` ms and captures one frame |
+| `video.wait(ms)` | Captures `ms` of video with no input |
+| `video.nowMs` | Clock time of the next frame |
+| `video.stop()` | Encodes with `ffmpeg`, deletes the frames, resumes the clock |
+
+Input between frames lands **instantly**, so move the pointer in small steps
+across frames for a visible glide. The extension picks the codec: `.mp4`
+(H.264, 4:2:0), `.webm` (VP9) or `.gif`. `ffmpeg` must be on `PATH`. Like
+`captureFrames`, it needs Node or Bun; in a browser page use the controlling
+browser tool.
+
 ### Live apps
 
 `launch({ command, args })` starts the app and speaks the same commands
@@ -4027,6 +4443,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
 - [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`, `resizeWindow`, `isFullscreen`)
+- [x] Clipboard text (`writeToClipboard` / `readFromClipboard`)
+- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar with the standard shortcuts (`appName`)
 - [ ] App-declared menus and menu callbacks

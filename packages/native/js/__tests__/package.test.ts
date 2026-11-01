@@ -32,7 +32,9 @@ describe("native ESM package", () => {
     expect(commonJs.stdout.trim()).toBe("function")
   })
 
-  it("resolves shared subpaths from an installed tarball without an addon", () => {
+  // npm pack + bun add copy the whole package, including the addon binary and
+  // the wasm build. On a cold CI runner that alone can pass the 5s default.
+  it("resolves shared subpaths from an installed tarball without an addon", { timeout: 30_000 }, () => {
     const packageRoot = join(fileURLToPath(new URL(".", import.meta.url)), "../..")
     const packed = run([
       "npm",

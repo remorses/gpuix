@@ -4,6 +4,8 @@
   "main": "./src/server.tsx",
   "compatibility_date": "2026-03-15",
   "compatibility_flags": ["nodejs_compat"],
+  // Lets the Worker read the prerendered `rendering: static` pages.
+  "assets": { "binding": "ASSETS" },
   "routes": [
     {
       "custom_domain": true,

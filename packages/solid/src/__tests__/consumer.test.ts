@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import solidPlugin from "../bun-plugin.js"
+import { hasNativeTestRenderer } from "../testing.js"
 
 const fixture = join(import.meta.dir, "../../fixtures/consumer")
 const workspace = resolve(import.meta.dir, "../../../..")
@@ -30,7 +31,8 @@ function nativeBindingPath(): string {
 }
 
 describe("Solid package consumer", () => {
-  it("runs imported TSX through the bunfig preload", () => {
+  // The fixture renders through createTestRoot(), which is macOS and Windows only.
+  it.skipIf(!hasNativeTestRenderer)("runs imported TSX through the bunfig preload", () => {
     const result = Bun.spawnSync({
       cmd: ["bun", "main.tsx"],
       cwd: fixture,
@@ -52,7 +54,8 @@ describe("Solid package consumer", () => {
     expect(await result.outputs[0]!.text()).toContain("built with plugin")
   })
 
-  it("runs the preload and build plugin from installed tarballs", () => {
+  // The fixture renders through createTestRoot(), which is macOS and Windows only.
+  it.skipIf(!hasNativeTestRenderer)("runs the preload and build plugin from installed tarballs", () => {
     const nativeTarball = "gpuix-native.tgz"
     const solidTarball = "gpuix-solid.tgz"
     for (const [packageDirectory, filename] of [

@@ -9,11 +9,12 @@ import { DefaultEventPriority } from "react-reconciler/constants.js"
 import type { HostEventHandler } from "@gpuix/native/host"
 import {
   BUILT_IN_TYPES,
-  EVENT_TYPE_BY_PROP,
+  handlerEventType,
   isReservedProp,
+  isUniversalProp,
+  RESERVED_PROPS,
   sameMutationValue,
   serializeCustomProp,
-  UNIVERSAL_PROPS,
 } from "@gpuix/native/host"
 
 const NoEventPriority = 0
@@ -100,9 +101,9 @@ function nextId(container: Container): number {
 function syncEventListeners(container: Container, id: number, props: Props): void {
   const record = props as Record<string, unknown>
   for (const propName in record) {
-    const eventType = EVENT_TYPE_BY_PROP.get(propName)
     const handler = record[propName]
-    if (eventType && handler) {
+    const eventType = handlerEventType(propName, handler)
+    if (eventType) {
       registerEventHandler(
         container.eventHandlers,
         id,
@@ -127,29 +128,29 @@ function diffEventListeners(
   const previous = oldProps as Record<string, unknown>
   const next = newProps as Record<string, unknown>
   for (const propName in next) {
-    const eventType = EVENT_TYPE_BY_PROP.get(propName)
-    if (!eventType) continue
     const oldHandler = previous[propName]
     const newHandler = next[propName]
-    if (oldHandler && !newHandler) {
-      unregisterEventHandler(container.eventHandlers, id, eventType)
-      container.renderer.setEventListener(id, eventType, false)
-    } else if (newHandler && newHandler !== oldHandler) {
+    const oldType = handlerEventType(propName, oldHandler)
+    const newType = handlerEventType(propName, newHandler)
+    if (oldType && !newType) {
+      unregisterEventHandler(container.eventHandlers, id, oldType)
+      container.renderer.setEventListener(id, oldType, false)
+    } else if (newType && newHandler !== oldHandler) {
       registerEventHandler(
         container.eventHandlers,
         id,
-        eventType,
+        newType,
         newHandler as HostEventHandler
       )
-      if (!oldHandler) {
-        container.renderer.setEventListener(id, eventType, true)
+      if (!oldType) {
+        container.renderer.setEventListener(id, newType, true)
       }
     }
   }
   for (const propName in previous) {
     if (propName in next) continue
-    const eventType = EVENT_TYPE_BY_PROP.get(propName)
-    if (eventType && previous[propName]) {
+    const eventType = handlerEventType(propName, previous[propName])
+    if (eventType) {
       unregisterEventHandler(container.eventHandlers, id, eventType)
       container.renderer.setEventListener(id, eventType, false)
     }
@@ -200,8 +201,8 @@ function syncCustomProps(
 ): void {
   const builtIn = BUILT_IN_TYPES.has(type)
   for (const [key, value] of Object.entries(props)) {
-    if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
+    if (isReservedProp(key, value)) continue
+    if (builtIn && !isUniversalProp(key)) continue
     renderer.setCustomProp(id, key, serializeCustomProp(value))
   }
 }
@@ -212,6 +213,9 @@ function syncCustomProps(
  * Compared by value after serialization: a handler or an inline object is new on
  * every render, and a function serializes to `null` either way, so resending it
  * would only make Rust parse and discard the same value again.
+ *
+ * `onTop` can switch between a handler and data across renders. Rust only holds
+ * the data form, so the handler form counts as absent.
  */
 function diffCustomProps(
   renderer: MutationRenderer,
@@ -225,28 +229,31 @@ function diffCustomProps(
   const next = newProps as Record<string, unknown>
   // Updated or added props
   for (const key in next) {
-    if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
     const value = next[key]
     const oldValue = previous[key]
     if (value === oldValue) continue
-    const serialized = serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0])
-    if (
-      key in previous &&
-      sameMutationValue(
-        serializeCustomProp(oldValue as Parameters<typeof serializeCustomProp>[0]),
-        serialized
-      )
-    ) {
+    if (RESERVED_PROPS.has(key)) continue
+    if (builtIn && !isUniversalProp(key)) continue
+    const wasData = key in previous && !isReservedProp(key, oldValue)
+    if (handlerEventType(key, value)) {
+      if (wasData) renderer.setCustomProp(id, key, null)
       continue
     }
+    const serialized = serializeCustomProp(value as Parameters<typeof serializeCustomProp>[0])
+    const unchanged = wasData
+      ? sameMutationValue(
+          serializeCustomProp(oldValue as Parameters<typeof serializeCustomProp>[0]),
+          serialized
+        )
+      : serialized === null
+    if (unchanged) continue
     renderer.setCustomProp(id, key, serialized)
   }
   // Removed props
   for (const key in previous) {
-    if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
-    if (!(key in next)) renderer.setCustomProp(id, key, null)
+    if (key in next || isReservedProp(key, previous[key])) continue
+    if (builtIn && !isUniversalProp(key)) continue
+    renderer.setCustomProp(id, key, null)
   }
 }
 
