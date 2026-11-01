@@ -719,6 +719,8 @@ export type NativeRenderer = MutationHost &
       | "minimizeWindow"
       | "zoomWindow"
       | "toggleFullscreen"
+      | "resizeWindow"
+      | "isFullscreen"
       | "setDebugFrameOverlay"
       | "getDebugFrameOverlay"
       | "cycleDebugFrameOverlay"

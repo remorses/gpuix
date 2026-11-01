@@ -459,6 +459,13 @@ enum UiCommand {
     MinimizeWindow,
     ZoomWindow,
     ToggleFullscreen,
+    ResizeWindow {
+        width: f32,
+        height: f32,
+    },
+    GetFullscreen {
+        response: SyncSender<bool>,
+    },
     SetWindowTitle(String),
     UpdateApp(Box<dyn FnOnce(&mut gpui::App) + Send>),
     PromptForPaths {
@@ -587,6 +594,14 @@ async fn run_ui_commands(
             UiCommand::ZoomWindow => window.update(cx, |_view, window, _cx| window.zoom_window()),
             UiCommand::ToggleFullscreen => {
                 window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
+            }
+            UiCommand::ResizeWindow { width, height } => window.update(cx, |_view, window, _cx| {
+                window.resize(gpui::size(gpui::px(width), gpui::px(height)))
+            }),
+            UiCommand::GetFullscreen { response } => {
+                window.update(cx, move |_view, window, _cx| {
+                    response.send(window.is_fullscreen()).ok();
+                })
             }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
@@ -1952,6 +1967,68 @@ impl GpuixRenderer {
         Err(Error::from_reason(
             "The production GPUIX renderer does not support this operating system",
         ))
+    }
+
+    /// Resize the window to a width and height in logical pixels. The panel
+    /// that changes a layout animates inside the same frame; without this the
+    /// window keeps its old width and the content reflows into empty space.
+    #[napi]
+    pub fn resize_window(&self, width: f64, height: f64) -> Result<()> {
+        let width = width as f32;
+        let height = height as f32;
+        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+            return Err(Error::from_reason(
+                "resizeWindow needs a positive, finite width and height in logical pixels",
+            ));
+        }
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |_view, window, _cx| {
+            window.resize(gpui::size(gpui::px(width), gpui::px(height)))
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ResizeWindow { width, height });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Whether the window is in native fullscreen, so a layout can branch on
+    /// the state `toggleFullscreen()` writes.
+    #[napi]
+    pub fn is_fullscreen(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            return update_window(|_view, window, _cx| window.is_fullscreen()).unwrap_or(false);
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            if self
+                .send_ui_command(UiCommand::GetFullscreen { response })
+                .is_err()
+            {
+                return false;
+            }
+            return recv_ui_response(receiver, "the fullscreen query").unwrap_or(false);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        false
     }
 
     #[napi]
