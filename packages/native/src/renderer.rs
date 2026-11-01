@@ -1917,13 +1917,13 @@ impl GpuixRenderer {
     /// window keeps its old width and the content reflows into empty space.
     #[napi]
     pub fn resize_window(&self, width: f64, height: f64) -> Result<()> {
+        let width = width as f32;
+        let height = height as f32;
         if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
             return Err(Error::from_reason(
                 "resizeWindow needs a positive, finite width and height in logical pixels",
             ));
         }
-        let width = width as f32;
-        let height = height as f32;
 
         #[cfg(target_os = "macos")]
         return update_window(move |_view, window, _cx| {
