@@ -451,7 +451,7 @@ export declare class TestGpuixRenderer {
   getScrollOffset(elementId: number): Array<number> | null
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
-   * Supported on macOS through Metal and Windows through DirectX.
+   * Supported on macOS through Metal, Windows through DirectX, and Linux through a wgpu offscreen readback.
    */
   captureScreenshot(path: string): void
   /**

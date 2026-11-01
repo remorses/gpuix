@@ -1,7 +1,8 @@
 /// TestGpuixRenderer — GPU-backed GPUI test renderer exposed to Node.js via napi.
 ///
-/// Uses gpui::VisualTestAppContext with the native Metal or DirectX renderer
-/// and TestDispatcher for deterministic scheduling. Runs the SAME GpuixView,
+/// Uses gpui::VisualTestAppContext with the native GPU renderer (Metal on
+/// macOS, DirectX on Windows, Vulkan on Linux) and TestDispatcher for
+/// deterministic scheduling. Runs the SAME GpuixView,
 /// build_element(), apply_styles(), and event handlers as production.
 ///
 /// Windows are positioned offscreen at (-10000, -10000) — invisible but
@@ -190,8 +191,9 @@ fn install_test_image_http_client(cx: &mut gpui::App) {
 // ── TestGpuixRenderer ────────────────────────────────────────────────
 
 /// GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
-/// Metal or DirectX renderer and TestDispatcher for deterministic scheduling.
-/// Same GpuixView and rendering pipeline as production.
+/// GPU renderer (Metal on macOS, DirectX on Windows, Vulkan on Linux) and
+/// TestDispatcher for deterministic scheduling. Same GpuixView and rendering
+/// pipeline as production.
 ///
 /// Usage from JS:
 ///   const r = new TestGpuixRenderer()
@@ -1047,7 +1049,7 @@ impl TestGpuixRenderer {
     }
 
     /// Capture a screenshot of the current rendered state and save as PNG.
-    /// Supported on macOS through Metal and Windows through DirectX.
+    /// Supported on macOS through Metal, Windows through DirectX, and Linux through a wgpu offscreen readback.
     #[napi]
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         with_test_state(|cx, window, view| {
