@@ -207,6 +207,9 @@ pub struct TestGpuixRenderer {
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
+    /// Published the way the Windows/Linux `GpuixRenderer` publishes, so tests
+    /// can check what its JS-thread reads would see.
+    painted_frame: crate::automation::SharedPaintedFrame,
 }
 
 #[napi]
@@ -230,6 +233,8 @@ impl TestGpuixRenderer {
         let callback_clone = event_callback.clone();
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
+        let painted_frame = crate::automation::SharedPaintedFrame::default();
+        let painted_frame_clone = painted_frame.clone();
 
         let platform = gpui_platform::current_platform(false);
         let mut cx = gpui::VisualTestAppContext::new(platform);
@@ -243,12 +248,14 @@ impl TestGpuixRenderer {
         let window_handle = cx
             .open_offscreen_window(window_size, |_window, app| {
                 app.new(|_cx| {
-                    GpuixView::new(
+                    let mut view = GpuixView::new(
                         tree_clone,
                         callback_clone,
                         "GPUIX Test".to_string(),
                         selection_clone,
-                    )
+                    );
+                    view.painted_frame = Some(painted_frame_clone);
+                    view
                 })
             })
             .map_err(|e| Error::from_reason(format!("Failed to open test window: {}", e)))?;
@@ -284,6 +291,7 @@ impl TestGpuixRenderer {
             tree,
             events,
             selection,
+            painted_frame,
         })
     }
 
@@ -1168,6 +1176,21 @@ impl TestGpuixRenderer {
         let id = to_element_id(id)?;
         self.flush()?;
         Ok(crate::automation::get_bounds(id).map(crate::renderer::ElementBounds::from_painted))
+    }
+
+    /// Bounds from the frame the view last published, without painting a new
+    /// one. This is what `GpuixRenderer.getElementBounds` returns on Windows
+    /// and Linux.
+    #[napi]
+    pub fn get_published_element_bounds(
+        &self,
+        id: f64,
+    ) -> Result<Option<crate::renderer::ElementBounds>> {
+        let id = to_element_id(id)?;
+        Ok(self
+            .painted_frame
+            .bounds(id)
+            .map(crate::renderer::ElementBounds::from_painted))
     }
 
     /// Ids under the window point, topmost first. See the live renderer.

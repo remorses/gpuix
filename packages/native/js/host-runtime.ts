@@ -29,14 +29,22 @@ export interface WindowInsets extends NativeWindowInsets {
 const DEFAULT_WINDOW_SIZE: WindowSize = { width: 800, height: 600 }
 const ZERO_EDGES: EdgeInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 
+const lastWindowSizes = new WeakMap<object, WindowSize>()
+
 export function readWindowSize(
   renderer: WindowSizeHost | NativeRenderer | null
 ): WindowSize {
   try {
     const size = renderer?.getWindowSize?.()
-    if (size && size.width > 0 && size.height > 0) return { ...size }
+    if (renderer && size && size.width > 0 && size.height > 0) {
+      lastWindowSizes.set(renderer, { ...size })
+      return { ...size }
+    }
   } catch {
-    // The platform window can still be opening.
+    // A failed read says nothing about the size, so keep the last good one.
+    // With none, the platform window can still be opening.
+    const last = renderer ? lastWindowSizes.get(renderer) : undefined
+    if (last) return { ...last }
   }
   return { ...DEFAULT_WINDOW_SIZE }
 }
@@ -44,14 +52,13 @@ export function readWindowSize(
 export function readWindowInsets(
   renderer: (WindowSizeHost & WindowInsetsHost) | NativeRenderer | null
 ): WindowInsets {
-  let size = DEFAULT_WINDOW_SIZE
+  const size = readWindowSize(renderer)
   let insets: NativeWindowInsets = {
     safeArea: ZERO_EDGES,
     ime: ZERO_EDGES,
     effective: ZERO_EDGES,
   }
   try {
-    size = renderer?.getWindowSize?.() ?? size
     insets = renderer?.getWindowInsets?.() ?? insets
   } catch {
     // The platform window can still be opening.

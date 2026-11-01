@@ -126,6 +126,66 @@ pub fn all_bounds() -> HashMap<u64, ElementBounds> {
     BOUNDS.with(|cell| cell.borrow().clone())
 }
 
+/// What the last completed paint produced, readable from any thread.
+///
+/// `BOUNDS` is thread-local to the thread that paints. On Windows and Linux
+/// that is the UI thread, so the JS thread used to ask it for a bounds read
+/// through a UI command and wait a frame for the answer. If the UI thread was
+/// blocked, for example by a native file dialog, the read timed out. The UI
+/// thread publishes the finished frame here instead, so reads never wait on it.
+#[derive(Default)]
+struct PaintedFrame {
+    bounds: HashMap<u64, ElementBounds>,
+    viewport: Option<(f64, f64)>,
+}
+
+#[derive(Clone, Default)]
+pub struct SharedPaintedFrame(Arc<Mutex<PaintedFrame>>);
+
+// macOS reads BOUNDS directly, so only Windows and Linux call these.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+impl SharedPaintedFrame {
+    fn publish(&self, bounds: HashMap<u64, ElementBounds>, viewport: gpui::Size<Pixels>) {
+        let mut frame = self.0.lock().unwrap();
+        frame.bounds = bounds;
+        frame.viewport = Some((
+            f64::from(f32::from(viewport.width)),
+            f64::from(f32::from(viewport.height)),
+        ));
+    }
+
+    pub fn bounds(&self, id: u64) -> Option<ElementBounds> {
+        self.0.lock().unwrap().bounds.get(&id).copied()
+    }
+
+    pub fn all_bounds(&self) -> HashMap<u64, ElementBounds> {
+        self.0.lock().unwrap().bounds.clone()
+    }
+
+    /// `None` until the first frame has painted.
+    pub fn viewport(&self) -> Option<(f64, f64)> {
+        self.0.lock().unwrap().viewport
+    }
+}
+
+/// Publishes the finished frame to `frame`. Keep it as a child of the root.
+///
+/// It is deferred with the highest priority so it paints after every other
+/// deferred draw, such as `<anchored>`, which records bounds during its own
+/// paint. Publishing from an ordinary trailing child would miss those.
+pub fn bounds_frame_publish(frame: SharedPaintedFrame) -> impl IntoElement {
+    gpui::deferred(
+        canvas(
+            |_, _, _| (),
+            move |_, _, window, _| frame.publish(all_bounds(), window.viewport_size()),
+        )
+        .absolute()
+        .w(px(0.0))
+        .h(px(0.0)),
+    )
+    .with_priority(usize::MAX)
+}
+
 pub fn bounds_tracker(id: u64, selection_start: Option<bool>) -> impl IntoElement {
     canvas(
         |bounds, _, _| bounds,

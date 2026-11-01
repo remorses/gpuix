@@ -106,8 +106,11 @@ export interface TestAutomationRenderer {
   getSelectedText(): string | null
   clearSelection(): void
   captureScreenshot(path: string): void
-  getAutomationTree(): string
-  getElementBounds(elementId: number): { x: number; y: number; width: number; height: number } | null
+  getAutomationTree(forceRender?: boolean): string
+  getElementBounds(
+    elementId: number,
+    forceRender?: boolean
+  ): { x: number; y: number; width: number; height: number } | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -233,13 +236,13 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       offset: this.renderer.getScrollOffset(params.elementId),
     }),
     getTree: () => {
-      const raw = JSON.parse(this.renderer.getAutomationTree()) as unknown
+      const raw = JSON.parse(this.renderer.getAutomationTree(true)) as unknown
       return { tree: raw === null ? null : (raw as TreeNode) }
     },
     getPaintedText: () => ({ text: this.renderer.getPaintedText() }),
     getAllText: () => ({ text: this.renderer.getAllText() }),
     getBounds: (params) => {
-      const rect = this.renderer.getElementBounds(params.elementId)
+      const rect = this.renderer.getElementBounds(params.elementId, true)
       if (!rect) return { bounds: null }
       return { bounds: rect }
     },

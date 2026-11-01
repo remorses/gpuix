@@ -186,3 +186,25 @@ describeNative("onLayout", () => {
     }
   })
 })
+
+describeNative("published frame", () => {
+  it("publishes bounds, including deferred <anchored> layers, after paint", () => {
+    const { render, renderer, unmount } = createTestRoot()
+    try {
+      render(
+        <div>
+          <div testId="plain" style={{ width: 50, height: 30 }} />
+          <anchored testId="layer" position={{ x: 100, y: 100 }} style={{ width: 40, height: 20 }} />
+        </div>
+      )
+      for (const testId of ["plain", "layer"]) {
+        const id = renderer.findByTestId(testId)!.id
+        const painted = renderer.getElementBounds(id)
+        expect(painted, testId).not.toBeNull()
+        expect(renderer.getPublishedElementBounds(id), testId).toEqual(painted)
+      }
+    } finally {
+      unmount()
+    }
+  })
+})

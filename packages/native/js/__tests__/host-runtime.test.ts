@@ -60,6 +60,21 @@ describe("shared host runtime", () => {
     expect(readWindowSize(renderer)).toEqual({ width: 12, height: 8 })
   })
 
+  it("keeps the last window size when a read fails", () => {
+    let error: unknown = null
+    const renderer: WindowSizeHost = {
+      getWindowSize() {
+        if (error) throw error
+        return { width: 300, height: 200 }
+      },
+    }
+    expect(readWindowSize(renderer)).toEqual({ width: 300, height: 200 })
+
+    error = new Error("timed out")
+    expect(readWindowSize(renderer)).toEqual({ width: 300, height: 200 })
+    expect(readWindowSize({ getWindowSize: () => { throw error } })).toEqual({ width: 800, height: 600 })
+  })
+
   it("reads insets from a size-and-insets host", () => {
     const renderer: WindowSizeHost & WindowInsetsHost = {
       getWindowSize: () => ({ width: 100, height: 50 }),

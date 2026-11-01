@@ -457,6 +457,20 @@ it. `custom_surface` in `custom_elements/mod.rs` does this for you.
 
 ## Bounds: a container uses a tracker, a leaf uses `on_painted`
 
+`BOUNDS` is thread-local to the painting thread. On Windows and Linux that is
+the UI thread, not JS, so `GpuixView` also publishes each finished frame (bounds
+and viewport) into a `SharedPaintedFrame` that `GpuixRenderer` reads from the
+JS thread. A read must never become a `UiCommand`: it would force a frame, and
+it would time out while a Windows file dialog blocks the UI thread. The
+publisher is a `deferred` canvas with `usize::MAX` priority so it paints after
+`<anchored>` and every other deferred draw. Keep that priority, or deferred
+bounds are missing from the snapshot.
+
+The `forceRender` argument on the bounds and size reads calls
+`render_window_now` (`window.draw` plus `present_cached_frame`) on the thread
+that owns the window, then reads. It is the same on every OS. Never route a
+default read through it.
+
 `getByTestId(..).click()` needs a recorded box. Two mechanisms, both required:
 
 - **Containers** (`<div>`, `<text>`, `<code>`, `<diff>`, `<markdown>`, `<input>`)

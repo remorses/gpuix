@@ -1071,7 +1071,10 @@ readWindowSize(null) // { width: 800, height: 600 }
 readWindowInsets(null).keyboardVisible // false
 ```
 
-Missing or not-yet-open windows use the default size and zero insets.
+Missing or not-yet-open windows use the default size and zero insets. When a
+read fails after an earlier success, `readWindowSize` keeps the last size it
+read for that renderer, so `observeWindowSize` never reports a resize that did
+not happen.
 `observeWindowSize` and `observeWindowInsets` deliver these same snapshots;
 React's `useWindowSize` / `useWindowInsets` and Solid's `createWindowSize` /
 `createWindowInsets` use the shared readers.
@@ -1110,6 +1113,16 @@ omit this optional capability.
 On the current Windows GPUI backend, the system dialog does not distinguish
 cancellation from other `IFileDialog::Show` errors, so both resolve with
 `null`. This needs a fix in GPUI before GPUIX can report those errors.
+
+**While the dialog is open**, on Windows it blocks GPUI's UI thread until it closes. Calls that need
+that thread (`getScrollOffset`, `getListScrollTop`, `getFocusedElementId`,
+`getDebugFrameOverlay*`, `setImage`, `setImagePixels`, `registerFont`, the
+`simulate*` input calls, the `clock*` calls, and any read with `forceRender`)
+wait 2 seconds, then throw `Timed out after 2 seconds waiting for ...`.
+
+`getWindowSize`, `getElementBounds`, `getElementsAt` and `getAutomationTree`
+answer from the last painted frame without the UI thread, so they keep working
+while a dialog is open.
 
 | Platform | `focus: false` | `show: false` |
 |---|---|---|
@@ -2693,6 +2706,29 @@ same commit as mount. The box is the element's border box, like a DOM
 const box = renderer.getElementBounds?.(ref.current.id)
 // { x, y, width, height }
 ```
+
+The read is free: it never draws a frame. On Windows and Linux the UI thread
+publishes each finished frame (bounds and window size) for the JS thread, so
+`getElementBounds`, `getElementsAt`, `getAutomationTree` and `getWindowSize`
+answer from it without a UI-thread round trip, and polling them leaves an idle
+window at 0 frames per second. Before the first frame, bounds are empty.
+
+Pass `true` as the last argument to draw a frame first and read the result of
+that frame. The default read is the last painted frame, which can lag a commit
+that has not painted yet.
+
+```tsx
+renderer.getElementBounds?.(id, true)       // fresh bounds
+renderer.getElementsAt?.(x, y, true)
+renderer.getAutomationTree?.(true)
+renderer.getWindowSize?.(true)
+```
+
+`forceRender` behaves the same on macOS, Windows and Linux. It costs one frame
+per call, so use it for one-off checks and automation, not polling. The
+automation client forces a render for its own reads. The test renderer always
+paints before it reads, so it ignores the argument. On Windows and Linux a
+forced read needs the UI thread, so it times out while one is blocked.
 
 ### Find what is under a point
 
