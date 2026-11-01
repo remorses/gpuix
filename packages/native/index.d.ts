@@ -105,6 +105,10 @@ export declare class GpuixRenderer {
   zoomWindow(): void
   /** Enter or exit native fullscreen. */
   toggleFullscreen(): void
+  /** Resize the window to a logical-pixel width and height. */
+  resizeWindow(width: number, height: number): void
+  /** Whether the window is in native fullscreen. */
+  isFullscreen(): boolean
   setWindowTitle(title: string): void
   /** Open the platform path picker. Returns null when the user cancels. */
   promptForPaths(options?: PathPromptOptions | undefined | null): Promise<Array<string> | null>

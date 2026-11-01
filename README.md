@@ -915,9 +915,14 @@ function WindowControls() {
 }
 ```
 
-`minimizeWindow()`, `zoomWindow()`, and `toggleFullscreen()` work on macOS,
-Windows, Linux, and FreeBSD. `zoomWindow()` uses the platform's native zoom or
-maximize operation. These methods are not available in the browser renderer.
+`minimizeWindow()`, `zoomWindow()`, `toggleFullscreen()`, `resizeWindow()` and
+`isFullscreen()` work on macOS, Windows, Linux, and FreeBSD. `zoomWindow()` uses
+the platform's native zoom or maximize operation. `resizeWindow(width, height)`
+takes logical pixels and needs both dimensions: the frame changes size, not just
+the content inside it, so a panel that folds can take the window with it.
+`isFullscreen()` answers the state `toggleFullscreen()` writes, so a layout can
+branch on it instead of tracking its own guess. These methods are not available
+in the browser renderer.
 
 ### Window measurements
 
@@ -4021,7 +4026,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Headless Select, Combobox, and Tooltip
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
-- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
+- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`, `resizeWindow`, `isFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar with the standard shortcuts (`appName`)
 - [ ] App-declared menus and menu callbacks
