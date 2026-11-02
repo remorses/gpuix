@@ -401,13 +401,18 @@ impl WindowInner {
     }
 
     fn draw(&self, scene: &Scene) {
-        let (width, height) = {
+        let (width, height, rows, columns) = {
             let state = self.state.borrow();
-            (state.size.width, state.size.height)
+            (
+                state.size.width,
+                state.size.height,
+                state.size.rows,
+                state.size.columns,
+            )
         };
         let result = autoreleasepool(|| {
             let mut presenter = self.presenter.borrow_mut();
-            let mut frame = presenter.begin_frame(width, height)?;
+            let mut frame = presenter.begin_frame(width, height, rows, columns)?;
             self.renderer.borrow_mut().render(
                 scene,
                 size(DevicePixels(width as i32), DevicePixels(height as i32)),

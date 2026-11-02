@@ -16,9 +16,12 @@
 //! only carries the regions that changed since the previous one: a hover or a
 //! keystroke is a few KB instead of the whole frame.
 //!
-//! Re-transmitting image id 1 with placement id 1 (`a=T,i=1,p=1`) replaces the
-//! old frame and its placement in one command, and the synchronized update
-//! brackets (`CSI ? 2026`) keep it flicker free.
+//! Frames are transmitted with `U=1`, which only stores them, and shown by
+//! painting a grid of Unicode placeholders (`U+10EEEE` plus row and column
+//! diacritics, in the image id's colour). The picture is then ordinary text:
+//! it scrolls, is clipped and is redrawn with the cells it occupies. That is
+//! what makes it work inside tmux, which has no graphics protocol of its own
+//! and can only pass the escape codes through (`ESC P tmux; ... ESC \`).
 //! https://sw.kovidgoyal.net/kitty/graphics-protocol/
 
 use std::{
@@ -26,13 +29,14 @@ use std::{
     ffi::CString,
     io::{self, Write as _},
     ptr,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
 
-use crate::tty::Tty;
+use crate::tty::{IMAGE_ID, Tty, tmux_passthrough};
 
 /// Frames whose shared memory object we still own. The terminal unlinks an
 /// object once it read it; we unlink anything older than this ourselves, so a
@@ -78,6 +82,13 @@ enum Transport {
 pub(crate) struct KittyPresenter {
     transport: Transport,
     process_id: u32,
+    /// tmux speaks no graphics protocol: every APC has to go through its
+    /// passthrough envelope or it is dropped.
+    tmux: bool,
+    /// Image id this instance owns, see [`instance_image_id`].
+    image_id: u32,
+    /// Grid geometry the placeholders were last painted for.
+    grid: (u16, u16),
     frame_counter: u64,
     in_flight: VecDeque<CString>,
     command: Vec<u8>,
@@ -108,6 +119,8 @@ struct Rect {
 pub(crate) struct Frame {
     width: u32,
     height: u32,
+    rows: u16,
+    columns: u16,
     target: Target,
 }
 
@@ -154,9 +167,14 @@ impl KittyPresenter {
     /// can edit a shown frame. No frame can be presented until `wait_until`
     /// returns `None`.
     pub(crate) fn new(tty: &mut Tty) -> Result<Self> {
+        let image_id = instance_image_id();
+        IMAGE_ID.store(image_id, Ordering::Relaxed);
         let mut presenter = Self {
             transport: Transport::Inline { frame_edits: false },
             process_id: std::process::id(),
+            tmux: std::env::var_os("TMUX").is_some(),
+            image_id,
+            grid: (0, 0),
             frame_counter: 0,
             in_flight: VecDeque::new(),
             command: Vec::new(),
@@ -188,7 +206,11 @@ impl KittyPresenter {
              \x1b_Ga=f,i={FRAME_EDIT_PROBE_ID},r=1,s=1,v=1,X=1,f=24,t=d;AAAA\x1b\\\
              \x1b_Ga=d,d=I,i={FRAME_EDIT_PROBE_ID},q=2\x1b\\\x1b[c"
         ));
-        tty.write_all(query.as_bytes())?;
+        if presenter.tmux {
+            tty.write_all(&tmux_passthrough(query.as_bytes()))?;
+        } else {
+            tty.write_all(query.as_bytes())?;
+        }
         presenter.transport = Transport::Probing {
             _probe: probe,
             shared_memory: false,
@@ -212,6 +234,11 @@ impl KittyPresenter {
                     frame_edits
                 }) = ok;
             }
+            // tmux answers the device-attributes query itself, so under tmux
+            // this reply is the only thing that can end the probe.
+            if self.tmux {
+                self.finish_probe();
+            }
             return;
         }
         // Replies arrive in order, so a fence's reply also answers every older one.
@@ -223,6 +250,11 @@ impl KittyPresenter {
     /// The reply to the `CSI c` sent after the startup queries, so every
     /// answer the terminal will give to them has arrived.
     pub(crate) fn handle_device_attributes(&mut self) {
+        // tmux answers this query itself, before the terminal's graphics reply
+        // can arrive, so under tmux it says nothing about graphics support.
+        if self.tmux {
+            return;
+        }
         self.finish_probe();
     }
 
@@ -239,6 +271,7 @@ impl KittyPresenter {
             log::info!("sending frames through shared memory");
             Transport::SharedMemory
         } else {
+            let frame_edits = frame_edits && !self.tmux;
             log::info!(
                 "the terminal cannot read our shared memory, sending frames inline \
                  ({})",
@@ -275,7 +308,13 @@ impl KittyPresenter {
 
     /// Allocates the target for an RGBA frame of `width` x `height`.
     /// Dropping the frame without `present` discards it.
-    pub(crate) fn begin_frame(&mut self, width: u32, height: u32) -> Result<Frame> {
+    pub(crate) fn begin_frame(
+        &mut self,
+        width: u32,
+        height: u32,
+        rows: u16,
+        columns: u16,
+    ) -> Result<Frame> {
         let length = width as usize * height as usize * 4;
         let target = match self.transport {
             Transport::Probing { .. } => anyhow::bail!("the frame transport is not known yet"),
@@ -289,6 +328,8 @@ impl KittyPresenter {
         Ok(Frame {
             width,
             height,
+            rows,
+            columns,
             target,
         })
     }
@@ -308,8 +349,8 @@ impl KittyPresenter {
                     base64::engine::general_purpose::STANDARD.encode(shared.name.as_bytes());
                 write!(
                     self.command,
-                    "\x1b[?2026h\x1b[H\x1b_Ga=T,i=1,p=1,f=32,t=s,s={},v={},S={},C=1,q=2;{encoded_name}\x1b\\\x1b[?2026l",
-                    frame.width, frame.height, shared.length,
+                    "\x1b[?2026h\x1b[H\x1b_Ga=T,i={},U=1,f=32,t=s,s={},v={},S={},q=2;{encoded_name}\x1b\\\x1b[?2026l",
+                    self.image_id, frame.width, frame.height, shared.length,
                 )?;
                 shared.presented = true;
                 self.in_flight.push_back(shared.name.clone());
@@ -339,6 +380,7 @@ impl KittyPresenter {
                         frame.width,
                         frame.height,
                         fence,
+                        self.image_id,
                     )?,
                 }
                 self.fences.push_back((fence, Instant::now()));
@@ -357,7 +399,19 @@ impl KittyPresenter {
         // TODO: over a slow link this write blocks the main thread until the
         // link drains. A writer thread would keep input responsive; the fence
         // gate already bounds it to two frames.
-        tty.write_all(&self.command)
+        if self.tmux {
+            tty.write_all(&tmux_passthrough(&self.command))?;
+        } else {
+            tty.write_all(&self.command)?;
+        }
+        // The picture is this grid: ordinary text cells, so tmux keeps them in
+        // its own grid, clips them to the pane and repaints them on return.
+        // Install them once per geometry; retransmitting the image updates them.
+        if self.grid != (frame.rows, frame.columns) {
+            self.grid = (frame.rows, frame.columns);
+            tty.write_all(&placeholders(frame.rows, frame.columns, self.image_id))?;
+        }
+        Ok(())
     }
 
     fn create_shared_memory(&mut self, length: usize) -> Result<SharedMemory> {
@@ -383,6 +437,72 @@ impl Drop for KittyPresenter {
     }
 }
 
+/// Image ids live in the terminal's global namespace and the placeholders only
+/// carry 24 bits of it, so every instance takes its own: two apps in separate
+/// tmux panes would otherwise overwrite each other's picture.
+fn instance_image_id() -> u32 {
+    (std::process::id() & 0x00ff_ffff) | 1
+}
+
+/// Kitty's combining diacritics, one per row or column index (the spec table,
+/// same order as kitty's docs).
+const DIACRITICS: [char; 297] = [
+    '\u{0305}', '\u{030D}', '\u{030E}', '\u{0310}', '\u{0312}', '\u{033D}', '\u{033E}', '\u{033F}', '\u{0346}', '\u{034A}', '\u{034B}', '\u{034C}',
+    '\u{0350}', '\u{0351}', '\u{0352}', '\u{0357}', '\u{035B}', '\u{0363}', '\u{0364}', '\u{0365}', '\u{0366}', '\u{0367}', '\u{0368}', '\u{0369}',
+    '\u{036A}', '\u{036B}', '\u{036C}', '\u{036D}', '\u{036E}', '\u{036F}', '\u{0483}', '\u{0484}', '\u{0485}', '\u{0486}', '\u{0487}', '\u{0592}',
+    '\u{0593}', '\u{0594}', '\u{0595}', '\u{0597}', '\u{0598}', '\u{0599}', '\u{059C}', '\u{059D}', '\u{059E}', '\u{059F}', '\u{05A0}', '\u{05A1}',
+    '\u{05A8}', '\u{05A9}', '\u{05AB}', '\u{05AC}', '\u{05AF}', '\u{05C4}', '\u{0610}', '\u{0611}', '\u{0612}', '\u{0613}', '\u{0614}', '\u{0615}',
+    '\u{0616}', '\u{0617}', '\u{0657}', '\u{0658}', '\u{0659}', '\u{065A}', '\u{065B}', '\u{065D}', '\u{065E}', '\u{06D6}', '\u{06D7}', '\u{06D8}',
+    '\u{06D9}', '\u{06DA}', '\u{06DB}', '\u{06DC}', '\u{06DF}', '\u{06E0}', '\u{06E1}', '\u{06E2}', '\u{06E4}', '\u{06E7}', '\u{06E8}', '\u{06EB}',
+    '\u{06EC}', '\u{0730}', '\u{0732}', '\u{0733}', '\u{0735}', '\u{0736}', '\u{073A}', '\u{073D}', '\u{073F}', '\u{0740}', '\u{0741}', '\u{0743}',
+    '\u{0745}', '\u{0747}', '\u{0749}', '\u{074A}', '\u{07EB}', '\u{07EC}', '\u{07ED}', '\u{07EE}', '\u{07EF}', '\u{07F0}', '\u{07F1}', '\u{07F3}',
+    '\u{0816}', '\u{0817}', '\u{0818}', '\u{0819}', '\u{081B}', '\u{081C}', '\u{081D}', '\u{081E}', '\u{081F}', '\u{0820}', '\u{0821}', '\u{0822}',
+    '\u{0823}', '\u{0825}', '\u{0826}', '\u{0827}', '\u{0829}', '\u{082A}', '\u{082B}', '\u{082C}', '\u{082D}', '\u{0951}', '\u{0953}', '\u{0954}',
+    '\u{0F82}', '\u{0F83}', '\u{0F86}', '\u{0F87}', '\u{135D}', '\u{135E}', '\u{135F}', '\u{17DD}', '\u{193A}', '\u{1A17}', '\u{1A75}', '\u{1A76}',
+    '\u{1A77}', '\u{1A78}', '\u{1A79}', '\u{1A7A}', '\u{1A7B}', '\u{1A7C}', '\u{1B6B}', '\u{1B6D}', '\u{1B6E}', '\u{1B6F}', '\u{1B70}', '\u{1B71}',
+    '\u{1B72}', '\u{1B73}', '\u{1CD0}', '\u{1CD1}', '\u{1CD2}', '\u{1CDA}', '\u{1CDB}', '\u{1CE0}', '\u{1DC0}', '\u{1DC1}', '\u{1DC3}', '\u{1DC4}',
+    '\u{1DC5}', '\u{1DC6}', '\u{1DC7}', '\u{1DC8}', '\u{1DC9}', '\u{1DCB}', '\u{1DCC}', '\u{1DD1}', '\u{1DD2}', '\u{1DD3}', '\u{1DD4}', '\u{1DD5}',
+    '\u{1DD6}', '\u{1DD7}', '\u{1DD8}', '\u{1DD9}', '\u{1DDA}', '\u{1DDB}', '\u{1DDC}', '\u{1DDD}', '\u{1DDE}', '\u{1DDF}', '\u{1DE0}', '\u{1DE1}',
+    '\u{1DE2}', '\u{1DE3}', '\u{1DE4}', '\u{1DE5}', '\u{1DE6}', '\u{1DFE}', '\u{20D0}', '\u{20D1}', '\u{20D4}', '\u{20D5}', '\u{20D6}', '\u{20D7}',
+    '\u{20DB}', '\u{20DC}', '\u{20E1}', '\u{20E7}', '\u{20E9}', '\u{20F0}', '\u{2CEF}', '\u{2CF0}', '\u{2CF1}', '\u{2DE0}', '\u{2DE1}', '\u{2DE2}',
+    '\u{2DE3}', '\u{2DE4}', '\u{2DE5}', '\u{2DE6}', '\u{2DE7}', '\u{2DE8}', '\u{2DE9}', '\u{2DEA}', '\u{2DEB}', '\u{2DEC}', '\u{2DED}', '\u{2DEE}',
+    '\u{2DEF}', '\u{2DF0}', '\u{2DF1}', '\u{2DF2}', '\u{2DF3}', '\u{2DF4}', '\u{2DF5}', '\u{2DF6}', '\u{2DF7}', '\u{2DF8}', '\u{2DF9}', '\u{2DFA}',
+    '\u{2DFB}', '\u{2DFC}', '\u{2DFD}', '\u{2DFE}', '\u{2DFF}', '\u{A66F}', '\u{A67C}', '\u{A67D}', '\u{A6F0}', '\u{A6F1}', '\u{A8E0}', '\u{A8E1}',
+    '\u{A8E2}', '\u{A8E3}', '\u{A8E4}', '\u{A8E5}', '\u{A8E6}', '\u{A8E7}', '\u{A8E8}', '\u{A8E9}', '\u{A8EA}', '\u{A8EB}', '\u{A8EC}', '\u{A8ED}',
+    '\u{A8EE}', '\u{A8EF}', '\u{A8F0}', '\u{A8F1}', '\u{AAB0}', '\u{AAB2}', '\u{AAB3}', '\u{AAB7}', '\u{AAB8}', '\u{AABE}', '\u{AABF}', '\u{AAC1}',
+    '\u{FE20}', '\u{FE21}', '\u{FE22}', '\u{FE23}', '\u{FE24}', '\u{FE25}', '\u{FE26}', '\u{10A0F}', '\u{10A38}', '\u{1D185}', '\u{1D186}', '\u{1D187}',
+    '\u{1D188}', '\u{1D189}', '\u{1D1AA}', '\u{1D1AB}', '\u{1D1AC}', '\u{1D1AD}', '\u{1D242}', '\u{1D243}', '\u{1D244}',
+];
+
+/// The kitty Unicode placeholder grid: one U+10EEEE per cell with the row and
+/// column diacritics, in the image id's colour. Ordinary text, so the picture
+/// is clipped to the pane, redrawn with it and erased by whatever comes next.
+fn placeholders(rows: u16, columns: u16, image_id: u32) -> Vec<u8> {
+    let (r, g, b) = (
+        (image_id >> 16) & 0xff,
+        (image_id >> 8) & 0xff,
+        image_id & 0xff,
+    );
+    let mut out = Vec::with_capacity(rows as usize * columns as usize * 10 + 32);
+    let _ = write!(out, "\x1b[38;2;{r};{g};{b}m");
+    // A row has to be spelled out explicitly, so past the table there is no way
+    // to address it: such a terminal is not supported.
+    for row in 0..rows.min(DIACRITICS.len() as u16) {
+        let _ = write!(out, "\x1b[{};1H", row + 1);
+        let row_mark = DIACRITICS[row as usize];
+        for column in 0..columns {
+            let _ = write!(out, "\u{10EEEE}{row_mark}");
+            // Past the table a column is the previous one plus one, which the
+            // protocol infers when its diacritic is omitted.
+            if let Some(column_mark) = DIACRITICS.get(column as usize) {
+                let _ = write!(out, "{column_mark}");
+            }
+        }
+    }
+    let _ = write!(out, "\x1b[0m");
+    out
+}
+
 /// Appends an RGBA frame as chunked `t=d,o=z` escape codes, then a one pixel
 /// query with id `fence` whose reply tells us the terminal got this far.
 fn write_inline_frame(
@@ -391,11 +511,12 @@ fn write_inline_frame(
     width: u32,
     height: u32,
     fence: u32,
+    image_id: u32,
 ) -> Result<()> {
     command.extend_from_slice(b"\x1b[?2026h\x1b[H");
     write_chunked(
         command,
-        &format!("a=T,i=1,p=1,f=32,o=z,t=d,s={width},v={height},C=1,q=2"),
+        &format!("a=T,i={image_id},U=1,f=32,o=z,t=d,s={width},v={height},q=2"),
         "",
         [pixels],
     )?;
@@ -599,7 +720,7 @@ mod tests {
         // Noise, so the compressed payload spans several chunks.
         let pixels = noise(width * height * 4, 0x9e37_79b9);
         let mut command = Vec::new();
-        write_inline_frame(&mut command, &pixels, width, height, 77).unwrap();
+        write_inline_frame(&mut command, &pixels, width, height, 77, 1).unwrap();
         let text = String::from_utf8(command).unwrap();
 
         let body = text
@@ -622,7 +743,7 @@ mod tests {
             let last = index == codes.len() - 1;
             let expected_keys = match (index, last) {
                 (0, _) => format!(
-                    "a=T,i=1,p=1,f=32,o=z,t=d,s={width},v={height},C=1,q=2,m={}",
+                    "a=T,i=1,U=1,f=32,o=z,t=d,s={width},v={height},q=2,m={}",
                     u8::from(!last)
                 ),
                 (_, false) => "m=1,q=2".to_owned(),
@@ -764,5 +885,27 @@ mod tests {
             .read_to_end(&mut decoded)
             .unwrap();
         decoded
+    }
+
+    #[test]
+    fn placeholders_cover_the_grid_in_the_image_colour() {
+        let grid = String::from_utf8(placeholders(2, 3, 1)).unwrap();
+        // The image id has to travel in the cell's foreground colour.
+        assert!(grid.starts_with("\x1b[38;2;0;0;1m"));
+        assert_eq!(grid.matches('\u{10EEEE}').count(), 6);
+        assert!(grid.contains("\x1b[1;1H"));
+        assert!(grid.contains("\x1b[2;1H"));
+        // Row and column diacritics follow every placeholder.
+        assert!(grid.contains("\u{10EEEE}\u{0305}\u{0305}"));
+        assert!(grid.contains("\u{10EEEE}\u{030D}\u{0305}"));
+    }
+
+    #[test]
+    fn columns_past_the_table_inherit_the_previous_one() {
+        let grid = String::from_utf8(placeholders(1, 298, 1)).unwrap();
+        // The last cell carries only the row diacritic: the protocol then reads
+        // the column as the previous one plus one.
+        let last = grid.rsplit('\u{10EEEE}').next().unwrap();
+        assert_eq!(last, "\u{0305}\x1b[0m");
     }
 }
