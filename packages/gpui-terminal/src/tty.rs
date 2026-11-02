@@ -8,7 +8,7 @@ use std::{
     ptr,
     sync::{
         Mutex, OnceLock,
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicI32, AtomicU32, Ordering},
     },
     thread,
     time::Duration,
@@ -39,11 +39,13 @@ fn enter_sequence() -> String {
     )
 }
 
-const EXIT_SEQUENCE: &str = "\x1b_Ga=d,d=i,i=1\x1b\\\
-     \x1b[<u\
+const EXIT_REST: &str = "\x1b[<u\
      \x1b[?2048l\x1b[?2004l\x1b[?1004l\
      \x1b[?1016l\x1b[?1006l\x1b[?1003l\
      \x1b[?25h\x1b[?1049l";
+
+/// Image id the terminal should free when this process exits.
+pub(crate) static IMAGE_ID: AtomicU32 = AtomicU32::new(1);
 
 /// Wraps every kitty graphics APC in tmux's passthrough envelope, a DCS with
 /// the `tmux;` prefix in which each ESC of the wrapped code is doubled. tmux
@@ -327,10 +329,15 @@ pub(crate) fn restore_terminal() {
     else {
         return;
     };
+    // `d=I` frees the data; the lowercase form would leave a full RGBA frame
+    // cached in the terminal after every exit.
+    let mut sequence =
+        format!("\x1b_Ga=d,d=I,i={}\x1b\\", IMAGE_ID.load(Ordering::Relaxed)).into_bytes();
+    sequence.extend_from_slice(EXIT_REST.as_bytes());
     let sequence = if std::env::var_os("TMUX").is_some() {
-        tmux_passthrough(EXIT_SEQUENCE.as_bytes())
+        tmux_passthrough(&sequence)
     } else {
-        EXIT_SEQUENCE.as_bytes().to_vec()
+        sequence
     };
     unsafe {
         libc::write(

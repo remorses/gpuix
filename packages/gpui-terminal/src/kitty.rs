@@ -29,13 +29,14 @@ use std::{
     ffi::CString,
     io::{self, Write as _},
     ptr,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
 
-use crate::tty::{Tty, tmux_passthrough};
+use crate::tty::{IMAGE_ID, Tty, tmux_passthrough};
 
 /// Frames whose shared memory object we still own. The terminal unlinks an
 /// object once it read it; we unlink anything older than this ourselves, so a
@@ -84,6 +85,10 @@ pub(crate) struct KittyPresenter {
     /// tmux speaks no graphics protocol: every APC has to go through its
     /// passthrough envelope or it is dropped.
     tmux: bool,
+    /// Image id this instance owns, see [`instance_image_id`].
+    image_id: u32,
+    /// Grid geometry the placeholders were last painted for.
+    grid: (u16, u16),
     frame_counter: u64,
     in_flight: VecDeque<CString>,
     command: Vec<u8>,
@@ -162,10 +167,14 @@ impl KittyPresenter {
     /// can edit a shown frame. No frame can be presented until `wait_until`
     /// returns `None`.
     pub(crate) fn new(tty: &mut Tty) -> Result<Self> {
+        let image_id = instance_image_id();
+        IMAGE_ID.store(image_id, Ordering::Relaxed);
         let mut presenter = Self {
             transport: Transport::Inline { frame_edits: false },
             process_id: std::process::id(),
             tmux: std::env::var_os("TMUX").is_some(),
+            image_id,
+            grid: (0, 0),
             frame_counter: 0,
             in_flight: VecDeque::new(),
             command: Vec::new(),
@@ -224,6 +233,11 @@ impl KittyPresenter {
                 } else {
                     frame_edits
                 }) = ok;
+            }
+            // tmux answers the device-attributes query itself, so under tmux
+            // this reply is the only thing that can end the probe.
+            if self.tmux {
+                self.finish_probe();
             }
             return;
         }
@@ -335,8 +349,8 @@ impl KittyPresenter {
                     base64::engine::general_purpose::STANDARD.encode(shared.name.as_bytes());
                 write!(
                     self.command,
-                    "\x1b[?2026h\x1b[H\x1b_Ga=T,i={IMAGE_ID},U=1,f=32,t=s,s={},v={},S={},q=2;{encoded_name}\x1b\\\x1b[?2026l",
-                    frame.width, frame.height, shared.length,
+                    "\x1b[?2026h\x1b[H\x1b_Ga=T,i={},U=1,f=32,t=s,s={},v={},S={},q=2;{encoded_name}\x1b\\\x1b[?2026l",
+                    self.image_id, frame.width, frame.height, shared.length,
                 )?;
                 shared.presented = true;
                 self.in_flight.push_back(shared.name.clone());
@@ -366,6 +380,7 @@ impl KittyPresenter {
                         frame.width,
                         frame.height,
                         fence,
+                        self.image_id,
                     )?,
                 }
                 self.fences.push_back((fence, Instant::now()));
@@ -391,7 +406,12 @@ impl KittyPresenter {
         }
         // The picture is this grid: ordinary text cells, so tmux keeps them in
         // its own grid, clips them to the pane and repaints them on return.
-        tty.write_all(&placeholders(frame.rows, frame.columns))
+        // Install them once per geometry; retransmitting the image updates them.
+        if self.grid != (frame.rows, frame.columns) {
+            self.grid = (frame.rows, frame.columns);
+            tty.write_all(&placeholders(frame.rows, frame.columns, self.image_id))?;
+        }
+        Ok(())
     }
 
     fn create_shared_memory(&mut self, length: usize) -> Result<SharedMemory> {
@@ -417,9 +437,12 @@ impl Drop for KittyPresenter {
     }
 }
 
-/// Image id of the picture, also encoded in the placeholder foreground colour,
-/// so it has to fit in 24 bits.
-const IMAGE_ID: u32 = 1;
+/// Image ids live in the terminal's global namespace and the placeholders only
+/// carry 24 bits of it, so every instance takes its own: two apps in separate
+/// tmux panes would otherwise overwrite each other's picture.
+fn instance_image_id() -> u32 {
+    (std::process::id() & 0x00ff_ffff) | 1
+}
 
 /// Kitty's combining diacritics, one per row or column index (the spec table,
 /// same order as kitty's docs).
@@ -454,26 +477,26 @@ const DIACRITICS: [char; 297] = [
 /// The kitty Unicode placeholder grid: one U+10EEEE per cell with the row and
 /// column diacritics, in the image id's colour. Ordinary text, so the picture
 /// is clipped to the pane, redrawn with it and erased by whatever comes next.
-fn placeholders(rows: u16, columns: u16) -> Vec<u8> {
+fn placeholders(rows: u16, columns: u16, image_id: u32) -> Vec<u8> {
     let (r, g, b) = (
-        (IMAGE_ID >> 16) & 0xff,
-        (IMAGE_ID >> 8) & 0xff,
-        IMAGE_ID & 0xff,
+        (image_id >> 16) & 0xff,
+        (image_id >> 8) & 0xff,
+        image_id & 0xff,
     );
     let mut out = Vec::with_capacity(rows as usize * columns as usize * 10 + 32);
     let _ = write!(out, "\x1b[38;2;{r};{g};{b}m");
-    for row in 0..rows {
+    // A row has to be spelled out explicitly, so past the table there is no way
+    // to address it: such a terminal is not supported.
+    for row in 0..rows.min(DIACRITICS.len() as u16) {
         let _ = write!(out, "\x1b[{};1H", row + 1);
-        let row_mark = DIACRITICS
-            .get(row as usize)
-            .copied()
-            .unwrap_or(DIACRITICS[0]);
+        let row_mark = DIACRITICS[row as usize];
         for column in 0..columns {
-            let column_mark = DIACRITICS
-                .get(column as usize)
-                .copied()
-                .unwrap_or(DIACRITICS[0]);
-            let _ = write!(out, "\u{10EEEE}{row_mark}{column_mark}");
+            let _ = write!(out, "\u{10EEEE}{row_mark}");
+            // Past the table a column is the previous one plus one, which the
+            // protocol infers when its diacritic is omitted.
+            if let Some(column_mark) = DIACRITICS.get(column as usize) {
+                let _ = write!(out, "{column_mark}");
+            }
         }
     }
     let _ = write!(out, "\x1b[0m");
@@ -488,11 +511,12 @@ fn write_inline_frame(
     width: u32,
     height: u32,
     fence: u32,
+    image_id: u32,
 ) -> Result<()> {
     command.extend_from_slice(b"\x1b[?2026h\x1b[H");
     write_chunked(
         command,
-        &format!("a=T,i={IMAGE_ID},U=1,f=32,o=z,t=d,s={width},v={height},q=2"),
+        &format!("a=T,i={image_id},U=1,f=32,o=z,t=d,s={width},v={height},q=2"),
         "",
         [pixels],
     )?;
@@ -696,7 +720,7 @@ mod tests {
         // Noise, so the compressed payload spans several chunks.
         let pixels = noise(width * height * 4, 0x9e37_79b9);
         let mut command = Vec::new();
-        write_inline_frame(&mut command, &pixels, width, height, 77).unwrap();
+        write_inline_frame(&mut command, &pixels, width, height, 77, 1).unwrap();
         let text = String::from_utf8(command).unwrap();
 
         let body = text
@@ -719,7 +743,7 @@ mod tests {
             let last = index == codes.len() - 1;
             let expected_keys = match (index, last) {
                 (0, _) => format!(
-                    "a=T,i={IMAGE_ID},U=1,f=32,o=z,t=d,s={width},v={height},q=2,m={}",
+                    "a=T,i=1,U=1,f=32,o=z,t=d,s={width},v={height},q=2,m={}",
                     u8::from(!last)
                 ),
                 (_, false) => "m=1,q=2".to_owned(),
@@ -865,7 +889,7 @@ mod tests {
 
     #[test]
     fn placeholders_cover_the_grid_in_the_image_colour() {
-        let grid = String::from_utf8(placeholders(2, 3)).unwrap();
+        let grid = String::from_utf8(placeholders(2, 3, 1)).unwrap();
         // The image id has to travel in the cell's foreground colour.
         assert!(grid.starts_with("\x1b[38;2;0;0;1m"));
         assert_eq!(grid.matches('\u{10EEEE}').count(), 6);
@@ -874,5 +898,14 @@ mod tests {
         // Row and column diacritics follow every placeholder.
         assert!(grid.contains("\u{10EEEE}\u{0305}\u{0305}"));
         assert!(grid.contains("\u{10EEEE}\u{030D}\u{0305}"));
+    }
+
+    #[test]
+    fn columns_past_the_table_inherit_the_previous_one() {
+        let grid = String::from_utf8(placeholders(1, 298, 1)).unwrap();
+        // The last cell carries only the row diacritic: the protocol then reads
+        // the column as the previous one plus one.
+        let last = grid.rsplit('\u{10EEEE}').next().unwrap();
+        assert_eq!(last, "\u{0305}\x1b[0m");
     }
 }
