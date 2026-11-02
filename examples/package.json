@@ -20,12 +20,15 @@
   "dependencies": {
     "@gpuix/react": "workspace:^",
     "@gpuix/solid": "workspace:^",
-    "solid-js": "1.9.15",
     "@kmamal/sdl": "^0.11.12",
+    "@mediabunny/server": "1.65.0",
     "diff": "^7.0.0",
+    "mediabunny": "1.65.0",
+    "node-web-audio-api": "2.2.0",
     "react": "^19.2.4",
     "safe-mdx": "1.14.0",
     "shiki": "^3.0.0",
+    "solid-js": "1.9.15",
     "string-dedent": "^3.0.2"
   },
   "devDependencies": {

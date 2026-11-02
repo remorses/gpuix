@@ -360,6 +360,7 @@ gpuix completions install
 | **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, per-thread transcripts, demo replies, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **mail** | `bun --hot mail.tsx` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
+| **video player** | `bun --hot video-player.tsx [file-or-url]` | A video player with sound: [Mediabunny](https://mediabunny.dev) decodes with FFmpeg, each frame is uploaded to an `<img>` with `setImagePixels`, and audio plays through `node-web-audio-api`. Play, pause, skip, mute, and a scrubbable seek bar |
 | **disktree** | `npx disktree [dir]`, source in [`disktree/`](https://github.com/remorses/gpuix/tree/main/disktree) | A port of [tobi/disktree](https://github.com/tobi/disktree) published to npm: scans a folder or the whole disk on worker threads, draws a translucent treemap on a frosted window, and ranks what could go |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
@@ -3561,6 +3562,75 @@ opaque pixels, which is why the example fills the background first. For a
 transparent canvas, use `getImageData().data` with the default `'rgba'` format.
 
 The [waveform example](./examples/waveform.tsx) writes BGRA by hand, at 2x.
+
+#### Play a video
+
+The same call plays video. [Mediabunny](https://mediabunny.dev) decodes the
+file, and `@mediabunny/server` gives it FFmpeg decoders, because Bun and Node
+have no WebCodecs. Each frame is copied out as BGRA and uploaded:
+
+```ts
+import { ALL_FORMATS, FilePathSource, Input, VideoSampleSink } from 'mediabunny'
+import { registerMediabunnyServer } from '@mediabunny/server'
+
+registerMediabunnyServer()
+const input = new Input({ source: new FilePathSource('clip.mp4'), formats: ALL_FORMATS })
+const track = (await input.getPrimaryVideoTrack())!
+const width = await track.getDisplayWidth()
+const height = await track.getDisplayHeight()
+const bgra = new Uint8Array(width * height * 4)
+
+for await (const sample of new VideoSampleSink(track).samples()) {
+  await sample.copyTo(bgra, { format: 'BGRA' })
+  img.current?.setImagePixels(width, height, bgra, { format: 'bgra' })
+  sample.close()
+  // wait until sample.timestamp on your playback clock
+}
+```
+
+The upload is a CPU copy per frame: about 2 ms for 1080p on an M-series Mac.
+There is no zero-copy GPU video surface yet
+([#92](https://github.com/remorses/gpuix/issues/92)).
+
+GPUIX has no audio API. Sound goes through
+[`node-web-audio-api`](https://github.com/ircam-ismm/node-web-audio-api), which
+loads in Bun. Turn each `AudioSample` into an `AudioBuffer` and schedule it on
+the `AudioContext`. Then use `AudioContext.currentTime` as the **one clock** for
+both tracks, so frames wait for the sound and never drift:
+
+```ts
+import { AudioSampleSink } from 'mediabunny'
+import { AudioBuffer, AudioContext } from 'node-web-audio-api'
+
+const ctx = new AudioContext()
+const origin = ctx.currentTime // media time 0 plays at this context time
+
+for await (const sample of new AudioSampleSink(audioTrack).samples()) {
+  const buffer = new AudioBuffer({
+    numberOfChannels: sample.numberOfChannels,
+    length: sample.numberOfFrames,
+    sampleRate: sample.sampleRate,
+  })
+  for (let i = 0; i < sample.numberOfChannels; i++) {
+    const channel = new Float32Array(sample.numberOfFrames)
+    sample.copyTo(channel, { planeIndex: i, format: 'f32-planar' })
+    buffer.copyToChannel(channel, i)
+  }
+  const node = ctx.createBufferSource()
+  node.buffer = buffer
+  node.connect(ctx.destination)
+  node.start(origin + sample.timestamp)
+  sample.close()
+}
+
+// the video loop shows a frame once its timestamp is due on the same clock
+const mediaTime = () => ctx.currentTime - ctx.outputLatency - origin
+```
+
+The [video player example](./examples/video-player.tsx) adds the rest: it
+schedules audio one second ahead, stops queued buffers on pause and seek, drops
+late frames, and draws the controls. On a 720p trailer, the median frame lands
+7 ms behind the sound, well under what a viewer can notice.
 
 ### `<svg>`
 
