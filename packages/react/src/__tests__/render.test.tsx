@@ -506,7 +506,7 @@ describeNative("render()", () => {
   it("always exposes browser automation on globalThis", async () => {
     Reflect.set(globalThis, "window", {})
     try {
-      installBrowserAutomation(renderer)
+      await installBrowserAutomation(renderer)
       render(<text>automated</text>, { renderer })
       renderer.flush()
 
@@ -519,6 +519,21 @@ describeNative("render()", () => {
     }
 
     expect(Reflect.get(globalThis, "gpuix")).toBeUndefined()
+  })
+
+  it("drops an automation install that a reset overtook", async () => {
+    const overtaken = installBrowserAutomation(renderer)
+    resetRender()
+    await overtaken
+    expect(Reflect.get(globalThis, "gpuix")).toBeUndefined()
+
+    const [first, second] = await Promise.all([
+      installBrowserAutomation(renderer),
+      installBrowserAutomation(renderer),
+    ])
+    expect(first).toBe(second)
+    expect(Reflect.get(globalThis, "gpuix")).toBe(first)
+    resetRender()
   })
 
   it("remounts under bun --hot without creating a new root", async () => {

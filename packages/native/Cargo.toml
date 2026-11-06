@@ -88,6 +88,8 @@ tar = "0.4"
 flate2 = "1"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
+objc = "0.2"
+raw-window-handle = "0.6"
 
 # Renders into the current terminal with the kitty graphics protocol (`terminal: true`).
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "freebsd"))'.dependencies]

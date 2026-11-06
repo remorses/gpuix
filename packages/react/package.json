@@ -83,7 +83,7 @@
     "build": "tsc",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "dev": "tsc --watch",
-    "test": "vitest run",
+    "test": "bun run build && vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {

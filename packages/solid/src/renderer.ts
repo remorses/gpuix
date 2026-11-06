@@ -2,7 +2,9 @@ import type { JSX } from "solid-js"
 import { GpuixRenderer, type WindowOptions } from "@gpuix/native"
 import type { NativeRenderer, RootEventHandlers } from "@gpuix/native/host"
 import {
+  closeBrowserAutomation,
   createNativeRenderer,
+  initHiddenUntilCommit,
   installBrowserAutomation,
   startFrameLoop,
   type FrameLoop,
@@ -51,6 +53,7 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     ...windowOptions
   } = options
   const host = slot()
+  let presentAfterMount = false
   if (!host.renderer) {
     host.renderer = injected ?? createNativeRenderer({
       onError(error) {
@@ -61,7 +64,7 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
       },
     })
     if (!injected && host.renderer instanceof GpuixRenderer) {
-      host.renderer.init(windowOptions)
+      presentAfterMount = initHiddenUntilCommit(host.renderer, windowOptions)
     }
   }
   host.root?.unmount()
@@ -74,23 +77,25 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     keyboardFocusDim,
     onUncaughtError,
   })
-  if (!injected && host.renderer instanceof GpuixRenderer && !host.loop) {
-    host.loop = startFrameLoop(host.renderer, {
-      onTerminated: () => {
-        if (typeof process !== "undefined") process.exit(0)
-      },
-      onError: (error) => console.error("[gpuix-solid] frame error", error),
-    })
-  }
-  if (
-    typeof window !== "undefined" &&
-    host.renderer instanceof GpuixRenderer &&
-    !Reflect.has(globalThis, "gpuix")
-  ) {
-    Reflect.set(globalThis, "gpuix", installBrowserAutomation(host.renderer))
+  if (typeof window !== "undefined" && host.renderer instanceof GpuixRenderer) {
+    installBrowserAutomation(host.renderer).catch((error) =>
+      console.error("[gpuix-solid] automation error", error)
+    )
   }
   if (debugFrameOverlay) host.renderer.setDebugFrameOverlay?.(debugFrameOverlay)
-  host.root.render(code)
+  try {
+    host.root.render(code)
+  } finally {
+    if (presentAfterMount && host.renderer instanceof GpuixRenderer) host.renderer.presentWindow()
+    if (!injected && host.renderer instanceof GpuixRenderer && !host.loop) {
+      host.loop = startFrameLoop(host.renderer, {
+        onTerminated: () => {
+          if (typeof process !== "undefined") process.exit(0)
+        },
+        onError: (error) => console.error("[gpuix-solid] frame error", error),
+      })
+    }
+  }
   return host.root
 }
 
@@ -99,5 +104,6 @@ export function resetRender(): void {
   const host = global[RENDER_HOST]
   host?.loop?.stop()
   host?.root?.unmount()
+  closeBrowserAutomation()
   delete global[RENDER_HOST]
 }
