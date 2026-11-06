@@ -46,7 +46,39 @@ render(React.createElement("text", null, "x"), ${options})
   return JSON.parse(result.stderr)
 }
 
+const zodLoadedByRenderer = `
+import { registerHooks } from "node:module"
+let zod = false
+registerHooks({
+  resolve(specifier, context, next) {
+    zod ||= specifier === "zod"
+    return next(specifier, context)
+  },
+})
+const { createRenderer } = await import("@gpuix/react")
+createRenderer().init({ show: false, focus: false })
+setTimeout(() => {
+  process.stderr.write(JSON.stringify(zod))
+  process.exit(0)
+}, 300)
+`
+
+function zodLoadedWithStdin(stdin: "ignore" | "pipe"): boolean {
+  const result = spawnSync("node", ["--input-type=module", "-e", zodLoadedByRenderer], {
+    encoding: "utf8",
+    timeout: 10_000,
+    stdio: [stdin, "pipe", "pipe"],
+  })
+  expect(result.status, result.stderr).toBe(0)
+  return JSON.parse(result.stderr)
+}
+
 describe("launch", () => {
+  it.skipIf(process.platform !== "darwin")("serves automation on a piped stdin only", () => {
+    expect(zodLoadedWithStdin("ignore")).toBe(false)
+    expect(zodLoadedWithStdin("pipe")).toBe(true)
+  })
+
   it.skipIf(process.platform !== "darwin")("commits before the first frame is shown", () => {
     expect(launchOrder("{}")).toEqual(["init show=false focus=false", "commit", "present", "tick"])
   })

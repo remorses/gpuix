@@ -15,6 +15,15 @@ export interface CreateNativeRendererOptions {
   onError?: (error: unknown) => void
 }
 
+function stdinCarriesAutomation(): boolean {
+  if (typeof process === "undefined") return false
+  try {
+    return !process.getBuiltinModule("node:fs").fstatSync(0).isCharacterDevice()
+  } catch {
+    return false
+  }
+}
+
 export function createNativeRenderer(
   options: CreateNativeRendererOptions = {}
 ): GpuixRenderer {
@@ -30,7 +39,7 @@ export function createNativeRenderer(
       options.onError?.(dispatchError)
     }
   })
-  if (typeof process !== "undefined" && process.stdin && !process.stdin.isTTY) {
+  if (stdinCarriesAutomation()) {
     const init = renderer.init.bind(renderer)
     renderer.init = (windowOptions) => {
       init(windowOptions)
