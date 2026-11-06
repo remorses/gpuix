@@ -10,4 +10,4 @@ Startup also stops paying for what it may not use. The HTTP client is built on t
 
 Automation now listens only when stdin is a pipe or a file, as documented. A `/dev/null` stdin, which is what Finder and `launchd` give an app, no longer starts it.
 
-`installBrowserAutomation()` now returns a `Promise`, so `globalThis.gpuix` appears shortly after `render()` in the browser.
+`installBrowserAutomation()` now returns a `Promise`, so `globalThis.gpuix` appears shortly after `render()` in the browser. Concurrent calls share one install, and `resetRender()` in either adapter drops one still in flight.

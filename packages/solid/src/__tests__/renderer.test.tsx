@@ -1,9 +1,24 @@
 import { createSignal, For, Show } from "solid-js"
 import { describe, expect, it } from "bun:test"
+import { installBrowserAutomation } from "@gpuix/native/runtime"
 import { AnimatePresence, motion } from "../index.js"
+import { resetRender } from "../renderer.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
 describe.skipIf(!hasNativeTestRenderer)("Solid renderer", () => {
+  it("drops an automation install that a reset overtook, and closes a published one", async () => {
+    const { renderer } = createTestRoot()
+    const overtaken = installBrowserAutomation(renderer)
+    resetRender()
+    await overtaken
+    expect(Reflect.get(globalThis, "gpuix")).toBeUndefined()
+
+    const published = await installBrowserAutomation(renderer)
+    expect(Reflect.get(globalThis, "gpuix")).toBe(published)
+    resetRender()
+    expect(Reflect.get(globalThis, "gpuix")).toBeUndefined()
+  })
+
   it("mounts and applies signal text and property updates", () => {
     const [count, setCount] = createSignal(0)
     const app = createTestRoot()

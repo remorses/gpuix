@@ -2,8 +2,10 @@ import React, { type ReactNode } from "react"
 import { GpuixRenderer } from "@gpuix/native"
 import type { EventPayload, WindowOptions } from "@gpuix/native"
 import {
+  closeBrowserAutomation,
   createNativeRenderer,
   enableAutomation as enableNativeAutomation,
+  initHiddenUntilCommit,
   installBrowserAutomation as installNativeBrowserAutomation,
   startFrameLoop as startNativeFrameLoop,
 } from "@gpuix/native/runtime"
@@ -92,22 +94,14 @@ export function startFrameLoop(
 }
 
 const RENDER_HOST_KEY = "__gpuixRenderHost"
-const BROWSER_AUTOMATION_KEY = "gpuix"
 
 declare global {
   var gpuix: AutomationApp | undefined
 }
 
-export async function installBrowserAutomation(
+export const installBrowserAutomation: (
   renderer: LiveAutomationRenderer
-): Promise<AutomationApp> {
-  const existing: AutomationApp | undefined = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
-  if (existing) return existing
-
-  const automation = await installNativeBrowserAutomation(renderer)
-  Reflect.set(globalThis, BROWSER_AUTOMATION_KEY, automation)
-  return automation
-}
+) => Promise<AutomationApp> = installNativeBrowserAutomation
 
 type RenderSlot = {
   renderer?: NativeRenderer
@@ -353,9 +347,7 @@ export function resetRender(): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
   slot?.loop?.stop()
   slot?.root?.unmount()
-  const automation = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
-  void automation?.close()
-  Reflect.deleteProperty(globalThis, BROWSER_AUTOMATION_KEY)
+  closeBrowserAutomation()
   Reflect.deleteProperty(globalThis, RENDER_HOST_KEY)
   uninstallRuntimeErrorHandlers()
 }
@@ -381,10 +373,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
       slot.renderer = injected
     } else {
       const renderer = createRenderer()
-      presentAfterMount = renderer.canPresentWindow?.(windowOptions) ?? false
-      renderer.init(
-        presentAfterMount ? { ...windowOptions, show: false, focus: false } : windowOptions
-      )
+      presentAfterMount = initHiddenUntilCommit(renderer, windowOptions)
       slot.renderer = renderer
       console.log("[gpuix] created native window")
     }
@@ -394,12 +383,8 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     throw new Error("GPUIX renderer is not initialized")
   }
   installRuntimeErrorHandlers()
-  if (
-    typeof window !== "undefined" &&
-    host instanceof GpuixRenderer &&
-    !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
-  ) {
-    void installBrowserAutomation(host)
+  if (typeof window !== "undefined" && host instanceof GpuixRenderer) {
+    installBrowserAutomation(host).catch((error) => scheduleRuntimeError(thrownToError(error)))
   }
   if (debugFrameOverlay) {
     host.setDebugFrameOverlay?.(debugFrameOverlay)
