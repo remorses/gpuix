@@ -506,7 +506,7 @@ describeNative("render()", () => {
   it("always exposes browser automation on globalThis", async () => {
     Reflect.set(globalThis, "window", {})
     try {
-      installBrowserAutomation(renderer)
+      await installBrowserAutomation(renderer)
       render(<text>automated</text>, { renderer })
       renderer.flush()
 

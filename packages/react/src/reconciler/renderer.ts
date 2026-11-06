@@ -1,7 +1,6 @@
 import React, { type ReactNode } from "react"
 import { GpuixRenderer } from "@gpuix/native"
 import type { EventPayload, WindowOptions } from "@gpuix/native"
-import { App as AutomationApp } from "@gpuix/native/automation"
 import {
   createNativeRenderer,
   enableAutomation as enableNativeAutomation,
@@ -14,7 +13,7 @@ import type {
   NativeRenderer,
   WindowKeyEventHandlers,
 } from "../types/host.js"
-import type { LiveAutomationRenderer } from "@gpuix/native/automation"
+import type { App as AutomationApp, LiveAutomationRenderer } from "@gpuix/native/automation"
 
 export { createRoot, flushSync, reconciler } from "./reconciler.js"
 export type { Root } from "./reconciler.js"
@@ -99,13 +98,13 @@ declare global {
   var gpuix: AutomationApp | undefined
 }
 
-export function installBrowserAutomation(
+export async function installBrowserAutomation(
   renderer: LiveAutomationRenderer
-): AutomationApp {
-  const existing = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
-  if (existing instanceof AutomationApp) return existing
+): Promise<AutomationApp> {
+  const existing: AutomationApp | undefined = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
+  if (existing) return existing
 
-  const automation = installNativeBrowserAutomation(renderer)
+  const automation = await installNativeBrowserAutomation(renderer)
   Reflect.set(globalThis, BROWSER_AUTOMATION_KEY, automation)
   return automation
 }
@@ -376,12 +375,16 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   } = options
   const slot = renderSlot()
   const remount = slot.root != null
+  let presentAfterMount = false
   if (!slot.renderer) {
     if (injected) {
       slot.renderer = injected
     } else {
       const renderer = createRenderer()
-      renderer.init(windowOptions)
+      presentAfterMount = renderer.canPresentWindow?.(windowOptions) ?? false
+      renderer.init(
+        presentAfterMount ? { ...windowOptions, show: false, focus: false } : windowOptions
+      )
       slot.renderer = renderer
       console.log("[gpuix] created native window")
     }
@@ -391,19 +394,12 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     throw new Error("GPUIX renderer is not initialized")
   }
   installRuntimeErrorHandlers()
-  if (!injected && host instanceof GpuixRenderer && !slot.loop) {
-    slot.loop = startFrameLoop(host, {
-      onTerminated: () => {
-        if (typeof process !== "undefined") process.exit(0)
-      },
-    })
-  }
   if (
     typeof window !== "undefined" &&
     host instanceof GpuixRenderer &&
     !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
   ) {
-    installBrowserAutomation(host)
+    void installBrowserAutomation(host)
   }
   if (debugFrameOverlay) {
     host.setDebugFrameOverlay?.(debugFrameOverlay)
@@ -420,7 +416,19 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     tabNavigation,
     keyboardFocusDim,
   }
-  const root = mountRoot({ slot, node, options: slot.lastOptions })
+  let root: Root
+  try {
+    root = mountRoot({ slot, node, options: slot.lastOptions })
+  } finally {
+    if (presentAfterMount && host instanceof GpuixRenderer) host.presentWindow()
+    if (!injected && host instanceof GpuixRenderer && !slot.loop) {
+      slot.loop = startFrameLoop(host, {
+        onTerminated: () => {
+          if (typeof process !== "undefined") process.exit(0)
+        },
+      })
+    }
+  }
   console.log(remount ? "[gpuix] remount complete" : "[gpuix] mount complete")
   return root
 }

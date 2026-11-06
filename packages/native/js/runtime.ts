@@ -1,13 +1,6 @@
 import { GpuixRenderer } from "@gpuix/native"
 import type { EventPayload } from "@gpuix/native"
-import {
-  App,
-  browserRendererAsTest,
-  InProcessBackend,
-  liveRendererAsTest,
-  serveAutomationStdio,
-  type LiveAutomationRenderer,
-} from "./automation/client.js"
+import type { App, LiveAutomationRenderer } from "./automation/client.js"
 import { createRendererState } from "./renderer-state.js"
 
 const DEFAULT_FRAME_MS = 8
@@ -95,15 +88,17 @@ export function startFrameLoop(
 }
 
 export function enableAutomation(renderer: LiveAutomationRenderer): void {
-  serveAutomationStdio(new InProcessBackend(liveRendererAsTest(renderer)))
+  void import("./automation/client.js").then(
+    ({ InProcessBackend, liveRendererAsTest, serveAutomationStdio }) =>
+      serveAutomationStdio(new InProcessBackend(liveRendererAsTest(renderer)))
+  )
 }
 
-export function installBrowserAutomation(
+export async function installBrowserAutomation(
   renderer: LiveAutomationRenderer,
   existing?: App
-): App {
+): Promise<App> {
   if (existing) return existing
-  return new App(
-    new InProcessBackend(browserRendererAsTest(renderer))
-  )
+  const { App, browserRendererAsTest, InProcessBackend } = await import("./automation/client.js")
+  return new App(new InProcessBackend(browserRendererAsTest(renderer)))
 }

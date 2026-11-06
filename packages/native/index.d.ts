@@ -100,6 +100,13 @@ export declare class GpuixRenderer {
    * with `show: false` or `focus: false` is revealed later.
    */
   activateWindow(): void
+  /**
+   * Whether `init({ show: false, focus: false })` then `presentWindow()` can
+   * replace `init(options)`, so the first visible frame holds the first commit.
+   */
+  canPresentWindow(options?: WindowOptions | undefined | null): boolean
+  /** Order a hidden window front and draw it before returning. */
+  presentWindow(): void
   /** Minimize the native window. */
   minimizeWindow(): void
   /** Run the native zoom or maximize operation. */

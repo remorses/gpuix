@@ -833,6 +833,25 @@ id, and one event map, so `createRoot()` throws if that renderer already has a
 mounted root. Call `unmount()` on the first root before you create another;
 `render()` already does that for you.
 
+### Startup
+
+On macOS, `render()` opens the window hidden, commits your tree, then shows the
+window with its first frame already drawn, so the app never flashes an empty
+window. `focus: false` and `show: false` keep their own launch order.
+
+Production apps load faster when bundled, with `process.env.NODE_ENV` set to
+`"production"` and `@gpuix/native` left external. On Node, enable the compile
+cache before the bundle is imported:
+
+```js
+import module from 'node:module'
+
+module.enableCompileCache()
+await import('./app.bundle.js')
+```
+
+Remote images build the HTTP client on the first request, on a background task.
+
 ### Background launch
 
 `focus: false` opens the window **without taking focus**. The app you were

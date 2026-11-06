@@ -124,14 +124,67 @@ fn http_image_uri(src: &str) -> Option<gpui::SharedUri> {
 /// Application defaults to `NullHttpClient`, which fails every URI load.
 pub fn init(cx: &mut gpui::App) {
     #[cfg(not(target_family = "wasm"))]
-    match reqwest_client::ReqwestClient::user_agent("gpuix") {
-        Ok(client) => cx.set_http_client(std::sync::Arc::new(client)),
-        Err(error) => log::error!(
-            "GPUIX HTTP client failed to start; <img src=\"http…\"> will not load: {error:#}"
-        ),
-    }
+    cx.set_http_client(std::sync::Arc::new(LazyHttpClient::default()));
     #[cfg(target_family = "wasm")]
     let _ = cx;
+}
+
+/// Building reqwest reads the system trust store, which takes over 100 ms on macOS.
+/// An app pays that on its first remote `<img>`, on a background task.
+#[cfg(not(target_family = "wasm"))]
+#[derive(Default)]
+struct LazyHttpClient {
+    client: std::sync::Arc<std::sync::OnceLock<Result<reqwest_client::ReqwestClient, String>>>,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl http_client::HttpClient for LazyHttpClient {
+    fn user_agent(&self) -> Option<&http_client::http::HeaderValue> {
+        None
+    }
+
+    fn proxy(&self) -> Option<&http_client::Url> {
+        None
+    }
+
+    fn send(
+        &self,
+        request: http_client::http::Request<http_client::AsyncBody>,
+    ) -> futures::future::BoxFuture<
+        'static,
+        anyhow::Result<http_client::Response<http_client::AsyncBody>>,
+    > {
+        let client = self.client.clone();
+        Box::pin(async move {
+            client
+                .get_or_init(|| {
+                    reqwest_client::ReqwestClient::user_agent("gpuix")
+                        .map_err(|error| format!("{error:#}"))
+                })
+                .as_ref()
+                .map_err(|error| anyhow::anyhow!("GPUIX HTTP client failed to start: {error}"))?
+                .send(request)
+                .await
+        })
+    }
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod lazy_http_tests {
+    use super::LazyHttpClient;
+    use http_client::{AsyncBody, HttpClient as _};
+
+    #[test]
+    fn the_client_is_built_by_the_first_request_only() {
+        let lazy = LazyHttpClient::default();
+        assert!(lazy.client.get().is_none());
+        let request = http_client::http::Request::builder()
+            .uri("http://127.0.0.1:9/")
+            .body(AsyncBody::empty())
+            .unwrap();
+        let _ = futures::executor::block_on(lazy.send(request));
+        assert!(matches!(lazy.client.get(), Some(Ok(_))));
+    }
 }
 
 #[cfg(test)]

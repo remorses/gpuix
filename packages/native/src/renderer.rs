@@ -171,6 +171,8 @@ thread_local! {
     static GPUI_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(target_os = "macos")]
     static GPUI_WINDOW: RefCell<Option<gpui::WindowHandle<GpuixView>>> = const { RefCell::new(None) };
+    #[cfg(target_os = "macos")]
+    static PENDING_APP_MENU: RefCell<Option<String>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static WEB_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -400,6 +402,30 @@ fn invalidate_window() -> Result<()> {
         cx.notify();
         window.refresh();
     })
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn present_ns_view(view: *mut objc::runtime::Object) {
+    use objc::{class, msg_send, sel, sel_impl};
+    let nil: *mut objc::runtime::Object = std::ptr::null_mut();
+    let window: *mut objc::runtime::Object = msg_send![view, window];
+    let _: () = msg_send![window, makeKeyAndOrderFront: nil];
+    let layer: *mut objc::runtime::Object = msg_send![view, layer];
+    let _: () = msg_send![layer, setNeedsDisplay];
+    let _: () = msg_send![layer, displayIfNeeded];
+    let _: () = msg_send![class!(CATransaction), flush];
+}
+
+#[cfg(target_os = "macos")]
+fn install_pending_app_menu() {
+    let Some(app_name) = PENDING_APP_MENU.with(|menu| menu.borrow_mut().take()) else {
+        return;
+    };
+    GPUI_APP.with(|app| {
+        if let Some(app) = app.borrow().as_ref() {
+            app.update(|cx| crate::app_menu::init(&app_name, cx));
+        }
+    });
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1310,13 +1336,11 @@ impl GpuixRenderer {
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
-            // After the other bindings: `set_menus` reads key equivalents out of
-            // the keymap, so every binding must exist before it runs.
             // A terminal has no menu bar.
             if terminal {
                 crate::custom_elements::input::init_terminal(cx);
             } else {
-                crate::app_menu::init(&app_name, cx);
+                PENDING_APP_MENU.with(|menu| *menu.borrow_mut() = Some(app_name));
             }
             let bounds = gpui::Bounds::centered(
                 None,
@@ -1597,6 +1621,7 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            install_pending_app_menu();
             let running = EMBEDDED_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()
@@ -1892,6 +1917,42 @@ impl GpuixRenderer {
         Err(Error::from_reason(
             "The production GPUIX renderer does not support this operating system",
         ))
+    }
+
+    /// Whether `init({ show: false, focus: false })` then `presentWindow()` can
+    /// replace `init(options)`, so the first visible frame holds the first commit.
+    #[napi]
+    pub fn can_present_window(&self, options: Option<WindowOptions>) -> bool {
+        let options = options.unwrap_or_default();
+        cfg!(target_os = "macos")
+            && options.show.unwrap_or(true)
+            && options.focus.unwrap_or(true)
+            && !terminal_requested(&options)
+    }
+
+    /// Order a hidden window front and draw it before returning.
+    #[napi]
+    pub fn present_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+
+            let ns_view = update_window(|_view, window, _cx| {
+                window.refresh();
+                match window.window_handle().map(|handle| handle.as_raw()) {
+                    Ok(RawWindowHandle::AppKit(handle)) => Ok(handle.ns_view.as_ptr()),
+                    Ok(_) => Err("not an AppKit window".to_string()),
+                    Err(error) => Err(error.to_string()),
+                }
+            })?
+            .map_err(Error::from_reason)?;
+            // SAFETY: the view is owned by the open window, on the thread that owns AppKit.
+            unsafe { present_ns_view(ns_view.cast()) };
+            return update_window(|_view, _window, cx| cx.activate(true));
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        self.activate_window()
     }
 
     /// Minimize the native window.
