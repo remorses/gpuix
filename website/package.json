@@ -15,7 +15,7 @@
   "dependencies": {
     "@cloudflare/vite-plugin": "1.64.0",
     "@cloudflare/workers-types": "^4.20250712.0",
-    "@holocron.so/vite": "^0.38.0",
+    "@holocron.so/vite": "^0.39.2",
     "@tailwindcss/vite": "^4.3.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
