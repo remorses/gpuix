@@ -101,6 +101,7 @@ impl From<gpui::TrayEvent> for TrayEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, rc::Rc};
 
     #[test]
     fn builds_the_gpui_options() {
@@ -129,6 +130,73 @@ mod tests {
         assert!(item.enabled);
         assert!(!item.checked);
         assert_eq!(item.id.as_ref(), "quit");
+    }
+
+    #[gpui::test]
+    fn tray_round_trip_through_the_virtual_test_platform(cx: &mut gpui::TestAppContext) {
+        let tray = cx
+            .update(|cx| {
+                cx.create_tray(
+                    TrayOptions {
+                        icon: None,
+                        title: Some("GPUIX".into()),
+                        tooltip: Some("Hover".into()),
+                    }
+                    .into_gpui(),
+                )
+            })
+            .expect("test platform supports trays");
+
+        tray.set_menu(vec![TrayMenuItem {
+            id: "open".into(),
+            label: "Open".into(),
+            enabled: None,
+            checked: Some(true),
+        }
+        .into_gpui()]);
+        tray.set_tooltip(Some("Updated hover".into()));
+        tray.set_title(Some("2".into()));
+
+        let state = cx.tray_states().first().expect("created tray").clone();
+        assert!(!state.removed);
+        assert_eq!(state.title.as_deref(), Some("2"));
+        assert_eq!(state.tooltip.as_deref(), Some("Updated hover"));
+        assert_eq!(state.menu.len(), 1);
+        let item = state.menu.first().expect("menu item");
+        assert_eq!(item.id.as_ref(), "open");
+        assert_eq!(item.label.as_ref(), "Open");
+        assert!(item.enabled);
+        assert!(item.checked);
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        cx.update(|cx| {
+            let events = events.clone();
+            cx.on_tray_event(move |event, _cx| {
+                events.borrow_mut().push(TrayEvent::from(event));
+            });
+        });
+
+        cx.simulate_tray_event(gpui::TrayEvent::MenuItem("open".into()));
+        tray.set_menu(Vec::new());
+        cx.simulate_tray_event(gpui::TrayEvent::Click);
+        cx.run_until_parked();
+
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[
+                TrayEvent {
+                    r#type: "menuItem".into(),
+                    id: Some("open".into()),
+                },
+                TrayEvent {
+                    r#type: "click".into(),
+                    id: None,
+                },
+            ]
+        );
+
+        tray.remove();
+        assert!(cx.tray_states().first().expect("created tray").removed);
     }
 
     #[test]
