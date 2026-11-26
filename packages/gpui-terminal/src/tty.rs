@@ -813,6 +813,7 @@ fn named_keystroke(name: &str, modifiers: Modifiers) -> Keystroke {
         modifiers,
         key: name.to_owned(),
         key_char,
+        code: None,
     }
 }
 
@@ -851,6 +852,7 @@ fn parse_legacy_byte(bytes: &[u8]) -> Parsed {
             modifiers: control,
             key: ((first - 1 + b'a') as char).to_string(),
             key_char: None,
+            code: None,
         },
         0x1b..=0x1f => return Parsed::Event(1, None),
         _ => {
@@ -891,6 +893,7 @@ fn text_keystroke(text: &str, modifiers: Option<Modifiers>) -> Keystroke {
         modifiers,
         key: lowercase,
         key_char: Some(text.to_owned()),
+        code: None,
     }
 }
 
@@ -1008,6 +1011,7 @@ fn parse_kitty_key(params: &str) -> Option<TerminalEvent> {
                     modifiers,
                     key,
                     key_char,
+                    code: None,
                 },
                 kind,
             });

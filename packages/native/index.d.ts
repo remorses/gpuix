@@ -127,6 +127,54 @@ export declare class GpuixRenderer {
    */
   onNotificationResponse(callback: (response: NotificationResponse) => void): void
   /**
+   * Quit the process, whatever the `quitMode` is. The way to exit an
+   * `explicit` app from JavaScript.
+   */
+  quit(): void
+  /**
+   * Create the process-wide tray item: an icon or short title in the macOS
+   * menu bar, the Windows notification area, or the Linux status notifier.
+   *
+   * Returns `false` when a tray already exists or the platform has no tray
+   * support, and creates nothing then.
+   *
+   * Tray events do not carry a tray identity, so there is one tray per
+   * process; multi-tray is out of scope.
+   */
+  createTray(options: GpuixTrayOptions): boolean
+  /**
+   * Replace the tray item's menu. Flat: labels only, no submenus,
+   * separators, or accelerators. An empty list removes the menu, so later
+   * clicks report `click` events again.
+   *
+   * Menu item ids are strings; native code never holds a JS callback.
+   */
+  setTrayMenu(items: Array<GpuixTrayMenuItem>): void
+  /**
+   * Replace the text shown while the pointer hovers over the tray item.
+   * `null` clears it. This is the only label a Windows tray item has.
+   */
+  setTrayTooltip(tooltip?: string | undefined | null): void
+  /**
+   * Replace the text shown beside the tray item's icon. `null` clears it.
+   * macOS only: Windows and Linux have no equivalent and ignore it.
+   */
+  setTrayTitle(title?: string | undefined | null): void
+  /**
+   * Remove the tray item from the system. A later `createTray` may create
+   * a new one.
+   */
+  removeTray(): void
+  /**
+   * Call `callback` when the tray item is clicked (only while it has no
+   * menu) or one of its menu items is chosen. A later call replaces the
+   * handler.
+   *
+   * GPUI drains tray events on the app/UI thread and calls the handler
+   * there; the ThreadsafeFunction is the only thing that crosses threads.
+   */
+  onTrayEvent(callback: (event: TrayEvent) => void): void
+  /**
    * Write text to the OS clipboard.
    *
    * An empty string is a real clipboard entry, so it clears the clipboard
@@ -829,6 +877,46 @@ export interface PathPromptOptions {
  */
 export declare function rollbackUpdate(): Promise<void>
 
+/**
+ * An event reported by the tray item. Flat: GPUI tray menus have no
+ * submenus, separators, or accelerators.
+ */
+export interface TrayEvent {
+  /**
+   * `"click"` when the item was clicked while it had no menu,
+   * `"menuItem"` when a menu item was chosen.
+   */
+  type: string
+  /** The chosen menu item's `id`. `null` for `click`. */
+  id?: string
+}
+
+/** One entry of the tray item's menu. */
+export interface TrayMenuItem {
+  /** Identifies the item in the `menuItem` event. */
+  id: string
+  /** The text shown for the item. */
+  label: string
+  /** Whether choosing the item reports an event. Defaults to true. */
+  enabled?: boolean
+  /** Whether the item is drawn with a checkmark. Defaults to false. */
+  checked?: boolean
+}
+
+/** Options for the process-wide tray item. */
+export interface TrayOptions {
+  /**
+   * Path to an image shown in the tray. `.icns` and `.png` on macOS, `.ico`
+   * on Windows, anything the `image` crate decodes on Linux. When the image
+   * cannot be loaded, or this is `None`, the item falls back to `title`.
+   */
+  icon?: string
+  /** Text shown when there is no icon. */
+  title?: string
+  /** Text shown while the pointer hovers over the item. */
+  tooltip?: string
+}
+
 /** One extra HTTP header on the feed or download request. */
 export interface UpdaterHeader {
   name: string
@@ -894,6 +982,13 @@ export interface WindowOptions {
    * to the `GPUIX_TERMINAL=1` environment variable.
    */
   terminal?: boolean
+  /**
+   * When the process quits. `"lastWindowClosed"` (the default) exits after
+   * the last window closes, like a plain document app. `"explicit"` keeps
+   * the process running with no windows, which a tray app usually needs:
+   * call `renderer.quit()` yourself.
+   */
+  quitMode?: string
 }
 
 export interface WindowSize {

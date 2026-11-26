@@ -41,6 +41,8 @@ use crate::retained_tree::{RetainedTree, StyleTable};
 use crate::style::StyleDesc;
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection};
 use crate::theme::Theme;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use crate::tray::{TrayMenuItem as GpuixTrayMenuItem, TrayOptions as GpuixTrayOptions};
 
 /// The Window menu items act on the focused window, and the root element is the
 /// only place in GPUIX that has one. `crate::app_menu` owns everything else.
@@ -164,6 +166,16 @@ fn terminal_requested(options: &WindowOptions) -> bool {
         .unwrap_or_else(|| std::env::var("GPUIX_TERMINAL").is_ok_and(|value| value == "1"))
 }
 
+/// The GPUI quit mode named by `WindowOptions.quitMode`.
+/// Unknown values fall back to the documented default rather than rejecting
+/// the whole init, matching how GPUIX treats other optional strings.
+fn quit_mode(options: &WindowOptions) -> gpui::QuitMode {
+    match options.quit_mode.as_deref() {
+        Some("explicit") => gpui::QuitMode::Explicit,
+        _ => gpui::QuitMode::LastWindowClosed,
+    }
+}
+
 thread_local! {
     #[cfg(target_os = "macos")]
     static EMBEDDED_PLATFORM: RefCell<Option<EmbeddedPlatform>> = const { RefCell::new(None) };
@@ -206,6 +218,25 @@ thread_local! {
     static PENDING_VIRTUAL_LIST_SCROLLS: RefCell<HashMap<u64, gpui::ListOffset>> =
         RefCell::new(HashMap::new());
 }
+
+/// The process-wide tray item. GPUI tray events carry no tray identity, so
+/// GPUIX exposes exactly one.
+///
+/// TrayHandle must only be touched on the GPUI app/UI thread: the macOS
+/// backend wraps an NSStatusItem AppKit owns, and the Windows/Linux backends
+/// create their resources on the UI thread. On macOS that is this Node thread
+/// (the embedded platform pumps AppKit here); on Windows and Linux it is the
+/// `gpuix-ui` thread, so every tray call routes through `update_app` and the
+/// handle lives in a thread-local on the UI side. `false` means a tray
+/// already exists.
+thread_local! {
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    static TRAY_HANDLE: RefCell<Option<gpui::TrayHandle>> = const { RefCell::new(None) };
+}
+
+/// Set at most once per process: `createTray` is process-wide.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+static TRAY_CREATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const SELECTION_SCROLL_TICK_MS: u64 = 24;
 const SELECTION_SCROLL_EDGE_PX: f32 = 36.0;
@@ -754,11 +785,9 @@ async fn run_ui_commands(
                         .ok();
                 })
             }
-            UiCommand::RenderNow { response } => {
-                render_window_now(window.into(), cx).map(|()| {
-                    response.send(()).ok();
-                })
-            }
+            UiCommand::RenderNow { response } => render_window_now(window.into(), cx).map(|()| {
+                response.send(()).ok();
+            }),
             UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
                 view.request_focus(id, window, cx);
                 window.refresh();
@@ -1305,8 +1334,9 @@ impl GpuixRenderer {
         let startup_error_for_app = startup_error.clone();
         // bun/node is not a .app. A Dock icon with no window cannot relaunch.
         // Last window close quits AppKit; tick() returns false and JS exits.
+        // `quitMode: "explicit"` keeps the process alive for a tray app.
         let app = gpui::Application::with_platform(platform.platform())
-            .with_quit_mode(gpui::QuitMode::LastWindowClosed);
+            .with_quit_mode(quit_mode(&options));
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
@@ -1436,6 +1466,7 @@ impl GpuixRenderer {
         let ui_running = self.ui_running.clone();
         let ui_running_for_run = ui_running.clone();
         let terminal = terminal_requested(&options);
+        let app_quit_mode = quit_mode(&options);
         #[cfg(target_os = "windows")]
         if terminal {
             return Err(Error::from_reason(
@@ -1466,58 +1497,55 @@ impl GpuixRenderer {
                     // Default is already LastWindowClosed on Windows/Linux.
                     // Set it anyway so a GPUI default change cannot leave bun
                     // running after the last window closes, as on macOS.
-                    application
-                        .with_quit_mode(gpui::QuitMode::LastWindowClosed)
-                        .run(move |cx| {
-                            crate::custom_elements::input::init(cx);
-                            crate::custom_elements::img::init(cx);
-                            if terminal {
-                                crate::custom_elements::input::init_terminal(cx);
+                    // `quitMode: "explicit"` keeps the process alive for a
+                    // tray app.
+                    application.with_quit_mode(app_quit_mode).run(move |cx| {
+                        crate::custom_elements::input::init(cx);
+                        crate::custom_elements::img::init(cx);
+                        if terminal {
+                            crate::custom_elements::input::init_terminal(cx);
+                        }
+                        let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
+                        // A layer-shell surface is positioned by the compositor from its
+                        // anchor, so it opens at the origin; a normal window is centered.
+                        let bounds = if window_options.layer_shell.is_some() {
+                            gpui::Bounds {
+                                origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                                size,
                             }
-                            let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
-                            // A layer-shell surface is positioned by the compositor from its
-                            // anchor, so it opens at the origin; a normal window is centered.
-                            let bounds = if window_options.layer_shell.is_some() {
-                                gpui::Bounds {
-                                    origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
-                                    size,
-                                }
-                            } else {
-                                gpui::Bounds::centered(None, size, cx)
-                            };
-                            let window = match cx.open_window(
-                                to_gpui_window_options(&window_options, bounds),
-                                |_window, cx| {
-                                    cx.new(|_| {
-                                        let mut view =
-                                            GpuixView::new(tree, callback, title, selection);
-                                        view.painted_frame = Some(painted_frame);
-                                        view
-                                    })
-                                },
-                            ) {
-                                Ok(window) => window,
-                                Err(error) => {
-                                    startup_sender
-                                        .send(Err(format!(
-                                            "Failed to open the GPUI window: {error}"
-                                        )))
-                                        .ok();
-                                    cx.quit();
-                                    return;
-                                }
-                            };
+                        } else {
+                            gpui::Bounds::centered(None, size, cx)
+                        };
+                        let window = match cx.open_window(
+                            to_gpui_window_options(&window_options, bounds),
+                            |_window, cx| {
+                                cx.new(|_| {
+                                    let mut view = GpuixView::new(tree, callback, title, selection);
+                                    view.painted_frame = Some(painted_frame);
+                                    view
+                                })
+                            },
+                        ) {
+                            Ok(window) => window,
+                            Err(error) => {
+                                startup_sender
+                                    .send(Err(format!("Failed to open the GPUI window: {error}")))
+                                    .ok();
+                                cx.quit();
+                                return;
+                            }
+                        };
 
-                            cx.spawn(async move |cx| {
-                                run_ui_commands(command_receiver, window, cx).await;
-                            })
-                            .detach();
-                            if activate {
-                                cx.activate(true);
-                            }
-                            ui_running_for_run.store(true, Ordering::Release);
-                            startup_sender.send(Ok(())).ok();
-                        });
+                        cx.spawn(async move |cx| {
+                            run_ui_commands(command_receiver, window, cx).await;
+                        })
+                        .detach();
+                        if activate {
+                            cx.activate(true);
+                        }
+                        ui_running_for_run.store(true, Ordering::Release);
+                        startup_sender.send(Ok(())).ok();
+                    });
                 }));
                 ui_running.store(false, Ordering::Release);
 
@@ -2014,6 +2042,170 @@ impl GpuixRenderer {
         self.update_app(move |cx| {
             cx.on_system_notification_response(move |response, _cx| {
                 callback.call(response.into(), ThreadsafeFunctionCallMode::NonBlocking);
+            })
+        })
+    }
+
+    /// Quit the process, whatever the `quitMode` is. The way to exit an
+    /// `explicit` app from JavaScript.
+    #[napi]
+    pub fn quit(&self) -> Result<()> {
+        self.update_app(|cx| cx.quit())
+    }
+
+    /// Create the process-wide tray item: an icon or short title in the macOS
+    /// menu bar, the Windows notification area, or the Linux status notifier.
+    ///
+    /// Returns `false` when a tray already exists or the platform has no tray
+    /// support, and creates nothing then.
+    ///
+    /// Tray events do not carry a tray identity, so there is one tray per
+    /// process; multi-tray is out of scope.
+    #[napi]
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn create_tray(&self, options: GpuixTrayOptions) -> Result<bool> {
+        if TRAY_CREATED.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return Ok(false);
+        }
+        let options = options.into_gpui();
+        #[cfg(target_os = "macos")]
+        {
+            // macOS embedded mode owns the app on this thread, so `with_app`
+            // can return the creation result directly. A UI-thread channel
+            // would deadlock here; threaded platforms use one below.
+            let created = with_app(move |cx| {
+                // Runs while the app is pumped on this same thread, so the
+                // handle is stored here. GPUI tray events carry no identity:
+                // one handler serves the one tray, registered together with
+                // its creation.
+                let tray = cx.create_tray(options);
+                let created = tray.is_some();
+                TRAY_HANDLE.with(|stored| *stored.borrow_mut() = tray);
+                created
+            })?;
+            if !created {
+                TRAY_CREATED.store(false, std::sync::atomic::Ordering::Release);
+            }
+            return Ok(created);
+        }
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            // Threaded mode: the closure runs on the `gpuix-ui` thread, so a
+            // bounded channel returns the result to this thread.
+            let (response, receiver) = sync_channel(1);
+            // `update_app` returning Err must not leave `TRAY_CREATED` set, or a
+            // failed first call would block every later one.
+            if self
+                .update_app(move |cx| {
+                    // Runs on the GPUI app/UI thread, so the handle is stored there.
+                    // GPUI tray events carry no identity: one handler serves the one
+                    // tray, registered together with its creation.
+                    let tray = cx.create_tray(options);
+                    let created = tray.is_some();
+                    TRAY_HANDLE.with(|stored| *stored.borrow_mut() = tray);
+                    response.send(created).ok();
+                })
+                .is_err()
+            {
+                TRAY_CREATED.store(false, std::sync::atomic::Ordering::Release);
+                return Ok(false);
+            }
+            let created = recv_ui_response(receiver, "the tray creation")?;
+            if !created {
+                // No handle was stored; allow a later retry (for example on a
+                // platform whose backend reports a transient failure).
+                TRAY_CREATED.store(false, std::sync::atomic::Ordering::Release);
+            }
+            Ok(created)
+        }
+    }
+
+    /// Replace the tray item's menu. Flat: labels only, no submenus,
+    /// separators, or accelerators. An empty list removes the menu, so later
+    /// clicks report `click` events again.
+    ///
+    /// Menu item ids are strings; native code never holds a JS callback.
+    #[napi]
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn set_tray_menu(&self, items: Vec<GpuixTrayMenuItem>) -> Result<()> {
+        let items: Vec<gpui::TrayMenuItem> = items
+            .into_iter()
+            .map(GpuixTrayMenuItem::into_gpui)
+            .collect();
+        self.update_app(move |_cx| {
+            TRAY_HANDLE.with(|stored| {
+                if let Some(tray) = stored.borrow().as_ref() {
+                    tray.set_menu(items);
+                }
+            })
+        })
+    }
+
+    /// Replace the text shown while the pointer hovers over the tray item.
+    /// `null` clears it. This is the only label a Windows tray item has.
+    #[napi]
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn set_tray_tooltip(&self, tooltip: Option<String>) -> Result<()> {
+        let tooltip = tooltip.map(gpui::SharedString::from);
+        self.update_app(move |_cx| {
+            TRAY_HANDLE.with(|stored| {
+                if let Some(tray) = stored.borrow().as_ref() {
+                    tray.set_tooltip(tooltip);
+                }
+            })
+        })
+    }
+
+    /// Replace the text shown beside the tray item's icon. `null` clears it.
+    /// macOS only: Windows and Linux have no equivalent and ignore it.
+    #[napi]
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn set_tray_title(&self, title: Option<String>) -> Result<()> {
+        let title = title.map(gpui::SharedString::from);
+        self.update_app(move |_cx| {
+            TRAY_HANDLE.with(|stored| {
+                if let Some(tray) = stored.borrow().as_ref() {
+                    tray.set_title(title);
+                }
+            })
+        })
+    }
+
+    /// Remove the tray item from the system. A later `createTray` may create
+    /// a new one.
+    #[napi]
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn remove_tray(&self) -> Result<()> {
+        self.update_app(move |_cx| {
+            // Dropping TrayHandle removes the item; that is GPUI's own
+            // contract, not a GPUIX workaround.
+            TRAY_HANDLE.with(|stored| {
+                *stored.borrow_mut() = None;
+            });
+            TRAY_CREATED.store(false, std::sync::atomic::Ordering::Release);
+        })
+    }
+
+    /// Call `callback` when the tray item is clicked (only while it has no
+    /// menu) or one of its menu items is chosen. A later call replaces the
+    /// handler.
+    ///
+    /// GPUI drains tray events on the app/UI thread and calls the handler
+    /// there; the ThreadsafeFunction is the only thing that crosses threads.
+    #[napi(ts_args_type = "callback: (event: TrayEvent) => void")]
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn on_tray_event(
+        &self,
+        callback: Function<crate::tray::TrayEvent, ()>,
+    ) -> Result<()> {
+        let callback = callback
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .weak::<true>()
+            .build()?;
+        self.update_app(move |cx| {
+            cx.on_tray_event(move |event, _cx| {
+                callback.call(event.into(), ThreadsafeFunctionCallMode::NonBlocking);
             })
         })
     }
@@ -7697,6 +7889,11 @@ pub struct WindowOptions {
     /// size and window chrome options are ignored. macOS and Linux. Defaults
     /// to the `GPUIX_TERMINAL=1` environment variable.
     pub terminal: Option<bool>,
+    /// When the process quits. `"lastWindowClosed"` (the default) exits after
+    /// the last window closes, like a plain document app. `"explicit"` keeps
+    /// the process running with no windows, which a tray app usually needs:
+    /// call `renderer.quit()` yourself.
+    pub quit_mode: Option<String>,
 }
 
 impl Default for WindowOptions {
@@ -7720,6 +7917,7 @@ impl Default for WindowOptions {
             app_id: None,
             layer_shell: None,
             terminal: None,
+            quit_mode: None,
         }
     }
 }
