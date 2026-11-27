@@ -223,6 +223,32 @@ describeNative("automation", () => {
     await app.close()
   })
 
+  // Below-the-fold content exists in the tree but its painted box lies
+  // outside the viewport, so `click()` misses and hover/wheel land nowhere.
+  // `locator.scrollIntoView()` walks the nearest scroll parent, like the
+  // host-ref `scrollIntoView()`.
+  it("scrolls a below-the-fold locator into view", async () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        testId="scroller"
+        style={{ width: 200, height: 100, overflow: "scroll" }}
+      >
+        <div testId="pad" style={{ height: 200 }} />
+        <div testId="target" style={{ height: 40, width: 100 }}>
+          <text>deep content</text>
+        </div>
+      </div>
+    )
+    const app = await connectTest(renderer)
+
+    const scrollerId = renderer.findByTestId("scroller")!.id
+    expect(renderer.getScrollOffset(scrollerId)).toEqual([0, 0])
+    await app.getByTestId("target").scrollIntoView()
+    expect(renderer.getScrollOffset(scrollerId)![1]).toBeLessThan(0)
+    await app.close()
+  })
+
   // Custom elements paint themselves, so they only appear in the bounds
   // registry if their builder attaches `automation::bounds_tracker`. Without
   // it, `click()` on an editor fails with "Element has no painted bounds" and
