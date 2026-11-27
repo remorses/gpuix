@@ -161,9 +161,36 @@ function diffEventListeners(
 
 const NO_STYLE = {}
 
+/**
+ * A CSS shorthand string in any padding/margin field used to reach Rust as-is
+ * and fail the whole batch with `setStyle parse error: invalid type: string,
+ * expected f64`, blanking the tree, with nothing naming the property.
+ */
+const SPACING_SHORTHAND_ERROR =
+  " (GPUIX has no CSS shorthand parsing); set the per-side number fields instead, " +
+  "e.g. paddingTop / paddingRight / paddingBottom / paddingLeft"
+
+function validateStyleForShorthands(style: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(style)) {
+    if (typeof value !== "string") continue
+    const base = key.startsWith("padding") ? "padding" : key.startsWith("margin") ? "margin" : null
+    if (base === null) continue
+    const match = /^(\d+(?:\.\d+)?)(?:px)?$/.exec(value.trim())
+    if (match) {
+      // A single pixel length is unambiguous; convert instead of bouncing it.
+      ;(style as Record<string, unknown>)[key] = Number(match[1])
+      continue
+    }
+    throw new TypeError(
+      `style.${key} = ${JSON.stringify(value)} is not a number${SPACING_SHORTHAND_ERROR}`
+    )
+  }
+}
+
 function sendStyle(renderer: MutationRenderer, id: number, props: Props): void {
   const style = props.style
   if (style == null || Object.keys(style).length === 0) return
+  validateStyleForShorthands(style as Record<string, unknown>)
   renderer.setStyle(id, style)
 }
 

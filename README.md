@@ -736,6 +736,13 @@ architectures is required; renaming an x64 binary does not make it ARM64.
 
 ## Usage
 
+Style objects take numbers and keyword strings, not CSS shorthand strings:
+`padding: 16` is valid, `padding: '8px 12px'` is not parsed and fails the
+render with an error naming the property and the value. Use the per-side
+fields (`paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, and the
+`margin*` equivalents). A single pixel length string like `paddingTop: '8px'`
+is accepted and converted to a number.
+
 ```tsx
 import React, { useState } from 'react'
 import { render } from '@gpuix/react'
