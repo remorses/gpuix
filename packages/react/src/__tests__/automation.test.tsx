@@ -264,4 +264,36 @@ describeNative("automation", () => {
 
     await app.close()
   })
+
+  it("finds below-the-fold text through the retained tree, not the painted frame", async () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ width: 400, height: 100, overflow: "scroll" }}>
+        <div style={{ width: 400, height: 600 }}>
+          <div testId="footer"><text>sidecar pid=1234</text></div>
+        </div>
+      </div>
+    )
+    const app = await connectTest(renderer)
+
+    // Painted view: the footer exists in the retained tree...
+    expect(
+      (await app.getByTestId("footer").allInTree()).map((n) => n.testId)
+    ).toEqual(["footer"])
+
+    // The two tree views carry the same node.
+    const painted = await app.getByTestId("footer").all()
+    expect(painted.map((n) => n.id)).toEqual(
+      (await app.getByTestId("footer").allInTree()).map((n) => n.id)
+    )
+
+    // textContent() resolves through the retained tree, so the off-screen
+    // footer is readable without scrolling.
+    expect(await app.getByTestId("footer").textContent()).toBe("sidecar pid=1234")
+    expect(await app.getByText("sidecar pid=1234").textContent()).toBe(
+      "sidecar pid=1234"
+    )
+
+    await app.close()
+  })
 })

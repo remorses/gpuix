@@ -4144,6 +4144,21 @@ focused editor contents. `press('enter')` sends one key. `waitFor()` polls until
 exactly one match exists. `textContent()` returns the node's own text plus every
 descendant's, like DOM `textContent`.
 
+**Painted versus retained tree.** `all()` and `element()` resolve against the
+last painted frame, which is what clicks and bounds need. `textContent()`
+instead resolves through `allInTree()` / `elementInTree()`, which read the
+retained tree and list elements no matter how they painted: an element below
+the fold in an `overflow: scroll` container, clipped by `overflow: hidden`, or
+outside a virtual list's window still carries its `testId` and text, so
+`getByTestId('footer').textContent()` reads it without scrolling first.
+
+```ts
+// The settings footer sits below the fold; bounds() would throw here.
+const footer = app.getByTestId('sidecar-info')
+const text = await footer.textContent() // readable from the retained tree
+await footer.scrollIntoView() // ...and this makes it clickable
+```
+
 **Chained locators** search strict descendants, not the matching parents
 themselves. Overlapping parent roots return each element ID once, in tree
 order. `all()` returns those nodes and `count()` returns their number;

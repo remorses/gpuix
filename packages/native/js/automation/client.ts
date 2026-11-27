@@ -239,6 +239,10 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       const raw = JSON.parse(this.renderer.getAutomationTree(true)) as unknown
       return { tree: raw === null ? null : (raw as TreeNode) }
     },
+    getFullTree: () => {
+      const raw = JSON.parse(this.renderer.getAutomationTree(false)) as unknown
+      return { tree: raw === null ? null : (raw as TreeNode) }
+    },
     getPaintedText: () => ({ text: this.renderer.getPaintedText() }),
     getAllText: () => ({ text: this.renderer.getAllText() }),
     getBounds: (params) => {
@@ -443,6 +447,19 @@ export class Locator {
     return collect(tree, this.selector)
   }
 
+  /**
+   * Every element of this locator's subtree, read from the retained tree
+   * instead of the last painted frame. Paint-independent: elements outside
+   * the viewport, clipped by `overflow`, or not painted this frame (virtual
+   * list rows outside the window) are all listed with their ids, testIds and
+   * text. `all()` stays the painted view; use this when you need to find or
+   * `textContent()` something that may be off screen.
+   */
+  async allInTree(): Promise<TreeNode[]> {
+    const { tree } = await this.app.call("getFullTree", {})
+    return collect(tree, this.selector)
+  }
+
   async count(): Promise<number> {
     return (await this.all()).length
   }
@@ -538,9 +555,27 @@ export class Locator {
    * Own text plus every descendant's, concatenated in document order, like
    * DOM `textContent`. `<text>{value}</text>` puts the string on a child node,
    * so reading only `node.text` returned an empty string for every wrapper.
+   *
+   * Resolves against the retained tree (`getFullTree`), not the painted
+   * frame, so it works on elements below the fold or otherwise unpainted.
    */
   async textContent(): Promise<string> {
-    return collectText(await this.element())
+    return collectText(await this.elementInTree())
+  }
+
+  /** `element()` against the retained tree; see `allInTree()`. */
+  async elementInTree(): Promise<TreeNode> {
+    const found = await this.allInTree()
+    if (found.length === 0) {
+      throw new AutomationError("NotFound", "Locator did not match any element")
+    }
+    if (found.length > 1) {
+      throw new AutomationError(
+        "Ambiguous",
+        `Locator matched ${found.length} elements`
+      )
+    }
+    return found[0]
   }
 
   async waitFor(options: { timeoutMs?: number } = {}): Promise<TreeNode> {

@@ -195,6 +195,10 @@ export const methods = {
     params: z.object({}),
     result: z.object({ tree: treeNodeSchema.nullable() }),
   },
+  getFullTree: {
+    params: z.object({}),
+    result: z.object({ tree: treeNodeSchema.nullable() }),
+  },
   getPaintedText: {
     params: z.object({}),
     result: z.object({ text: z.array(z.string()) }),
