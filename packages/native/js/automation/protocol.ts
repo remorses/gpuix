@@ -185,6 +185,10 @@ export const methods = {
     }),
     result: okSchema,
   },
+  scrollIntoView: {
+    params: z.object({ elementId: z.number() }),
+    result: okSchema,
+  },
   getScrollOffset: {
     params: z.object({ elementId: z.number() }),
     result: z.object({

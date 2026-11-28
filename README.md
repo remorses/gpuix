@@ -4246,11 +4246,21 @@ await target.element() // that one node, not an ambiguous duplicate
 |---|---|
 | `locator.hover()` | Moves the pointer to the center, so hover styles and tooltips fire |
 | `locator.wheel(dx, dy)` | One wheel event over the center |
+| `locator.scrollIntoView()` | Scrolls the nearest scroll parent until this element is visible |
 | `locator.dragBy(dx, dy)` | Presses on the center, travels, releases |
 | `locator.dragTo(target)` | Same, ending on another locator or a `{ x, y }` point |
 | `app.mouse.move / down / up / click` | Raw pointer input in window coordinates |
 | `app.mouse.wheel(target, dx, dy)` | A wheel over a point or a locator |
 | `app.mouse.drag(from, to)` | A drag between two points, two locators, or a mix |
+
+`locator.scrollIntoView()` reaches content below the fold. An off-screen
+element still appears in `all()` and `textContent()` — the tree holds the whole
+hierarchy — but its painted bounds lie outside the window, so `click()` misses
+and `wheel()` over its center lands nowhere. Scroll it into view first, then
+interact. It calls the renderer's `scrollIntoView`, the same walk to the
+nearest scroll parent (and through a `<virtual-list>`'s logical items) that a
+host ref uses, so it works even before the element has painted bounds.
+
 
 A drag sends **interpolated moves**, not one jump, because snapping, live
 previews, and per-move commits only appear when the pointer travels. Pass

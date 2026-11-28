@@ -100,6 +100,7 @@ export interface TestAutomationRenderer {
   ): void
   nativeSimulateKeyUp(elementId: number, keystroke: string): void
   scrollTo(elementId: number, x: number, y: number): void
+  scrollIntoView(elementId: number): void
   getScrollOffset(elementId: number): [number, number] | null
   getAllText(): string[]
   getPaintedText(): string[]
@@ -230,6 +231,10 @@ export class InProcessBackend extends ValidatedAutomationBackend {
     },
     scrollTo: (params) => {
       this.renderer.scrollTo(params.elementId, params.x, params.y)
+      return { ok: true as const }
+    },
+    scrollIntoView: (params) => {
+      this.renderer.scrollIntoView(params.elementId)
       return { ok: true as const }
     },
     getScrollOffset: (params) => ({
@@ -493,6 +498,17 @@ export class Locator {
     options: MouseOptions = {}
   ): Promise<void> {
     await this.app.mouse.wheel(await this.center(), deltaX, deltaY, options)
+  }
+
+  /**
+   * Scroll this element's nearest scroll parent until it is visible, so
+   * `click()` and painted bounds reach content below the fold. Uses the
+   * renderer's `scrollIntoView`, the same call a host-ref
+   * `scrollIntoView()` makes; no painted bounds are needed to resolve it.
+   */
+  async scrollIntoView(): Promise<void> {
+    const node = await this.element()
+    await this.app.call("scrollIntoView", { elementId: node.id })
   }
 
   /** Press on this element, travel to `target`, release there. */
@@ -879,6 +895,7 @@ export interface LiveAutomationRenderer {
   focusElement(elementId: number): void
   blur(): void
   scrollTo(elementId: number, x: number, y: number): void
+  scrollIntoView(elementId: number): void
   getScrollOffset(elementId: number): number[] | null
   getAllText(): string[]
   getPaintedText(): string[]
@@ -952,6 +969,7 @@ export function liveRendererAsTest(
       afterInput()
     },
     scrollTo: (id, x, y) => renderer.scrollTo(id, x, y),
+    scrollIntoView: (id) => renderer.scrollIntoView(id),
     getScrollOffset: (id) => {
       const offset = renderer.getScrollOffset(id)
       return offset ? [offset[0], offset[1]] : null
