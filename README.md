@@ -1004,9 +1004,9 @@ opened the window.
 
 ### Window controls
 
-The desktop renderer exposes GPUI's native minimize, zoom, and fullscreen
-operations. Reach them through `useGpuixRequired()` or the renderer returned by
-`createRenderer()`.
+The desktop renderer exposes GPUI's native minimize, zoom, fullscreen, and
+resize operations. Reach them through `useGpuixRequired()` or the renderer
+returned by `createRenderer()`, in React and Solid alike.
 
 ```tsx
 function WindowControls() {
@@ -1016,14 +1016,26 @@ function WindowControls() {
       <div onClick={() => renderer.minimizeWindow?.()}>Minimize</div>
       <div onClick={() => renderer.zoomWindow?.()}>Zoom</div>
       <div onClick={() => renderer.toggleFullscreen?.()}>Fullscreen</div>
+      <div onClick={() => renderer.resizeWindow?.(1024, 768)}>1024 × 768</div>
     </div>
   )
 }
 ```
 
-`minimizeWindow()`, `zoomWindow()`, and `toggleFullscreen()` work on macOS,
-Windows, Linux, and FreeBSD. `zoomWindow()` uses the platform's native zoom or
-maximize operation. These methods are not available in the browser renderer.
+`resizeWindow(width, height)` sets the content size in logical pixels,
+excluding the platform title bar, so it matches `getWindowSize()`. Both values
+must be positive and finite, or it throws. The platform applies the resize
+asynchronously and may clamp it to the screen, so read the result from
+`useWindowSize()` or `getWindowSize()` after the next frame.
+
+`isFullscreen()` returns whether the window is in native fullscreen. It is a
+plain call, not reactive, so read it when you need it, for example to label a
+fullscreen button after a click.
+
+These methods work on macOS, Windows, Linux, and FreeBSD. `zoomWindow()` uses
+the platform's native zoom or maximize operation. They are not available in the
+browser renderer. In terminal mode, `resizeWindow()` does nothing, because the
+terminal decides the size.
 
 ### Notifications
 
@@ -4511,7 +4523,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
 - [x] Clipboard text (`writeToClipboard` / `readFromClipboard`)
-- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
+- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`, `resizeWindow`, `isFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar with the standard shortcuts (`appName`)
 - [ ] App-declared menus and menu callbacks

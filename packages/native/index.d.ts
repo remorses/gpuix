@@ -106,6 +106,14 @@ export declare class GpuixRenderer {
   zoomWindow(): void
   /** Enter or exit native fullscreen. */
   toggleFullscreen(): void
+  /**
+   * Set the content size in logical pixels, excluding the platform title
+   * bar. The platform applies it asynchronously, so `getWindowSize()` reports
+   * the new size after the next frame.
+   */
+  resizeWindow(width: number, height: number): void
+  /** Whether the window is in native fullscreen. */
+  isFullscreen(): boolean
   setWindowTitle(title: string): void
   /**
    * Post an OS notification. A tag that matches an earlier one replaces it

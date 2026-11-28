@@ -255,6 +255,16 @@ pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f
     });
 }
 
+fn window_content_size(width: f64, height: f64) -> Result<gpui::Size<gpui::Pixels>> {
+    let valid = |value: f64| value > 0.0 && (value as f32).is_finite();
+    if !valid(width) || !valid(height) {
+        return Err(Error::from_reason(format!(
+            "resizeWindow needs a positive, finite width and height, got {width}x{height}"
+        )));
+    }
+    Ok(gpui::size(gpui::px(width as f32), gpui::px(height as f32)))
+}
+
 fn parse_debug_frame_overlay_mode_str(
     mode: &str,
 ) -> std::result::Result<gpui::DebugFrameOverlayMode, String> {
@@ -459,6 +469,10 @@ enum UiCommand {
     MinimizeWindow,
     ZoomWindow,
     ToggleFullscreen,
+    ResizeWindow(gpui::Size<gpui::Pixels>),
+    IsFullscreen {
+        response: SyncSender<bool>,
+    },
     SetWindowTitle(String),
     UpdateApp(Box<dyn FnOnce(&mut gpui::App) + Send>),
     PromptForPaths {
@@ -587,6 +601,14 @@ async fn run_ui_commands(
             UiCommand::ZoomWindow => window.update(cx, |_view, window, _cx| window.zoom_window()),
             UiCommand::ToggleFullscreen => {
                 window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
+            }
+            UiCommand::ResizeWindow(size) => {
+                window.update(cx, move |_view, window, _cx| window.resize(size))
+            }
+            UiCommand::IsFullscreen { response } => {
+                window.update(cx, move |_view, window, _cx| {
+                    response.send(window.is_fullscreen()).ok();
+                })
             }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
@@ -1942,6 +1964,53 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ToggleFullscreen);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Set the content size in logical pixels, excluding the platform title
+    /// bar. The platform applies it asynchronously, so `getWindowSize()` reports
+    /// the new size after the next frame.
+    #[napi]
+    pub fn resize_window(&self, width: f64, height: f64) -> Result<()> {
+        let size = window_content_size(width, height)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |_view, window, _cx| window.resize(size));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ResizeWindow(size));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Whether the window is in native fullscreen.
+    #[napi]
+    pub fn is_fullscreen(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.is_fullscreen());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::IsFullscreen { response })?;
+            return recv_ui_response(receiver, "the fullscreen query");
+        }
 
         #[cfg(not(any(
             target_os = "macos",

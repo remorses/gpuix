@@ -1329,7 +1329,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] Headless Select, Combobox, Tooltip
 - [x] `setWindowTitle`
 - [x] Clipboard text (`writeToClipboard` / `readFromClipboard`)
-- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
+- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`, `resizeWindow`, `isFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar (`crate::app_menu`, `appName`)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
@@ -1350,7 +1350,7 @@ belong in README. This list is only the remaining engineering work.
 
 #### Low Priority
 
-- [ ] **Window resize** - expose GPUI's runtime resize API
+- [x] **Window resize** - `resizeWindow` maps to GPUI's `Window::resize`
 - [ ] **Multiple windows** - Support multiple GPUI windows
 - [x] **JS remount** - `render()` plus `bun --hot` remounts the React tree on the same window
 - [x] **React Refresh in the browser** - `bun run web` keeps `useState` across saves

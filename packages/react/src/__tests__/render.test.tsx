@@ -145,17 +145,24 @@ describe("TestGpuixRenderer availability", () => {
         minimizeWindow(): void
         zoomWindow(): void
         toggleFullscreen(): void
+        resizeWindow(width: number, height: number): void
+        isFullscreen(): boolean
       }
     }
     const renderer = new native.GpuixRenderer()
 
     for (const control of [
-      renderer.minimizeWindow,
-      renderer.zoomWindow,
-      renderer.toggleFullscreen,
+      () => renderer.minimizeWindow(),
+      () => renderer.zoomWindow(),
+      () => renderer.toggleFullscreen(),
+      () => renderer.resizeWindow(640, 480),
+      () => renderer.isFullscreen(),
     ]) {
-      expect(() => control.call(renderer)).toThrow(
-        /GPUI (window|application) is not initialized/
+      expect(control).toThrow(/GPUI (window|application) is not initialized/)
+    }
+    for (const [width, height] of [[0, 480], [640, -1], [Number.NaN, 480], [640, Infinity]]) {
+      expect(() => renderer.resizeWindow(width, height)).toThrow(
+        "resizeWindow needs a positive, finite width and height"
       )
     }
   })
