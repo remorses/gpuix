@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { preload } from 'react-dom'
 import { VideoBackgroundShader } from '@holocron.so/vite/mdx'
 
 const HERO_FONT = "'ArizonaFlare', serif"
@@ -18,13 +18,9 @@ export function HeroSection({
 }: {
   lines?: [string, string]
 }) {
-  const [fontsReady, setFontsReady] = useState(false)
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setFontsReady(true), 3000)
-    void document.fonts.ready.then(() => setFontsReady(true))
-    return () => clearTimeout(timeout)
-  }, [])
+  // Starts the font download from <head>. `font-display: block` in globals.css keeps
+  // the title hidden until it arrives, so no JS gate (which delayed LCP to hydration).
+  preload('/fonts/arizona-flare-regular.woff2', { as: 'font', type: 'font/woff2', crossOrigin: '' })
 
   return (
     <div className='relative mt-2 lg:mt-4 mb-4 lg:mb-6 w-full overflow-hidden'>
@@ -37,13 +33,7 @@ export function HeroSection({
         dotSize={6}
       />
 
-      <div
-        className='relative z-[2] flex flex-col items-center justify-center text-center w-full px-5 py-12 sm:py-16 lg:py-20 gap-4'
-        style={{
-          opacity: fontsReady ? 1 : 0,
-          transition: 'opacity 0.3s cubic-bezier(0.23, 1, 0.32, 1)',
-        }}
-      >
+      <div className='relative z-[2] flex flex-col items-center justify-center text-center w-full px-5 py-12 sm:py-16 lg:py-20 gap-4'>
         <h1
           className='flex flex-col items-center leading-none tracking-tight text-[40px] sm:text-[56px] md:text-[68px] text-foreground'
           style={{ fontFamily: HERO_FONT }}

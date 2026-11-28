@@ -4,8 +4,10 @@
 
 @font-face {
   font-family: 'ArizonaFlare';
-  src: url('/fonts/arizona-flare-regular.otf') format('opentype');
+  /* Latin-1 subset of arizona-flare-regular.otf (166KB → 31KB). Preloaded by hero-section.tsx. */
+  src: url('/fonts/arizona-flare-regular.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
-  font-display: swap;
+  /* Hero text stays invisible until this font loads, without waiting for hydration. */
+  font-display: block;
 }
