@@ -8,7 +8,7 @@ use std::{
     ptr,
     sync::{
         Mutex, OnceLock,
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicI32, AtomicU32, Ordering},
     },
     thread,
     time::Duration,
@@ -39,11 +39,44 @@ fn enter_sequence() -> String {
     )
 }
 
-const EXIT_SEQUENCE: &str = "\x1b_Ga=d,d=A,q=2\x1b\\\
-     \x1b[<u\
+const EXIT_REST: &str = "\x1b[<u\
      \x1b[?2048l\x1b[?2004l\x1b[?1004l\
      \x1b[?1016l\x1b[?1006l\x1b[?1003l\
      \x1b[?25h\x1b[?1049l";
+
+/// Image id the terminal should free when this process exits.
+pub(crate) static IMAGE_ID: AtomicU32 = AtomicU32::new(1);
+
+/// Wraps every kitty graphics APC in tmux's passthrough envelope, a DCS with
+/// the `tmux;` prefix in which each ESC of the wrapped code is doubled. tmux
+/// has no graphics protocol of its own and drops raw `ESC _ G` sequences.
+pub(crate) fn tmux_passthrough(command: &[u8]) -> Vec<u8> {
+    const APC: &[u8] = b"\x1b_G";
+    const ST: &[u8] = b"\x1b\\";
+
+    let mut wrapped = Vec::with_capacity(command.len() + 32);
+    let mut rest = command;
+    while let Some(start) = rest.windows(APC.len()).position(|w| w == APC) {
+        wrapped.extend_from_slice(&rest[..start]);
+        let apc = &rest[start..];
+        let end = apc
+            .windows(ST.len())
+            .position(|w| w == ST)
+            .map(|index| index + ST.len())
+            .unwrap_or(apc.len());
+        wrapped.extend_from_slice(b"\x1bPtmux;");
+        for &byte in &apc[..end] {
+            if byte == b'\x1b' {
+                wrapped.push(b'\x1b');
+            }
+            wrapped.push(byte);
+        }
+        wrapped.extend_from_slice(ST);
+        rest = &apc[end..];
+    }
+    wrapped.extend_from_slice(rest);
+    wrapped
+}
 
 /// How long a lone ESC waits for the rest of an escape sequence. Only legacy
 /// terminals send a bare ESC once the kitty keyboard protocol is on.
@@ -296,11 +329,21 @@ pub(crate) fn restore_terminal() {
     else {
         return;
     };
+    // `d=I` frees the data; the lowercase form would leave a full RGBA frame
+    // cached in the terminal after every exit.
+    let mut sequence =
+        format!("\x1b_Ga=d,d=I,i={}\x1b\\", IMAGE_ID.load(Ordering::Relaxed)).into_bytes();
+    sequence.extend_from_slice(EXIT_REST.as_bytes());
+    let sequence = if std::env::var_os("TMUX").is_some() {
+        tmux_passthrough(&sequence)
+    } else {
+        sequence
+    };
     unsafe {
         libc::write(
             restore.fd,
-            EXIT_SEQUENCE.as_ptr() as *const libc::c_void,
-            EXIT_SEQUENCE.len(),
+            sequence.as_ptr() as *const libc::c_void,
+            sequence.len(),
         );
         libc::tcsetattr(restore.fd, libc::TCSANOW, &restore.original);
     }
