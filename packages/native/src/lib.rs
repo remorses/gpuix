@@ -33,6 +33,9 @@ pub mod style;
 mod syntax;
 mod text;
 mod theme;
+// napi payloads for the tray: GPUI owns the item and event delivery.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod tray;
 // Desktop only. HTTP goes through reqwest_client, not crates.io reqwest.
 #[cfg(not(target_family = "wasm"))]
 mod updater;

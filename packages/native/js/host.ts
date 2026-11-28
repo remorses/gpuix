@@ -51,6 +51,34 @@ export interface MotionTransition {
   ease?: MotionEase
 }
 
+/** Options for the process-wide tray item. Set at least `icon` or `title`. */
+export interface TrayOptions {
+  /** Path to an image shown in the tray. `.icns` and `.png` on macOS, `.ico`
+   *  on Windows, anything the `image` crate decodes on Linux. Falls back to
+   *  `title` when the image cannot be loaded. */
+  icon?: string
+  /** Text shown when there is no icon. */
+  title?: string
+  /** Text shown while the pointer hovers over the item. */
+  tooltip?: string
+}
+
+/** One entry of the tray item's flat menu. */
+export interface TrayMenuItem {
+  /** Identifies the item in the `menuItem` tray event. */
+  id: string
+  label: string
+  /** Whether choosing the item reports an event. Defaults to true. */
+  enabled?: boolean
+  /** Whether the item is drawn with a checkmark. Defaults to false. */
+  checked?: boolean
+}
+
+/** An event reported by the tray item. */
+export type TrayEvent =
+  | { type: "click" }
+  | { type: "menuItem"; id: string }
+
 export interface MotionProps {
   initial?: MotionStyle | false
   animate: MotionStyle
@@ -711,6 +739,13 @@ export type NativeRenderer = MutationHost &
       | "dismissNotification"
       | "setAppIdentity"
       | "onNotificationResponse"
+      | "quit"
+      | "createTray"
+      | "setTrayMenu"
+      | "setTrayTooltip"
+      | "setTrayTitle"
+      | "removeTray"
+      | "onTrayEvent"
       | "writeToClipboard"
       | "readFromClipboard"
       | "registerFont"

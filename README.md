@@ -1071,6 +1071,79 @@ renderer.dismissNotification?.('upload-1')
 - A later `onNotificationResponse()` replaces the handler. These methods are not
   available in the browser renderer.
 
+### Tray
+
+`createTray()` puts an item in the macOS menu bar, the Windows notification
+area, or the Linux status notifier. Tray apps usually want the process to keep
+running when its windows close: pass `quitMode: "explicit"` to `render()` and
+quit from a menu item through `renderer.quit()`.
+
+```tsx
+import { render, useGpuixRequired } from '@gpuix/react'
+
+function TrayApp() {
+  const renderer = useGpuixRequired()
+  return (
+    <div style={{ padding: 16 }}>
+      <div onClick={() => renderer.quit?.()}>Quit</div>
+    </div>
+  )
+}
+
+const { renderer } = render(<TrayApp />, {
+  title: 'Tray demo',
+  quitMode: 'explicit',
+})
+
+const created = renderer.createTray?.({ title: '✓', tooltip: 'GPUIX tray' }) ?? false
+if (created) {
+  renderer.setTrayMenu?.([
+    { id: 'show', label: 'Show window', enabled: true },
+    { id: 'checked', label: 'Show badge', checked: true },
+    { id: 'quit', label: 'Quit' },
+  ])
+  renderer.onTrayEvent?.(event => {
+    if (event.type === 'menuItem' && event.id === 'show') renderer.activateWindow?.()
+    if (event.type === 'menuItem' && event.id === 'quit') renderer.quit?.()
+  })
+}
+```
+
+- **One tray per process.** GPUI tray events carry no tray identity, so
+  `createTray()` returns `false` when a tray already exists. Multi-tray is out
+  of scope. `removeTray()` drops the item and a later `createTray()` may
+  create a new one.
+- **The menu is flat.** Labels, `enabled`, and `checked` only; no submenus,
+  separators, or keyboard accelerators. Menu item ids are strings — native
+  code never holds a JS callback, events come back with the id only.
+- **`click` fires only without a menu.** When the item has a menu, a click
+  opens it; after `setTrayMenu([])` clicks report `click` events again.
+- **Icon is a file path**, not a URL or data string. `.icns` and `.png` on
+  macOS, `.ico` on Windows, anything the `image` crate decodes on Linux. When
+  the image cannot be loaded the item falls back to `title`.
+- **`setTrayTitle()` is macOS-only.** Windows and Linux have no text next to
+  the icon and ignore it; `setTrayTooltip()` works everywhere and is the only
+  label a Windows item has.
+- **`quitMode` defaults to `"lastWindowClosed"`**, which exits the process
+  when the last window closes — usually wrong for a tray app. With
+  `"explicit"` the process stays alive with no windows; call `renderer.quit()`
+  yourself, including from the tray's Quit item.
+- **Hiding the Dock icon (macOS `activationPolicy` / Accessory mode) is not
+  included yet** and is planned as a follow-up.
+- These methods are not available in the browser renderer.
+
+Platform support:
+
+| Capability | macOS | Windows | Linux |
+|---|---|---|---|
+| Tray item (icon/title) | yes | yes | yes¹ |
+| Flat menu | yes | yes | yes |
+| Tooltip | yes | yes (as the item's tooltip) | yes |
+| Title next to icon | yes | no (ignored) | no (ignored) |
+| `quitMode: "explicit"` | yes | yes | yes |
+
+¹ Linux needs a StatusNotifier host (most desktop environments ship one).
+
 ### Window measurements
 
 **Snapshots** from `readWindowSize(renderer)` and `readWindowInsets(renderer)`
