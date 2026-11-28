@@ -360,7 +360,7 @@ gpuix completions install
 | **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, per-thread transcripts, demo replies, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **mail** | `bun --hot mail.tsx` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
-| **video player** | `bun --hot video-player.tsx [file-or-url]` | A video player with sound: [Mediabunny](https://mediabunny.dev) decodes with FFmpeg, each frame is uploaded to an `<img>` with `setImagePixels`, and audio plays through `node-web-audio-api`. Play, pause, skip, mute, and a scrubbable seek bar |
+| **video player** | `bun --hot video-player.tsx [file-or-url]` | A video player with sound: [Mediabunny](https://mediabunny.dev) decodes through WebCodecs (`@napi-rs/webcodecs`), each frame is uploaded to an `<img>` with `setImagePixels`, and audio plays through `node-web-audio-api`. Play, pause, skip, mute, and a scrubbable seek bar |
 | **disktree** | `npx disktree [dir]`, source in [`disktree/`](https://github.com/remorses/gpuix/tree/main/disktree) | A port of [tobi/disktree](https://github.com/tobi/disktree) published to npm: scans a folder or the whole disk on worker threads, draws a translucent treemap on a frosted window, and ranks what could go |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
@@ -3566,14 +3566,16 @@ The [waveform example](./examples/waveform.tsx) writes BGRA by hand, at 2x.
 #### Play a video
 
 The same call plays video. [Mediabunny](https://mediabunny.dev) decodes the
-file, and `@mediabunny/server` gives it FFmpeg decoders, because Bun and Node
-have no WebCodecs. Each frame is copied out as BGRA and uploaded:
+file through the WebCodecs `VideoDecoder` and `AudioDecoder`, like in a
+browser. Bun and Node have no WebCodecs, so import the
+[`@napi-rs/webcodecs`](https://github.com/Brooooooklyn/webcodecs-node) polyfill
+first. It installs a native implementation on `globalThis`. Each frame is
+copied out as BGRA and uploaded:
 
 ```ts
+import '@napi-rs/webcodecs/polyfill' // before Mediabunny decodes anything
 import { ALL_FORMATS, FilePathSource, Input, VideoSampleSink } from 'mediabunny'
-import { registerMediabunnyServer } from '@mediabunny/server'
 
-registerMediabunnyServer()
 const input = new Input({ source: new FilePathSource('clip.mp4'), formats: ALL_FORMATS })
 const track = (await input.getPrimaryVideoTrack())!
 const width = await track.getDisplayWidth()
@@ -3588,8 +3590,9 @@ for await (const sample of new VideoSampleSink(track).samples()) {
 }
 ```
 
-The upload is a CPU copy per frame: about 2 ms for 1080p on an M-series Mac.
-There is no zero-copy GPU video surface yet
+The upload is a CPU copy per frame: about 3 ms for 1080p on an M-series Mac.
+Frames are copied as stored, so rotation metadata (common in phone videos) is
+not applied. There is no zero-copy GPU video surface yet
 ([#92](https://github.com/remorses/gpuix/issues/92)).
 
 GPUIX has no audio API. Sound goes through
@@ -3630,7 +3633,7 @@ const mediaTime = () => ctx.currentTime - ctx.outputLatency - origin
 The [video player example](./examples/video-player.tsx) adds the rest: it
 schedules audio one second ahead, stops queued buffers on pause and seek, drops
 late frames, and draws the controls. On a 720p trailer, the median frame lands
-7 ms behind the sound, well under what a viewer can notice.
+4 ms behind the sound, well under what a viewer can notice.
 
 ### `<svg>`
 

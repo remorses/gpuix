@@ -21,7 +21,7 @@
     "@gpuix/react": "workspace:^",
     "@gpuix/solid": "workspace:^",
     "@kmamal/sdl": "^0.11.12",
-    "@mediabunny/server": "1.65.0",
+    "@napi-rs/webcodecs": "1.5.0",
     "diff": "^7.0.0",
     "mediabunny": "1.65.0",
     "node-web-audio-api": "2.2.0",

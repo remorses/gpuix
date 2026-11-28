@@ -3,10 +3,11 @@
  *
  * Run: cd examples && bun --hot video-player.tsx [file-or-url]
  *
- * Mediabunny demuxes the file and drives the decoders. Bun has no WebCodecs, so
- * `@mediabunny/server` registers FFmpeg decoders (NodeAV, hardware accelerated
- * where available) behind the same Mediabunny API a browser would use. Sound
- * goes out through `node-web-audio-api`, a Rust Web Audio implementation.
+ * Mediabunny demuxes the file and decodes through the WebCodecs `VideoDecoder`
+ * and `AudioDecoder`, exactly as in a browser. Bun has no WebCodecs, so
+ * `@napi-rs/webcodecs/polyfill` installs a native implementation on
+ * `globalThis` first. Sound goes out through `node-web-audio-api`, a Rust Web
+ * Audio implementation.
  *
  *   file / URL ─► Mediabunny Input ─┬─► VideoSampleSink ─► copyTo BGRA ─► <img>.setImagePixels
  *                                   └─► AudioSampleSink ─► AudioBuffer ─► AudioContext
@@ -22,6 +23,8 @@
  * https://github.com/remorses/gpuix/issues/92.
  */
 
+// Must run before Mediabunny looks for `VideoDecoder` and `AudioDecoder`.
+import '@napi-rs/webcodecs/polyfill'
 import React, { useRef, useSyncExternalStore } from 'react'
 import { render, useGpuix } from '@gpuix/react'
 import type { EventPayload, ImgInstance, PublicInstance } from '@gpuix/react'
@@ -34,18 +37,12 @@ import {
   VideoSampleSink,
 } from 'mediabunny'
 import type { AudioSample, VideoSample } from 'mediabunny'
-import { registerMediabunnyServer } from '@mediabunny/server'
 import { AudioBuffer, AudioContext } from 'node-web-audio-api'
-
-registerMediabunnyServer()
 
 // Sintel trailer (c) Blender Foundation, CC BY 3.0. Served with range requests,
 // so Mediabunny streams it instead of downloading the whole file first.
 const DEFAULT_SOURCE = 'https://download.blender.org/durian/trailer/sintel_trailer-720p.mp4'
 
-// Bigger frames are scaled down before the copy. A 4K BGRA frame is 33 MB.
-const MAX_FRAME_WIDTH = 1920
-const MAX_FRAME_HEIGHT = 1080
 // A frame this late is dropped so playback catches up with the clock.
 const LATE_FRAME_MS = 40
 // How far ahead of the clock audio is decoded and scheduled.
@@ -106,11 +103,6 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-function fitFrame({ width, height }: { width: number; height: number }) {
-  const scale = Math.min(1, MAX_FRAME_WIDTH / width, MAX_FRAME_HEIGHT / height)
-  return { width: Math.round(width * scale), height: Math.round(height * scale) }
-}
-
 function toAudioBuffer(sample: AudioSample): AudioBuffer {
   const buffer = new AudioBuffer({
     numberOfChannels: sample.numberOfChannels,
@@ -125,34 +117,31 @@ function toAudioBuffer(sample: AudioSample): AudioBuffer {
   return buffer
 }
 
+interface PlayRun {
+  abort: AbortController
+  output: GainNode
+}
+
 export class VideoPlayer {
   state: PlayerState
   private listeners = new Set<() => void>()
-  private input: Input | null = null
+  private input: Input
   private videoSink: VideoSampleSink | null = null
   private audioSink: AudioSampleSink | null = null
   private audio = new AudioContext()
-  private gain = this.audio.createGain()
-  private audioNodes = new Set<AudioBufferSourceNode>()
+  private volume = this.audio.createGain()
   private img: ImgInstance | null = null
-  private frameWidth = 0
-  private frameHeight = 0
-  private bytes: Uint8Array = new Uint8Array(0)
-  private hasFrame = false
-  // Every present runs after the previous one, because they share `bytes`.
-  private presentChain: Promise<void> = Promise.resolve()
-  // Aborts the running video and audio loops on pause, seek, or detach.
-  private playback: AbortController | null = null
-  // Media time `clockTime` is heard at AudioContext time `clockOrigin`.
-  private clockOrigin = 0
-  private clockTime = 0
-  // Latest paused seek. Scrubbing replaces it faster than frames decode.
+  // One per play run. Aborting it ends both loops; disconnecting `output`
+  // silences every buffer that run already scheduled.
+  private run: PlayRun | null = null
+  // AudioContext time at which media time 0 is heard.
+  private clockStart = 0
+  // Latest paused seek. Scrubbing sends seeks faster than frames decode.
   private scrubTarget: number | null = null
   private scrubbing = false
-  private autoplay = true
 
-  constructor(private source: string) {
-    this.gain.connect(this.audio.destination)
+  constructor(source: string) {
+    this.volume.connect(this.audio.destination)
     this.state = {
       status: 'loading',
       playing: false,
@@ -164,7 +153,11 @@ export class VideoPlayer {
       details: 'Opening…',
       error: null,
     }
-    void this.load()
+    this.input = new Input({
+      source: /^https?:\/\//.test(source) ? new UrlSource(source) : new FilePathSource(source),
+      formats: ALL_FORMATS,
+    })
+    void this.load().catch((error: Error) => this.set({ status: 'error', error: error.message }))
   }
 
   subscribe = (listener: () => void) => {
@@ -180,227 +173,160 @@ export class VideoPlayer {
   }
 
   private async load() {
-    const isUrl = /^https?:\/\//.test(this.source)
-    const input = new Input({
-      source: isUrl ? new UrlSource(this.source) : new FilePathSource(this.source),
-      formats: ALL_FORMATS,
+    const video = await this.input.getPrimaryVideoTrack()
+    if (!video || !(await video.canDecode())) throw new Error('No playable video track')
+    const track = await this.input.getPrimaryAudioTrack()
+    const audio = track && (await track.canDecode()) ? track : null
+    const [duration, width, height, stats] = await Promise.all([
+      this.input.computeDuration(),
+      video.getDisplayWidth(),
+      video.getDisplayHeight(),
+      video.computePacketStats(60),
+    ])
+    this.videoSink = new VideoSampleSink(video)
+    this.audioSink = audio && new AudioSampleSink(audio)
+    const sound = audio ? `${audio.codec?.toUpperCase()} ${audio.sampleRate / 1000} kHz` : 'no audio'
+    const fps = Math.round(stats.averagePacketRate)
+    this.set({
+      status: 'ready',
+      duration,
+      hasAudio: audio !== null,
+      details: `${width}×${height} · ${video.codec?.toUpperCase()} · ${fps} fps · ${sound}`,
     })
-    this.input = input
-    try {
-      const [video, audio] = await Promise.all([
-        input.getPrimaryVideoTrack(),
-        input.getPrimaryAudioTrack(),
-      ])
-      if (!video) throw new Error('The file has no video track')
-      if (!(await video.canDecode())) throw new Error(`Cannot decode ${video.codec ?? 'this codec'}`)
-      const playableAudio = audio && (await audio.canDecode()) ? audio : null
-      const [duration, displayWidth, displayHeight, stats] = await Promise.all([
-        input.computeDuration(),
-        video.getDisplayWidth(),
-        video.getDisplayHeight(),
-        video.computePacketStats(60),
-      ])
-      const frame = fitFrame({ width: displayWidth, height: displayHeight })
-      this.frameWidth = frame.width
-      this.frameHeight = frame.height
-      this.bytes = new Uint8Array(frame.width * frame.height * 4)
-      this.videoSink = new VideoSampleSink(video)
-      this.audioSink = playableAudio && new AudioSampleSink(playableAudio)
-      const fps = Math.round(stats.averagePacketRate)
-      const sound = playableAudio
-        ? `${(playableAudio.codec ?? 'audio').toUpperCase()} ${playableAudio.sampleRate / 1000} kHz`
-        : audio
-          ? `cannot decode ${audio.codec ?? 'audio'}`
-          : 'no audio'
-      this.set({
-        status: 'ready',
-        duration,
-        hasAudio: playableAudio !== null,
-        details: `${displayWidth}×${displayHeight} · ${(video.codec ?? '?').toUpperCase()} · ${fps} fps · ${sound}`,
-      })
-      if (this.autoplay) this.play()
-      else this.requestFrame(0)
-    } catch (error) {
-      this.set({ status: 'error', error: error instanceof Error ? error.message : String(error) })
-    }
+    this.play()
   }
 
-  /** Attach the `<img>` that shows frames. React calls the returned cleanup on unmount. */
+  /** Ref callback for the `<img>` that shows frames. */
   attach = (img: ImgInstance | null) => {
-    if (!img) return
     this.img = img
-    if (this.hasFrame) this.upload()
+    // `bun --hot` makes a new player on every save. Release the old file and audio device.
     return () => {
-      this.autoplay = false
       this.pause()
-      if (this.img === img) this.img = null
-      // `bun --hot` makes a new player on every save. Release the old file and audio device.
-      this.input?.dispose()
+      this.img = null
+      this.input.dispose()
       void this.audio.close()
     }
   }
 
-  /** Media time that is reaching the speakers right now. */
+  /** Media time reaching the speakers now. */
   private clock(): number {
-    const heard = this.audio.currentTime - this.audio.outputLatency
-    return this.clockTime + heard - this.clockOrigin
+    return this.audio.currentTime - this.audio.outputLatency - this.clockStart
   }
 
-  private upload() {
-    this.img?.setImagePixels(this.frameWidth, this.frameHeight, this.bytes, { format: 'bgra' })
+  /** Copy a frame out and upload it, unless `stale()` turns true meanwhile. */
+  private async draw(sample: VideoSample, stale: () => boolean) {
+    // Copied as stored: rotation metadata is not applied.
+    const bytes = new Uint8Array(sample.allocationSize({ format: 'BGRA' }))
+    await sample.copyTo(bytes, { format: 'BGRA' })
+    if (stale()) return
+    const { width, height } = sample.visibleRect
+    this.img?.setImagePixels(width, height, bytes, { format: 'bgra' })
   }
 
-  private present(sample: VideoSample, isStale: () => boolean): Promise<void> {
-    const run = this.presentChain.then(async () => {
-      if (isStale()) return
-      const fits =
-        sample.displayWidth === this.frameWidth &&
-        sample.displayHeight === this.frameHeight &&
-        sample.rotation === 0
-      const frame = fits
-        ? sample
-        : await sample.transform({ width: this.frameWidth, height: this.frameHeight, fit: 'fill' })
-      try {
-        await frame.copyTo(this.bytes, { format: 'BGRA' })
-      } finally {
-        if (frame !== sample) frame.close()
-      }
-      if (isStale()) return
-      this.hasFrame = true
-      this.upload()
-    })
-    this.presentChain = run.catch(() => {})
-    return run
-  }
-
-  togglePlay = () => {
-    if (this.state.playing) this.pause()
-    else this.play()
-  }
+  togglePlay = () => (this.state.playing ? this.pause() : this.play())
 
   toggleMute = () => {
-    const muted = !this.state.muted
-    this.gain.gain.value = muted ? 0 : 1
-    this.set({ muted })
+    this.volume.gain.value = this.state.muted ? 1 : 0
+    this.set({ muted: !this.state.muted })
   }
 
   play = () => {
     if (!this.videoSink || this.state.playing) return
     const atEnd = this.state.currentTime >= this.state.duration - 0.05
-    this.startPlayback(atEnd ? 0 : this.state.currentTime)
+    this.start(atEnd ? 0 : this.state.currentTime)
   }
 
   pause = () => {
-    this.stopPlayback()
-    if (this.state.playing) this.set({ playing: false })
+    this.stop()
+    this.set({ playing: false })
   }
 
   seek = (time: number) => {
     if (!this.videoSink) return
     const target = Math.min(Math.max(time, 0), this.state.duration)
-    if (this.state.playing) this.startPlayback(target)
-    else this.requestFrame(target)
+    if (this.state.playing) this.start(target)
+    else void this.showFrame(target)
   }
 
   skip = (seconds: number) => this.seek(this.state.currentTime + seconds)
 
-  private stopPlayback() {
-    this.playback?.abort()
-    this.playback = null
-    for (const node of this.audioNodes) node.stop()
-    this.audioNodes.clear()
+  private stop() {
+    this.run?.abort.abort()
+    this.run?.output.disconnect()
+    this.run = null
   }
 
-  private startPlayback(from: number) {
-    this.stopPlayback()
-    const playback = new AbortController()
-    this.playback = playback
+  private start(from: number) {
+    this.stop()
+    const run: PlayRun = { abort: new AbortController(), output: this.audio.createGain() }
+    run.output.connect(this.volume)
+    this.run = run
     this.scrubTarget = null
-    this.clockTime = from
-    this.clockOrigin = this.audio.currentTime
+    this.clockStart = this.audio.currentTime - from
     this.set({ playing: true, currentTime: from })
     const fail = (error: Error) => {
-      if (playback.signal.aborted) return
-      this.stopPlayback()
-      this.set({ playing: false, status: 'error', error: String(error) })
+      if (run.abort.signal.aborted) return
+      this.stop()
+      this.set({ playing: false, status: 'error', error: error.message })
     }
-    void this.runVideo(from, playback.signal).catch(fail)
-    void this.runAudio(from, playback.signal).catch(fail)
+    void this.playVideo(from, run.abort.signal).catch(fail)
+    void this.playAudio(from, run).catch(fail)
   }
 
-  private async runVideo(from: number, signal: AbortSignal) {
-    let first = true
+  private async playVideo(from: number, signal: AbortSignal) {
     for await (const sample of this.videoSink!.samples(from)) {
       try {
-        if (signal.aborted) return
         const delay = (sample.timestamp - this.clock()) * 1000
-        if (delay < -LATE_FRAME_MS && !first) continue
-        if (delay > 0) await sleep(delay, signal)
+        if (delay < -LATE_FRAME_MS) continue
+        await sleep(delay, signal)
         if (signal.aborted) return
-        await this.present(sample, () => signal.aborted)
-        first = false
+        await this.draw(sample, () => signal.aborted)
         if (!signal.aborted) this.set({ currentTime: Math.max(sample.timestamp, 0) })
       } finally {
         sample.close()
       }
     }
-    // The audio track can outlast the last frame. Keep the time readout moving.
-    while (!signal.aborted && this.clock() < this.state.duration) {
-      this.set({ currentTime: Math.max(this.clock(), this.state.currentTime) })
-      await sleep(Math.min(250, (this.state.duration - this.clock()) * 1000), signal)
-    }
+    // The audio track can outlast the last frame.
+    await sleep((this.state.duration - this.clock()) * 1000, signal)
     if (signal.aborted) return
-    this.stopPlayback()
+    this.stop()
     this.set({ playing: false, currentTime: this.state.duration })
   }
 
-  private async runAudio(from: number, signal: AbortSignal) {
+  private async playAudio(from: number, { abort: { signal }, output }: PlayRun) {
     if (!this.audioSink) return
     for await (const sample of this.audioSink.samples(from)) {
-      const timestamp = sample.timestamp
-      try {
-        if (signal.aborted) return
-        const node = this.audio.createBufferSource()
-        node.buffer = toAudioBuffer(sample)
-        node.connect(this.gain)
-        const at = this.clockOrigin + timestamp - this.clockTime
-        const now = this.audio.currentTime
-        // A buffer that is already due starts part way in, so sound never lags the clock.
-        if (at >= now) node.start(at)
-        else node.start(now, now - at)
-        this.audioNodes.add(node)
-        node.onended = () => this.audioNodes.delete(node)
-      } finally {
-        sample.close()
-      }
-      const ahead = timestamp - this.clock()
-      if (ahead > AUDIO_AHEAD_SECONDS) await sleep((ahead - AUDIO_AHEAD_SECONDS) * 1000, signal)
+      if (signal.aborted) return sample.close()
+      const node = this.audio.createBufferSource()
+      node.buffer = toAudioBuffer(sample)
+      node.connect(output)
+      // A buffer that is already due starts part way in, so sound never lags the clock.
+      const at = this.clockStart + sample.timestamp
+      const now = this.audio.currentTime
+      node.start(Math.max(at, now), Math.max(now - at, 0))
+      const ahead = sample.timestamp - this.clock()
+      sample.close()
+      await sleep((ahead - AUDIO_AHEAD_SECONDS) * 1000, signal)
     }
   }
 
   /** Show the frame at `time` while paused. Only the newest request decodes. */
-  private requestFrame(time: number) {
+  private async showFrame(time: number) {
     this.set({ currentTime: time })
     this.scrubTarget = time
     if (this.scrubbing) return
     this.scrubbing = true
-    void this.drainFrameRequests().finally(() => {
-      this.scrubbing = false
-    })
-  }
-
-  private async drainFrameRequests() {
-    const sink = this.videoSink!
-    while (this.scrubTarget !== null) {
-      const time = this.scrubTarget
-      this.scrubTarget = null
-      const sample = await sink.getSample(time)
-      if (!sample) continue
-      try {
-        await this.present(sample, () => this.state.playing || this.scrubTarget !== null)
-      } finally {
+    try {
+      while (this.scrubTarget !== null) {
+        const target = this.scrubTarget
+        this.scrubTarget = null
+        const sample = await this.videoSink!.getSample(target)
+        if (!sample) continue
+        await this.draw(sample, () => this.state.playing || this.scrubTarget !== null)
         sample.close()
       }
+    } finally {
+      this.scrubbing = false
     }
   }
 }
@@ -416,13 +342,11 @@ function formatTime(seconds: number): string {
 
 function IconButton({
   icon,
-  size = 18,
   primary,
   testId,
   onClick,
 }: {
   icon: string
-  size?: number
   primary?: boolean
   testId: string
   onClick: () => void
@@ -447,7 +371,7 @@ function IconButton({
     >
       <svg
         source={icon}
-        style={{ width: size, height: size, color: primary ? C.app : C.text, pointerEvents: 'none' }}
+        style={{ width: 18, height: 18, color: primary ? C.app : C.text, pointerEvents: 'none' }}
       />
     </div>
   )
@@ -531,7 +455,6 @@ function SeekBar({ player, state }: { player: VideoPlayer; state: PlayerState })
 
 export function VideoPlayerApp({ player }: { player: VideoPlayer }) {
   const state = useSyncExternalStore(player.subscribe, player.getSnapshot)
-  const ready = state.status === 'ready'
 
   return (
     <div
@@ -561,7 +484,7 @@ export function VideoPlayerApp({ player }: { player: VideoPlayer }) {
           backgroundColor: C.stage,
           overflow: 'hidden',
           position: 'relative',
-          cursor: ready ? 'pointer' : 'default',
+          cursor: 'pointer',
         }}
       >
         <img
@@ -570,7 +493,7 @@ export function VideoPlayerApp({ player }: { player: VideoPlayer }) {
           objectFit="contain"
           style={{ width: '100%', height: '100%' }}
         />
-        {state.status !== 'ready' || !state.playing ? (
+        {!state.playing ? (
           <div
             style={{
               position: 'absolute',
@@ -645,7 +568,7 @@ export function VideoPlayerApp({ player }: { player: VideoPlayer }) {
           {state.details}
         </text>
         <div style={{ flexGrow: 1 }} />
-        <text style={{ color: C.faint, fontSize: 11 }}>Space play · ← → seek · M mute · Mediabunny + FFmpeg</text>
+        <text style={{ color: C.faint, fontSize: 11 }}>Space play · ← → seek · M mute · Mediabunny + WebCodecs</text>
       </div>
     </div>
   )
